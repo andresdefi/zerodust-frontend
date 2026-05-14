@@ -15,6 +15,8 @@ const jetbrains = JetBrains_Mono({
   variable: '--font-jetbrains',
 });
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: 'ZeroDust - Sweep Your Dust to Zero',
   description: 'Exit any blockchain with exactly 0 balance. Sweep leftover ETH from unused chains to your main wallet.',
