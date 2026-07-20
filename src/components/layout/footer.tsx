@@ -19,9 +19,9 @@ const footerLinks = {
     { label: 'Fees', href: '#fees' },
   ],
   resources: [
-    { label: 'Documentation', href: 'https://docs.zerodust.xyz', external: true },
-    { label: 'GitHub', href: 'https://github.com/zerodustxyz', external: true },
-    { label: 'Status', href: 'https://status.zerodust.xyz', external: true },
+    { label: 'Documentation', href: '/docs' },
+    { label: 'GitHub', href: 'https://github.com/andresdefi/zerodust', external: true },
+    { label: 'SDK', href: 'https://www.npmjs.com/package/@zerodust/sdk', external: true },
   ],
   legal: [
     { label: 'Terms of Service', href: '/terms' },
@@ -31,8 +31,8 @@ const footerLinks = {
 
 const socialLinks = [
   { icon: XLogo, href: 'https://x.com/zerodustxyz', label: 'X (Twitter)' },
-  { icon: Github, href: 'https://github.com/zerodustxyz', label: 'GitHub' },
-  { icon: FileText, href: 'https://docs.zerodust.xyz', label: 'Docs' },
+  { icon: Github, href: 'https://github.com/andresdefi/zerodust', label: 'GitHub' },
+  { icon: FileText, href: '/docs', label: 'Docs' },
 ];
 
 export function Footer() {
