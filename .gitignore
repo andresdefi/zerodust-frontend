@@ -30,3 +30,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .serena/
+
+# Node 25+ writes the localStorage polyfill file here (see scripts.dev)
+.next/.localstorage
