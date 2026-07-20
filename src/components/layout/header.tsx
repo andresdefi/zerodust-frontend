@@ -8,10 +8,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Menu, X } from 'lucide-react';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 
-const navLinks = [
+const navLinks: Array<{ href: string; label: string; external?: boolean }> = [
   { href: '#how-it-works', label: 'How it works' },
   { href: '#chains', label: 'Chains' },
-  { href: 'https://docs.zerodust.xyz', label: 'Docs', external: true },
+  { href: '/docs', label: 'Docs' },
 ];
 
 export function Header() {
