@@ -1,5 +1,23 @@
 # ZeroDust Two-Step EIP-7702 Sweep Architecture
 
+> **UNBUILT DESIGN PROPOSAL — this is not the shipped system.**
+>
+> This document describes a hypothetical `ZeroDustSweepV4` contract with
+> on-chain intent registration, a 0.5% protocol fee, an `IntentMonitorService`
+> and Prisma/PostgreSQL. None of that exists. There is no `ZeroDustSweepV4.sol`;
+> the deployed contracts are `ZeroDustSweepMainnet.sol` and
+> `ZeroDustSweepTEST.sol`, the backend uses Supabase and
+> `src/services/relayer.ts`, and the implementation checklist in §6 is entirely
+> unchecked.
+>
+> **What actually ships is a single sponsor-submitted transaction**, not two
+> steps: the user signs an EIP-7702 delegation, a revoke authorization and an
+> EIP-712 sweep intent, then the relayer submits one type-4 transaction and
+> pays the gas. For the real flow see the root `CLAUDE.md` files.
+>
+> Kept for the design rationale and the security analysis in §5, which remain
+> useful reading. Do not treat any of it as a description of current behaviour.
+
 ## Executive Summary
 
 This document describes a two-step sweep mechanism that achieves **TRUE ZERO balance** on the source chain. The key innovation is separating the user's registration/intent transaction from the actual sweep execution, allowing a relayer to pay for gas while sweeping the user's entire remaining balance.

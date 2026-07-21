@@ -132,7 +132,10 @@ export default function DocsLayout({
 
         {/* Content */}
         <main className="min-w-0 flex-1 max-w-3xl">
-          <article className="prose-custom">{children}</article>
+          {/* Typography for docs pages comes from mdx-components.tsx, which maps
+              each MDX element to explicit classes. A `.tsx` page added here
+              would inherit no styling — see LegalArticle for that case. */}
+          <article>{children}</article>
         </main>
       </div>
     </div>
