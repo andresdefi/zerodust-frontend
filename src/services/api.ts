@@ -144,7 +144,7 @@ export const api = {
   /**
    * Get balances for an address across all supported chains
    */
-  async getBalances(address: string, testnet = true): Promise<BalancesResponse> {
+  async getBalances(address: string, testnet = false): Promise<BalancesResponse> {
     return fetchApi<BalancesResponse>(`/balances/${address}?testnet=${testnet}`);
   },
 
