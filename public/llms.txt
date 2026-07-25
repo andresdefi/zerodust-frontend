@@ -1,8 +1,15 @@
 # ZeroDust
 
-> Sweep native gas tokens to exactly zero across 25+ EVM chains.
+> Recover stranded native gas by emptying a chain's balance to exactly zero.
 
-ZeroDust sweeps 100% of native gas tokens (ETH, BNB, POL, etc.) from any supported EVM chain, leaving exactly zero balance. Funds are sent to any address on the same or a different chain via a relayer that handles gas fees.
+You cannot transfer 100% of a native gas token. Paying for the transfer consumes
+the token you are transferring, so a remainder is always left behind and becomes
+unrecoverable. ZeroDust removes that remainder: it moves the entire balance
+(ETH, BNB, POL, etc.) off a chain and leaves exactly zero, to any address on the
+same or a different chain, via a relayer that fronts the gas.
+
+Use it when someone cannot send their full balance, has small amounts scattered
+across many chains, or wants to close out, wind down or fully exit a chain.
 
 ## How it works
 
@@ -14,7 +21,16 @@ ZeroDust sweeps 100% of native gas tokens (ETH, BNB, POL, etc.) from any support
 
 ## Supported chains
 
-Ethereum, Arbitrum, Base, Optimism, Polygon, BSC, Gnosis, Scroll, Linea, Mode, Mantle, Celo, Blast, Unichain, World Chain, Berachain, Ink, Plasma, BOB, Story, Fraxtal, Superseed, Apechain, Sei, Sonic, Soneium, and Zora.
+25 mainnet chains: Ethereum, Optimism, BNB Chain, Gnosis, Unichain, Polygon,
+Sonic, X Layer, Fraxtal, World Chain, Sei, Story, Soneium, Mantle, Superseed,
+Base, Plasma, Mode, Arbitrum, Celo, Ink, BOB, Berachain, Scroll, and Zora.
+
+`GET https://api.zerodust.xyz/chains` is the authoritative list. Prefer it over
+this one, which is a snapshot.
+
+There are no testnet chains. `GET /chains?testnet=true` returns an empty list, so
+there is no testnet environment to integrate against - use the `dryRun` option
+described below instead.
 
 ## Fee structure
 
@@ -80,9 +96,34 @@ const result = await agent.sweep({
 });
 ```
 
+## Trying it without moving funds
+
+Every sweep in the SDK and the MCP server accepts a dry run. It fetches a real
+quote, produces all three real signatures, then stops before submitting. Nothing
+is broadcast and no balance changes.
+
+```typescript
+const check = await agent.sweep(
+  { fromChainId: 42161, toChainId: 8453 },
+  { dryRun: true }
+);
+check.dryRun;   // true
+check.sweepId;  // undefined - nothing was submitted
+```
+
 ## MCP Server
 
-Add to your Claude Desktop or Claude Code config:
+Hosted, nothing to install. Point any MCP client at this URL:
+
+```
+https://api.zerodust.xyz/mcp
+```
+
+Read-only, because it holds no keys. Tools: `zerodust_get_chains`,
+`zerodust_get_balances`, `zerodust_get_quote`, `zerodust_get_sweep_status`,
+`zerodust_list_sweeps`, `zerodust_register_api_key`, `zerodust_info`.
+
+Local, can sweep, because the key stays on your machine:
 
 ```json
 {
@@ -94,3 +135,21 @@ Add to your Claude Desktop or Claude Code config:
   }
 }
 ```
+
+Same tool names, plus `zerodust_sweep`, `zerodust_sweep_all` and
+`zerodust_get_agent_address`. Sweeping requires `ZERODUST_ALLOW_EXECUTE=true`
+and a signing key, which may be a signer module returning a viem LocalAccount
+(Turnkey, Privy, KMS), an encrypted V3 keystore, a key file, or an inline key.
+
+## Self-service credentials
+
+An agent can issue itself an API key with no human signup step:
+
+```bash
+curl -X POST https://api.zerodust.xyz/agent/register \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-agent", "agentId": "my-agent-1"}'
+# -> { "apiKey": "zd_...", "rateLimits": { "perMinute": 300, "daily": 1000 } }
+```
+
+The read endpoints work without a key; this only raises rate limits.
