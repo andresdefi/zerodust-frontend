@@ -14,7 +14,13 @@ ZeroDust sweeps 100% of native gas tokens (ETH, BNB, POL, etc.) from any support
 
 ## Supported chains
 
-Ethereum, Arbitrum, Base, Optimism, Polygon, BSC, Gnosis, Scroll, Linea, Mode, Mantle, Celo, Blast, Unichain, World Chain, Berachain, Ink, Plasma, BOB, Story, Fraxtal, Superseed, Apechain, Sei, Sonic, Soneium, and Zora.
+25 mainnet chains: Ethereum, Optimism, BNB Chain, Gnosis, Unichain, Polygon,
+Sonic, X Layer, Fraxtal, World Chain, Sei, Story, Soneium, Mantle, Superseed,
+Base, Plasma, Mode, Arbitrum, Celo, Ink, BOB, Berachain, Scroll, and Zora.
+
+`GET https://api.zerodust.xyz/chains` is the authoritative list; this is a
+snapshot. There are no testnet chains, so there is no testnet environment to
+integrate against.
 
 ## Fee structure
 

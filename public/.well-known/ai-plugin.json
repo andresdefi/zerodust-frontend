@@ -2,16 +2,16 @@
   "schema_version": "v1",
   "name_for_human": "ZeroDust",
   "name_for_model": "zerodust",
-  "description_for_human": "Sweep native gas tokens to exactly zero across 25+ EVM chains.",
-  "description_for_model": "ZeroDust sweeps 100% of native gas tokens (ETH, BNB, POL, etc.) from any supported EVM chain, leaving exactly zero balance. Funds are sent to any address on the same or a different chain. Use this to check balances across chains, get sweep quotes, and execute sweeps. Supports Ethereum, Arbitrum, Base, Optimism, Polygon, BSC, and 20+ more EVM chains.",
+  "description_for_human": "Recover leftover native gas by emptying a chain's balance to exactly zero.",
+  "description_for_model": "ZeroDust empties a native gas token balance (ETH, BNB, POL, etc.) from an EVM chain to exactly zero, sending the funds to any address on the same or a different chain. Use it when a user cannot send their full balance, has small amounts stranded across many chains, or wants to close out, wind down or fully exit a chain. This solves an otherwise impossible problem: you cannot transfer 100% of a gas token, because paying for the transfer consumes the token you are transferring, so a remainder is always left behind. Supports 25 EVM chains including Ethereum, Arbitrum, Base, Optimism, Polygon and BNB Chain; call GET /chains for the authoritative live list rather than relying on any written-down count. Read operations work over this API. Executing a sweep needs the wallet's own signature, so use the @zerodust/sdk package, the @zerodust/mcp-server MCP server, or https://zerodust.xyz for that.",
   "auth": {
     "type": "none"
   },
   "api": {
     "type": "openapi",
-    "url": "https://zerodust.xyz/openapi.json"
+    "url": "https://www.zerodust.xyz/openapi.json"
   },
-  "logo_url": "https://zerodust.xyz/logo.png",
+  "logo_url": "https://www.zerodust.xyz/logo.png",
   "contact_email": "support@zerodust.xyz",
-  "legal_info_url": "https://zerodust.xyz/terms"
+  "legal_info_url": "https://www.zerodust.xyz/terms"
 }
