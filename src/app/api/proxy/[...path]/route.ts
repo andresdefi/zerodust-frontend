@@ -2,10 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
+// Development only (avoids CORS against a local backend). In production it
+// would let anyone relay API traffic through Vercel's IPs, around the
+// backend's per-IP rate limits (audit 2026-09-30).
+const DISABLED = process.env.NODE_ENV === 'production';
+const notFound = () => NextResponse.json({ error: 'Not found' }, { status: 404 });
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
+  if (DISABLED) return notFound();
   const { path: pathSegments } = await params;
   const path = pathSegments.join('/');
   const searchParams = request.nextUrl.searchParams.toString();
@@ -25,6 +32,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
+  if (DISABLED) return notFound();
   const { path: pathSegments } = await params;
   const path = pathSegments.join('/');
   const body = await request.json();
