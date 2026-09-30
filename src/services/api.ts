@@ -3,7 +3,9 @@
 // Use local proxy in development to avoid CORS issues
 const API_URL = typeof window !== 'undefined' && window.location.hostname === 'localhost'
   ? '/api/proxy'
-  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001');
+  // Production must never fall back to localhost: a build without the env var
+  // sent every visitor's API calls to their own machine (audit 2026-09-30)
+  : (process.env.NEXT_PUBLIC_API_URL || 'https://api.zerodust.xyz');
 
 export interface ChainBalance {
   chainId: number;
