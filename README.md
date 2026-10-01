@@ -1,116 +1,37 @@
-# ZeroDust Frontend
+# ZeroDust website
 
-ZeroDust is a Web3 application that enables users to sweep 100% of their native gas tokens from one chain, leaving zero dust behind. Built with EIP-7702 technology.
+The public site at [zerodust.xyz](https://zerodust.xyz): empty a wallet's native gas balances to
+exactly 0, across many chains at once, to one destination. The home page is the app.
 
-## Tech Stack
+The page handles private keys, so the build is held to strict rules (checked on every build):
 
-- **Framework**: Next.js 14 (App Router)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **Animations**: Framer Motion
-- **Web3**: wagmi, viem, RainbowKit
-- **Icons**: Lucide React
+- No third-party scripts, fonts, analytics or wallet SDKs. Fonts and chain logos are self-hosted.
+- A Content-Security-Policy with `default-src 'none'` and `script-src 'self'` (`vercel.json`); no
+  inline scripts, styles or event handlers in any page (`scripts/check-dist.mjs`).
+- Subresource Integrity on every script and stylesheet (`build/sri.ts`).
+- Dependencies pinned exactly (`.npmrc`, `package-lock.json`).
+- A reproducible build: `npm run build` prints one SHA-256 over every file in `dist/`
+  (`scripts/hash-dist.mjs`). Rebuild the same commit and compare.
 
-## Features
+## Stack
 
-### Sweep Interface
-- Chain selection with official chain logos (via LI.FI icons)
-- Real-time balance fetching across multiple chains
-- Fee estimation and breakdown display
-- Destination address input with wallet auto-fill
+Vite, React, TypeScript. No server code: `dist/` is static and deployed to Vercel.
 
-### Network Support
-- **Testnets**: Sepolia, Base Sepolia, OP Sepolia, Arbitrum Sepolia, Polygon Amoy, BSC Testnet + 40 more
-- **Mainnets (26 chains)**: Base, Arbitrum, Polygon, BSC, Zora, Optimism, Gnosis, Scroll, Linea, Mode, Mantle, Celo, Blast, Unichain, World Chain, Berachain, Ink, Plasma, BOB, Story, Fraxtal, Superseed, Apechain, Sei, Sonic, Soneium
-- **Cross-chain**: 650 routes via Gas.zip integration
-- Network mode toggle to switch between mainnet/testnet views
+## Develop
 
-### Fee System
-- Preview mode: See estimated fees without connecting wallet
-- Warning system:
-  - "Amount too low" when fees exceed balance
-  - "High fee" warning when fees > 30% of amount
-- Confirmation step required for high fee transactions
-
-### UI/UX
-- Premium glassmorphism design
-- Dark/light mode support
-- Animated gradient backgrounds
-- Responsive design (mobile-first)
-- Official chain logos from LI.FI (same as Jumper exchange)
-
-## Getting Started
-
-### Prerequisites
-- Node.js 18+
-- npm or yarn
-
-### Installation
-
-```bash
-# Install dependencies
-npm install
-
-# Copy environment variables
-cp .env.example .env.local
-
-# Start development server
-npm run dev
-```
-
-### Environment Variables
-
-```env
-NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_project_id
-NEXT_PUBLIC_API_URL=your_backend_api_url
-```
-
-## Project Structure
-
-```
-src/
-├── app/
-│   ├── globals.css      # Global styles, design tokens, animations
-│   ├── layout.tsx       # Root layout with providers
-│   └── page.tsx         # Main landing page with sweep interface
-├── components/
-│   ├── layout/
-│   │   ├── header.tsx   # Navigation header
-│   │   └── footer.tsx   # Page footer
-│   ├── sweep/
-│   │   ├── balance-list.tsx      # Chain selection dropdown
-│   │   ├── destination-form.tsx  # Destination address input
-│   │   ├── fee-breakdown.tsx     # Fee estimation display
-│   │   └── sweep-button.tsx      # Transaction execution
-│   └── ui/
-│       ├── chain-icon.tsx        # Chain logo component
-│       └── theme-toggle.tsx      # Dark/light mode toggle
-├── config/
-│   └── wagmi.ts         # Chain configuration, RPC URLs
-├── providers/
-│   └── web3-provider.tsx # wagmi + RainbowKit setup
-└── services/
-    ├── api.ts           # Backend API client
-    └── prices.ts        # Token price fetching
-```
-
-## Documentation
-
-- [EIP-7702 Architecture](./docs/EIP-7702-TWO-STEP-SWEEP-ARCHITECTURE.md) - Technical architecture for the sweep mechanism
-
-## Development
-
-```bash
-# Run development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Run linting
+```sh
+npm ci
+npm run dev        # http://localhost:5173
+npm run build      # typecheck, build, CSP and integrity checks, build hash
+npm run preview    # serves dist/ with the production security headers
 npm run lint
+npm test
 ```
 
-## License
+## Layout
 
-MIT
+- `src/` the page (`App.tsx`, `components/`, `styles/tokens.css` for the palette)
+- `build/` Vite plugins (SRI)
+- `scripts/` build checks and the build hash
+- `content/docs/` developer docs from the previous site, to be carried over
+- `public/` static files served as is (`llms.txt`, `openapi.json`, `.well-known/`)

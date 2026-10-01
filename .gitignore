@@ -1,36 +1,23 @@
 # Dependencies
 node_modules
-.pnp
-.pnp.js
 
-# Testing
+# Build output and test artifacts
+dist
 coverage
-
-# Next.js
-.next/
-out/
-build
+test-results
+playwright-report
 
 # Misc
 .DS_Store
 *.pem
+*.tsbuildinfo
+.serena/
 
 # Debug
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
-# Env files: all of them, except the example
+# Env files: the site has none; keep any local ones out of git
 .env*
-!.env.example
 
-# Vercel
+# Vercel CLI project link
 .vercel
-
-# TypeScript
-*.tsbuildinfo
-next-env.d.ts
-.serena/
-
-# Node 25+ writes the localStorage polyfill file here (see scripts.dev)
-.next/.localstorage

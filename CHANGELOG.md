@@ -4,6 +4,18 @@ All notable changes to the ZeroDust frontend will be documented in this file.
 
 ## [Unreleased]
 
+### Rebuild (2026-10-01)
+
+- Replaced the Next.js app with a static Vite + React site: the home page is the sweep app, with
+  the approved "Saffron" design (light and dark).
+- Removed RainbowKit, wagmi, ethers, framer-motion, Tailwind and Vercel Analytics.
+- Security headers in `vercel.json` (CSP without inline code, HSTS, frame denial, no referrer),
+  Subresource Integrity on scripts and styles, build checks for both, and a reproducible build hash.
+- CI: typecheck, lint, tests, build.
+- The old developer docs are kept in `content/docs/` until the docs pages are rebuilt.
+
+## Previous site
+
 ### Added
 
 #### Design & UI Overhaul
