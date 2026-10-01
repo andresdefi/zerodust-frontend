@@ -8,13 +8,23 @@ import { WalletHead } from './WalletHead';
 import { ChevronIcon, DownIcon, PencilIcon, RefreshIcon } from './icons';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
 import { serviceFeeUsd } from '../lib/fees';
-import type { Choice, Row, SweepModel } from '../sweep/useSweep';
+import { isExit, type Choice, type Row, type SweepModel } from '../sweep/useSweep';
 
-const CHOICES: Array<{ choice: Choice | null; label: string; text: (amount: string) => string; danger?: boolean }> = [
-  { choice: 'donate', label: 'Donate all to ZeroDust', text: (a) => `${a} goes to ZeroDust. You receive nothing.` },
-  { choice: 'burn', label: 'Burn all', text: (a) => `${a} is destroyed. Nobody receives it.`, danger: true },
-  { choice: null, label: 'Leave it', text: () => 'This chain is not swept and keeps its balance.' },
-];
+const CHOICES: Record<Choice | 'leave', { label: string; text: (amount: string, dest: string) => string; danger?: boolean; quiet?: boolean }> = {
+  'exit-donate': { label: 'Swap out', text: (_a, d) => `Swap to a token a bridge takes, then send it to ${d}. The few cents of gas reserve left are donated to ZeroDust.` },
+  'exit-burn': { label: 'Swap out, burn the cents left', text: () => 'Same, but the cents left are burned instead of donated.' },
+  donate: { label: 'Donate all to ZeroDust', text: (a) => `${a} goes to ZeroDust. You receive nothing.` },
+  burn: { label: 'Burn all', text: (a) => `${a} is destroyed. Nobody receives it.`, danger: true },
+  leave: { label: 'Leave it', text: () => 'This chain is not swept and keeps its balance.', quiet: true },
+};
+
+/** How a chosen fallback reads on its row */
+export const CHOICE_LABEL: Record<Choice, string> = {
+  'exit-donate': 'Swap out; cents left donated',
+  'exit-burn': 'Swap out; cents left burned',
+  donate: 'Donate all to ZeroDust',
+  burn: 'Burn all, not received',
+};
 
 export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; clipboard: ClipboardState; onForget: () => void }) {
   const m = model;
@@ -65,11 +75,15 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
   const totalUsd = m.rows.reduce((s, r) => s + (rowUsd(r) ?? 0), 0);
   // Before a destination is chosen, count what is selected; after, what can actually go
   const counted = m.destination === null ? selectedAll : m.selectedRows;
-  const routed = counted.filter((r) => !m.choices[r.chainId]);
-  const feeUsd = routed.reduce((s, r) => s + serviceFeeUsd(rowUsd(r) ?? 0), 0);
+  const routed = counted.filter((r) => !m.choices[r.chainId] || isExit(m.choices[r.chainId]));
+  // A direct chain's checked fee is exact; otherwise the published schedule
+  const feeUsd = routed.reduce((s, r) => {
+    const fee = m.states[r.chainId]?.fee;
+    return s + (fee !== undefined ? usdValue(fee, r.decimals, price(r.token)) ?? 0 : serviceFeeUsd(rowUsd(r) ?? 0));
+  }, 0);
   const destPrice = m.destRow ? price(m.destRow.token) : undefined;
   const receiveUsd = m.destRow ? usdValue(m.readyTotal, m.destRow.decimals, destPrice) : null;
-  const readyRoutedUsd = m.readyRows.filter((r) => !m.choices[r.chainId]).reduce((s, r) => s + (rowUsd(r) ?? 0), 0);
+  const readyRoutedUsd = m.readyRows.filter((r) => !m.choices[r.chainId] || isExit(m.choices[r.chainId])).reduce((s, r) => s + (rowUsd(r) ?? 0), 0);
   const gasUsd = receiveUsd === null ? null : Math.max(0, readyRoutedUsd - receiveUsd - feeUsd);
   const burned = m.selectedRows.filter((r) => m.choices[r.chainId] === 'burn');
   const donated = m.selectedRows.filter((r) => m.choices[r.chainId] === 'donate');
@@ -120,17 +134,20 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                   aria-label={`Sweep ${r.name}`}
                 />
                 <ChainIcon chainId={r.chainId} name={r.name} />
-                <span className="name">{r.name}</span>
+                <span className="name"><span className="name-line">{r.name}{r.direct && <span className="tag" title="No sponsor here: the wallet pays its own gas out of the balance, in exact transactions">direct</span>}</span></span>
                 <span className="right">
                   {formatUsd(rowUsd(r)) || '-'}
                   <span className="bal">
-                    {st?.phase === 'ready' && !choice && <span className="ok-text">Ready, </span>}
+                    {st?.phase === 'ready' && (!choice || isExit(choice)) && <span className="ok-text">Ready, </span>}
                     {formatAmount(r.balance, r.decimals)} {r.token}
                   </span>
                 </span>
                 {isDest && <span className="detail muted">Destination chain: nothing to move</span>}
                 {!r.canSweep && <span className="detail muted">Too small to sweep</span>}
-                {st?.phase === 'quoting' && <span className="detail muted">Checking route…</span>}
+                {st?.phase === 'quoting' && <span className="detail muted">{st.detail ?? 'Checking route…'}</span>}
+                {r.direct && st?.fee !== undefined && st.fee > 0n && st.phase === 'ready' && (
+                  <span className="detail muted">You pay this chain's gas from the balance. ZeroDust fee {formatAmount(st.fee, r.decimals)} {r.token}{formatUsd(usdValue(st.fee, r.decimals, price(r.token))) && ` (${formatUsd(usdValue(st.fee, r.decimals, price(r.token)))})`}</span>
+                )}
                 {st?.phase === 'no-route' && !needs && <span className="detail warn-text">{st.detail}</span>}
                 {needs && (
                   <span className="detail split">
@@ -143,28 +160,29 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                 {needs && menuFor === r.chainId && (
                   <span className="menu" role="group" aria-label={`What to do with ${r.name}`}>
                     <span className="menu-title">Nothing can carry {r.token} to {m.destRow?.name ?? 'the destination'} right now. Instead:</span>
-                    {CHOICES.map((c) => (
-                      <button
-                        key={c.label}
-                        type="button"
-                        className={`menu-item${c.danger ? ' danger' : ''}${c.choice === null ? ' quiet' : ''}`}
-                        onClick={() => {
-                          if (c.choice) m.setChoice(r.chainId, c.choice);
-                          else if (m.selected.has(r.chainId)) m.toggle(r.chainId);
-                          setMenuFor(null);
-                        }}
-                      >
-                        <b>{c.label}</b>
-                        <span>{c.text(amountText(r))}</span>
-                      </button>
-                    ))}
+                    {[...m.choicesFor(r), 'leave' as const].map((key) => {
+                      const c = CHOICES[key];
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          className={`menu-item${c.danger ? ' danger' : ''}${c.quiet ? ' quiet' : ''}`}
+                          onClick={() => {
+                            if (key !== 'leave') m.setChoice(r.chainId, key);
+                            else if (m.selected.has(r.chainId)) m.toggle(r.chainId);
+                            setMenuFor(null);
+                          }}
+                        >
+                          <b>{c.label}</b>
+                          <span>{c.text(amountText(r), m.destRow?.name ?? 'the destination')}</span>
+                        </button>
+                      );
+                    })}
                   </span>
                 )}
                 {choice && (
                   <span className="detail split">
-                    <span className={choice === 'burn' ? 'danger-text strong' : 'warn-text strong'}>
-                      {choice === 'burn' ? 'Burn all, not received' : 'Donate all to ZeroDust'}
-                    </span>
+                    <span className={choice === 'burn' ? 'danger-text strong' : 'warn-text strong'}>{CHOICE_LABEL[choice]}</span>
                     <button type="button" className="link-btn" onClick={() => m.setChoice(r.chainId, null)} disabled={m.busy}>Change</button>
                   </span>
                 )}
