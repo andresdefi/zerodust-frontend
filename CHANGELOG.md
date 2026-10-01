@@ -4,6 +4,17 @@ All notable changes to the ZeroDust frontend will be documented in this file.
 
 ## [Unreleased]
 
+### Direct chains (2026-10-01)
+
+- Avalanche, Cronos, Metis, Immutable zkEVM, Fuse, XDC, HyperEVM, Flow EVM, Gravity and Etherlink
+  (no EIP-7702 in ZeroDust) are swept by the wallet itself with exact legacy transactions, planned
+  by the API (`/direct/*`, quote-only) and checked here before signing: the plan against the
+  request and the chain's own balance and nonce (`src/direct/verify.ts`), then replayed on a fork
+  of the chain in an in-page EVM (ethereumjs, `src/direct/replay.ts`). Signed transactions go
+  straight to the chain's RPC; the API never sees them.
+- Swap out (LI.FI) for a direct chain with no bridge route, the cents left donated or burned.
+- A fee transfer that landed before its sweep failed is passed back so a retry is not charged twice.
+
 ### Sweep flow for sponsored chains (2026-10-01)
 
 - Key entry ported from the local sweeper: the key never enters the DOM; pasting wipes the clipboard.

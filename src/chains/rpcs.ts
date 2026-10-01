@@ -50,3 +50,20 @@ export const RPC_URLS: Record<number, string> = {
   747474: 'https://rpc.katana.network',
   7777777: 'https://rpc.zora.energy/',
 };
+
+// Direct chains (no EIP-7702 in ZeroDust): the page reads balances, replays
+// the planned set on a fork, and broadcasts its signed transactions here. The
+// same endpoints the API plans with (/direct/chains); each answered CORS for
+// the site and the reads the replay needs on 2026-10-01.
+export const DIRECT_RPC_URLS: Record<number, string> = {
+  43114: 'https://api.avax.network/ext/bc/C/rpc',
+  25: 'https://evm.cronos.org',
+  1088: 'https://andromeda.metis.io/?owner=1088',
+  13371: 'https://rpc.immutable.com',
+  122: 'https://rpc.fuse.io',
+  50: 'https://rpc.xdcrpc.com',
+  999: 'https://rpc.hyperliquid.xyz/evm',
+  747: 'https://mainnet.evm.nodes.onflow.org',
+  1625: 'https://rpc.gravity.xyz',
+  42793: 'https://node.mainnet.etherlink.com',
+};

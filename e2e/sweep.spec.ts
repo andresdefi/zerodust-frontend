@@ -123,3 +123,55 @@ test('sweeps sponsored chains to one destination, burning a chain with no route'
   expect(watch.leaks).toEqual([]);
   expect(watch.cspViolations).toEqual([]);
 });
+
+test('sweeps a direct chain: plan checked and replayed in the page, signed here, sent to the chain', async ({ page }) => {
+  const key = generatePrivateKey();
+  const address = privateKeyToAccount(key).address;
+  const { swept, sent } = await mockNetwork(page, address, { direct: true });
+  const watch = await watchForKey(page, key);
+
+  await page.goto('/');
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.row')).toHaveCount(4);
+  const avax = page.locator('.row', { hasText: 'Avalanche' });
+  await expect(avax.locator('.tag')).toHaveText('direct');
+  // Selected by default, like the sponsored chains; keep only Avalanche for this test
+  for (const name of ['Base', 'Optimism', 'Scroll']) await page.getByRole('checkbox', { name: `Sweep ${name}` }).uncheck();
+
+  await page.getByRole('button', { name: 'Choose where it goes' }).click();
+  await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^Base/ }).click();
+  await page.getByRole('button', { name: 'Check sweep' }).click();
+  await expect(page.getByRole('button', { name: 'Sweep 1 chain' })).toBeVisible({ timeout: 30_000 });
+  await expect(avax).toContainText('ZeroDust fee 0.002 AVAX');
+  expect(sent).toEqual([]);
+
+  await page.getByRole('button', { name: 'Sweep 1 chain' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Sweep 1 chain' }).click();
+  await expect(page.getByText('1 of 1 at zero')).toBeVisible({ timeout: 60_000 });
+  // Two signed legacy transactions went to the chain's RPC: the fee, then the deposit
+  expect(sent).toHaveLength(2);
+  expect(sent.every((raw) => raw.startsWith('0xf8') || raw.startsWith('0xf9'))).toBe(true);
+  expect(swept.has(43114)).toBe(true);
+  await watch.checkPage();
+  expect(watch.leaks).toEqual([]);
+  expect(watch.cspViolations).toEqual([]);
+});
+
+test('refuses a direct plan that pays someone else, and sends nothing', async ({ page }) => {
+  const key = generatePrivateKey();
+  const { sent } = await mockNetwork(page, privateKeyToAccount(key).address, { direct: true, tamper: true });
+  await page.goto('/');
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.row')).toHaveCount(4);
+  for (const name of ['Base', 'Optimism', 'Scroll']) await page.getByRole('checkbox', { name: `Sweep ${name}` }).uncheck();
+  await page.getByRole('button', { name: 'Choose where it goes' }).click();
+  await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^Base/ }).click();
+  await page.getByRole('button', { name: 'Check sweep' }).click();
+  await expect(page.locator('.row', { hasText: 'Avalanche' })).toContainText('Plan refused: the Gas.zip deposit does not name the address you set', { timeout: 30_000 });
+  await expect(page.getByRole('button', { name: /^Sweep \d/ })).toHaveCount(0);
+  expect(sent).toEqual([]);
+});

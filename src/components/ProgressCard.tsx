@@ -36,7 +36,7 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
             <span className="done-ring"><CheckIcon /></span>
             <div>
               <div className="amt">{done.length} of {swept.length} at zero</div>
-              <div className="sub">Every balance reads 0 on-chain and every delegation is revoked</div>
+              <div className="sub">Every balance reads 0 on-chain{swept.some((r) => !r.direct) ? ' and every delegation is revoked' : ''}</div>
             </div>
           </div>
         ) : (
