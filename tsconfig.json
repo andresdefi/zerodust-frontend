@@ -1,7 +1,12 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2023", "DOM", "DOM.Iterable", "ESNext.Iterator"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable",
+      "ESNext.Iterator"
+    ],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
@@ -12,7 +17,18 @@
     "isolatedModules": true,
     "allowJs": true,
     "checkJs": false,
-    "types": ["node", "vite/client"]
+    "types": [
+      "node",
+      "vite/client"
+    ],
+    "allowImportingTsExtensions": true
   },
-  "include": ["src", "build", "tests", "vite.config.ts"]
+  "include": [
+    "src",
+    "build",
+    "tests",
+    "e2e",
+    "vite.config.ts",
+    "playwright.config.ts"
+  ]
 }

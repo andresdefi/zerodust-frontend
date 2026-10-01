@@ -4,6 +4,18 @@ All notable changes to the ZeroDust frontend will be documented in this file.
 
 ## [Unreleased]
 
+### Sweep flow for sponsored chains (2026-10-01)
+
+- Key entry ported from the local sweeper: the key never enters the DOM; pasting wipes the clipboard.
+- Balances, destination picker (no default chain), "Receive at" with a check-it warning, burn or
+  donate for a chain with no route, check (real quotes, SDK-verified, nothing sent), confirm
+  dialog, sweep with progress, and an on-chain check per chain (balance 0, delegation revoked).
+- Public RPCs for all 45 sponsored chains, probed for browser access and listed in the CSP.
+- Chain logos self-hosted (web3icons, MIT).
+- Subresource Integrity is now computed from the files as written, and the build re-verifies every
+  hash (a chunk rewritten after hashing had shipped a wrong one in testing).
+- End-to-end tests in CI (Playwright, offline).
+
 ### Rebuild (2026-10-01)
 
 - Replaced the Next.js app with a static Vite + React site: the home page is the sweep app, with

@@ -25,8 +25,14 @@ npm run dev        # http://localhost:5173
 npm run build      # typecheck, build, CSP and integrity checks, build hash
 npm run preview    # serves dist/ with the production security headers
 npm run lint
-npm test
+npm test           # unit tests
+npm run e2e        # end-to-end, against the built site with an offline API and RPCs
 ```
+
+The end-to-end tests (`e2e/`) prove the key never reaches the DOM, storage, a request or the
+console, that pasting wipes the clipboard, and run a full sweep (check, confirm, sweep, "0 left")
+against recorded API responses. They use the production CSP and contact nothing outside the
+machine.
 
 ## Layout
 
@@ -35,3 +41,8 @@ npm test
 - `scripts/` build checks and the build hash
 - `content/docs/` developer docs from the previous site, to be carried over
 - `public/` static files served as is (`llms.txt`, `openapi.json`, `.well-known/`)
+- `src/chains/rpcs.ts` the public RPC per chain the page reads from. Each passed
+  `scripts/probe-rpcs.mjs` (CORS for the site, right chain ID, the read calls answer); every host
+  must also be in the CSP's `connect-src` (`tests/csp-hosts.test.ts` fails otherwise).
+- `public/chains/` chain logos from [web3icons](https://github.com/0xa3k5/web3icons) (MIT,
+  `public/chains/LICENSE.txt`), copied by `scripts/copy-chain-logos.mjs`

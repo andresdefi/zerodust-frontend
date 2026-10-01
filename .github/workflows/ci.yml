@@ -41,3 +41,9 @@ jobs:
         # check-dist fails on any inline script/style, missing integrity or a
         # weakened CSP; hash-dist prints the build's sha256 for verification
         run: npm run build
+
+      - name: Install Chromium for end-to-end tests
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests (offline API and RPCs, production CSP)
+        run: npm run e2e
