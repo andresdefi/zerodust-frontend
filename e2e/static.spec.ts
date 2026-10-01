@@ -8,10 +8,13 @@ import { mockNetwork } from './fixtures';
 test('static pages render with their only script, under the site CSP', async ({ page }) => {
   const csp: string[] = [];
   page.on('console', (m) => { if (/Refused|Content Security|integrity/.test(m.text())) csp.push(m.text()); });
-  for (const name of ['security', 'offline']) {
-    await page.goto(`/${name}.html`);
+  for (const path of ['security', 'offline', 'terms', 'privacy', 'docs/index', 'docs/getting-started', 'docs/api', 'docs/direct-chains', 'docs/mcp']) {
+    await page.goto(`/${path}.html`);
     await expect(page.locator('h1')).toBeVisible();
   }
+  // Docs sidebar marks the current page
+  await page.goto('/docs/api.html');
+  await expect(page.locator('.docs-nav a[aria-current="page"]')).toHaveText('REST API');
   await page.goto('/security.html');
   // The build record fills the site hash
   await expect(page.locator('[data-build="siteSha256"]')).toHaveText(/^[0-9a-f]{64}$/);

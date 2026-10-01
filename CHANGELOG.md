@@ -4,6 +4,18 @@ All notable changes to the ZeroDust frontend will be documented in this file.
 
 ## [Unreleased]
 
+### Docs, terms and privacy (2026-10-01)
+
+- Developer docs rewritten from the current code (`content/docs/*.md`, 11 pages: overview, getting
+  started, SDK, agent, API client, errors, REST API, direct chains, MCP server, Vercel AI SDK,
+  LangChain), rendered to static HTML at build time with a sidebar. Raw HTML in Markdown is
+  escaped and only web, site, anchor and mailto links are accepted (the build fails otherwise).
+  Section headings get ids for deep links (`/docs/api#api-keys`). Docs match SDK 0.5.0 (default
+  RPCs for all chains, HTTP error codes, 429 retries), API keys raising rate limits, and the
+  hosted MCP's `zerodust_get_destinations`.
+- Terms and privacy (`content/legal/`): what the service does, risks, fees, and exactly what the
+  API keeps and for how long, checked against the database and its retention jobs.
+
 ### Security and offline pages (2026-10-01)
 
 - `/security`: how the key is handled, what the page talks to, how plans are checked, how the page

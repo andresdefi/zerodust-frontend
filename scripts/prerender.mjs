@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const root = new URL('../', import.meta.url).pathname;
 const dist = join(root, 'dist');
@@ -59,7 +59,9 @@ ${body}
   </body>
 </html>
 `;
-  writeFileSync(join(dist, `${name}.html`), html);
+  const file = join(dist, `${name}.html`);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, html);
 }
 
 rmSync(join(dist, 'theme-manifest.json'), { force: true });
