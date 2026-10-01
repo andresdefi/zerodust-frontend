@@ -2,6 +2,7 @@
 // line that carries its gist (native <details>: keyboard accessible, no
 // script), so the card stays the one thing that asks for attention. On
 // narrow screens the card comes right after the headline and these follow.
+import { OFFLINE, SITE } from '../lib/env';
 
 export function LeftPanel() {
   return (
@@ -43,7 +44,9 @@ export function RightPanel() {
         </ul>
       </details>
       <p className="note">
-        Rather not trust a website with a key? <a className="link" href="/offline">Use the offline page</a>.
+        {OFFLINE
+          ? <>Offline page. Check for a newer version at <a className="link" href={`${SITE}/offline`}>zerodust.xyz/offline</a>.</>
+          : <>Rather not trust a website with a key? <a className="link" href="/offline">Use the offline page</a>.</>}
       </p>
     </aside>
   );

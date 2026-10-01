@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && node scripts/check-dist.mjs && node scripts/hash-dist.mjs",
+    "build": "tsc --noEmit && vite build --mode offline && node scripts/make-offline.mjs && vite build && vite build --mode theme && vite build --ssr src/prerender.tsx && node scripts/prerender.mjs && node scripts/check-dist.mjs && node scripts/hash-dist.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
