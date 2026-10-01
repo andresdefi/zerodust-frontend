@@ -21,3 +21,6 @@ npm-debug.log*
 
 # Vercel CLI project link
 .vercel
+dist-offline
+dist-ssr
+offline-out

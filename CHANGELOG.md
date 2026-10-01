@@ -4,6 +4,20 @@ All notable changes to the ZeroDust frontend will be documented in this file.
 
 ## [Unreleased]
 
+### Security and offline pages (2026-10-01)
+
+- `/security`: how the key is handled, what the page talks to, how plans are checked, how the page
+  is locked down, and how to rebuild and compare the published hashes.
+- `/offline`: the sweeper as one HTML file (`/download/zerodust-offline.html`) with its SHA-256.
+  Code and styles are inlined under a CSP `<meta>` that allows them only by hash; fonts and logos
+  are data: URIs. Built by `vite build --mode offline` + `scripts/make-offline.mjs`, checked by
+  `check-dist` (hash-only script/style sources, every inline block listed).
+- Static pages are rendered to HTML at build time (`src/prerender.tsx`, `scripts/prerender.mjs`)
+  and load only the stylesheet and a 0.4 KB theme script, both with integrity.
+- `/.well-known/zerodust-build.json`: site hash, offline-file hash and commit; the site hash covers
+  every other file.
+- Ronin's RPC moved to Tenderly's gateway (api.roninchain.com refuses `Origin: null`).
+
 ### Direct chains (2026-10-01)
 
 - Avalanche, Cronos, Metis, Immutable zkEVM, Fuse, XDC, HyperEVM, Flow EVM, Gravity and Etherlink

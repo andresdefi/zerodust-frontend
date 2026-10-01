@@ -1,7 +1,8 @@
 // Public RPC per chain, read from the browser: nonces for signing, and the
 // on-chain check that a swept chain reads exactly 0. Each one passed
 // scripts/probe-rpcs.mjs (CORS for the site's origin, right chain ID, the
-// read calls answer) on 2026-10-01. Every host here must also be in the
+// read calls answer) on 2026-10-01. Ronin moved to Tenderly's gateway: api.roninchain.com
+// refuses Origin: null, which the offline page sends. Every host here must also be in the
 // CSP's connect-src in vercel.json (tests/csp-hosts.test.ts).
 export const RPC_URLS: Record<number, string> = {
   1: 'https://mainnet.gateway.tenderly.co',
@@ -22,7 +23,7 @@ export const RPC_URLS: Record<number, string> = {
   1514: 'https://mainnet.datarpc.io',
   1672: 'https://rpc.pharos.xyz',
   1868: 'https://rpc.soneium.org',
-  2020: 'https://api.roninchain.com/rpc',
+  2020: 'https://ronin.gateway.tenderly.co',
   2818: 'https://rpc-quicknode.morphl2.io',
   4326: 'https://mainnet.megaeth.com/rpc',
   4663: 'https://robinhood-rpc.publicnode.com',

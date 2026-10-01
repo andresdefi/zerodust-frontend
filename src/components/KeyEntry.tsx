@@ -2,6 +2,7 @@ import { useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react
 import type { LocalAccount } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { ShieldIcon } from './icons';
+import { OFFLINE } from '../lib/env';
 
 const KEY_PATTERN = /^(0x)?[0-9a-fA-F]{64}$/;
 
@@ -108,10 +109,14 @@ export function KeyEntry({ onAccount }: { onAccount: (account: LocalAccount, cli
           <div><ShieldIcon /><span>The key stays in this tab. It is never sent, saved or shown. Only signatures leave.</span></div>
           <div><ShieldIcon /><span>Pasting wipes your clipboard. Typing keeps the key off it entirely.</span></div>
         </div>
-        <div className="offline">
-          <span>Rather not trust a website with a key? Run the same page from your disk.</span>
-          <a href="/offline">Offline page</a>
-        </div>
+        {OFFLINE ? (
+          <div className="offline"><span>You are running the offline page from your own disk.</span></div>
+        ) : (
+          <div className="offline">
+            <span>Rather not trust a website with a key? Run the same page from your disk.</span>
+            <a href="/offline">Offline page</a>
+          </div>
+        )}
       </div>
       <div className="actions">
         <button type="button" className="btn btn-primary btn-block" onClick={() => unlock()} disabled={length === 0}>

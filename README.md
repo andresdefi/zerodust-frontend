@@ -22,7 +22,7 @@ Vite, React, TypeScript. No server code: `dist/` is static and deployed to Verce
 ```sh
 npm ci
 npm run dev        # http://localhost:5173
-npm run build      # typecheck, build, CSP and integrity checks, build hash
+npm run build      # typecheck; offline file, site and static pages; CSP and integrity checks; hashes
 npm run preview    # serves dist/ with the production security headers
 npm run lint
 npm test           # unit tests

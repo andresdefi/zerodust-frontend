@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkCsp, checkHtml } from './dist-checks.mjs';
+import { checkCsp, checkHtml, checkOfflineHtml } from './dist-checks.mjs';
 
 const dist = new URL('../dist/', import.meta.url).pathname;
 const problems = [];
@@ -11,6 +11,12 @@ const problems = [];
 for (const file of readdirSync(dist, { recursive: true })) {
   if (!String(file).endsWith('.html')) continue;
   const html = readFileSync(join(dist, String(file)), 'utf8');
+  // The downloadable offline page inlines its code under its own hash-based CSP
+  if (String(file).startsWith('download/')) {
+    const b64 = (s) => createHash('sha256').update(s, 'utf8').digest('base64');
+    for (const p of checkOfflineHtml(html, b64)) problems.push(`${file}: ${p}`);
+    continue;
+  }
   for (const p of checkHtml(html)) problems.push(`${file}: ${p}`);
   // Each integrity value must match the file it names, as served
   for (const [, url, integrity] of html.matchAll(/(?:src|href)="\/?([^"]+)"[^>]*\sintegrity="(sha384-[^"]+)"/g)) {
@@ -23,6 +29,18 @@ for (const file of readdirSync(dist, { recursive: true })) {
     }
     if (actual !== integrity) problems.push(`${file}: integrity does not match ${url}`);
   }
+}
+
+// Every script must be loaded with integrity by some page: a script no page
+// lists (a lazily loaded module) would run without its hash being checked
+const referenced = new Set();
+for (const file of readdirSync(dist, { recursive: true })) {
+  if (!String(file).endsWith('.html') || String(file).startsWith('download/')) continue;
+  const html = readFileSync(join(dist, String(file)), 'utf8');
+  for (const [, src] of html.matchAll(/(?:src|href)="\/?([^"]+\.js)"[^>]*\sintegrity="/g)) referenced.add(src);
+}
+for (const file of readdirSync(join(dist, 'assets'))) {
+  if (file.endsWith('.js') && !referenced.has(`assets/${file}`)) problems.push(`assets/${file}: a script no page loads with integrity (lazy chunk?)`);
 }
 
 const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
