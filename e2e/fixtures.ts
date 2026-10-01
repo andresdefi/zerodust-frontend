@@ -229,7 +229,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
   });
 
   // Nothing else may be contacted
-  await page.route((url) => !url.origin.startsWith('http://localhost') && url.origin !== API && !rpcChains.has(url.origin), (route) =>
+  await page.route((url) => url.protocol !== 'file:' && url.protocol !== 'data:' && !url.origin.startsWith('http://localhost') && url.origin !== API && !rpcChains.has(url.origin), (route) =>
     route.abort('blockedbyclient')
   );
 

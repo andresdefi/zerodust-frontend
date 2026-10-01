@@ -225,3 +225,25 @@ a { color: inherit; }
 .done-ring svg { width: 20px; height: 20px; }
 .received { display: flex; justify-content: space-between; align-items: flex-end; padding: 2px 2px 12px; border-bottom: 1px solid var(--line); }
 .received .amt { font-size: 26px; }
+
+/* Static pages (Security, Offline, Docs, Terms, Privacy) */
+.doc { max-width: 720px; margin: 0 auto; padding: 24px 32px 64px; }
+.doc h1 { font-size: 34px; letter-spacing: -0.03em; line-height: 1.1; margin-bottom: 12px; }
+.doc h2 { font-size: 20px; letter-spacing: -0.015em; margin: 36px 0 10px; }
+.doc p, .doc li { color: var(--muted); }
+.doc p + p { margin-top: 12px; }
+.doc strong { color: var(--ink); font-weight: 600; }
+.doc a:not(.btn) { color: var(--ink); text-underline-offset: 2px; }
+.doc ul { padding-left: 20px; display: grid; gap: 8px; }
+.doc-lede { font-size: 17px; margin-bottom: 8px; }
+.doc .btn { margin-top: 12px; }
+.doc code { font-size: 13px; background: var(--sunken); padding: 1px 6px; border-radius: 6px; color: var(--ink); overflow-wrap: anywhere; }
+.cmd { margin: 14px 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-row); padding: 14px 16px; overflow-x: auto; }
+.cmd code { background: none; padding: 0; font-size: 13px; line-height: 1.6; white-space: pre; overflow-wrap: normal; }
+.hashes { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 16px 0; font-size: 14px; }
+.hashes dt { color: var(--muted); }
+.foot { max-width: 1240px; margin: 0 auto; padding: 24px 32px 40px; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); }
+.foot-links { display: flex; gap: 16px; flex-wrap: wrap; }
+.foot a { text-decoration: none; }
+.foot a:hover { color: var(--ink); }
+@media (max-width: 760px) { .doc { padding: 16px 16px 48px; } .doc h1 { font-size: 28px; } .hashes { grid-template-columns: 1fr; } }
