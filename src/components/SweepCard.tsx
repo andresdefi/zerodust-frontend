@@ -1,0 +1,265 @@
+import { useState } from 'react';
+import type { ClipboardState } from './KeyEntry';
+import { ChainIcon } from './ChainIcon';
+import { ConfirmDialog } from './ConfirmDialog';
+import { DestinationPicker } from './DestinationPicker';
+import { ProgressCard } from './ProgressCard';
+import { WalletHead } from './WalletHead';
+import { ChevronIcon, DownIcon, PencilIcon, RefreshIcon } from './icons';
+import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
+import { serviceFeeUsd } from '../lib/fees';
+import type { Choice, Row, SweepModel } from '../sweep/useSweep';
+
+const CHOICES: Array<{ choice: Choice | null; label: string; text: (amount: string) => string; danger?: boolean }> = [
+  { choice: 'donate', label: 'Donate all to ZeroDust', text: (a) => `${a} goes to ZeroDust. You receive nothing.` },
+  { choice: 'burn', label: 'Burn all', text: (a) => `${a} is destroyed. Nobody receives it.`, danger: true },
+  { choice: null, label: 'Leave it', text: () => 'This chain is not swept and keeps its balance.' },
+];
+
+export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; clipboard: ClipboardState; onForget: () => void }) {
+  const m = model;
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [menuFor, setMenuFor] = useState<number | null>(null);
+  const [showAll, setShowAll] = useState(false);
+
+  if (m.stage === 'sweeping' || m.stage === 'done') return <ProgressCard model={m} onForget={onForget} />;
+
+  const price = (token: string) => m.prices[token];
+  const rowUsd = (r: Row) => usdValue(r.balance, r.decimals, price(r.token));
+  const amountText = (r: Row) => `${formatAmount(r.balance, r.decimals)} ${r.token}${formatUsd(rowUsd(r)) ? ` (${formatUsd(rowUsd(r))})` : ''}`;
+
+  if (m.stage === 'loading' || m.stage === 'error' || m.stage === 'empty') {
+    return (
+      <section className="card" aria-live="polite">
+        <WalletHead title="Sweep" address={m.address} />
+        <div className="card-message">
+          {m.stage === 'loading' && <p>Reading balances on every chain…</p>}
+          {m.stage === 'error' && <p className="field-error" role="alert">Could not load balances: {m.loadError}</p>}
+          {m.stage === 'empty' && (
+            <>
+              <p><strong>Nothing to sweep.</strong></p>
+              <p className="muted">Every chain reads 0 for {shortAddress(m.address)}.</p>
+            </>
+          )}
+        </div>
+        <div className="actions">
+          {m.stage === 'error'
+            ? <button type="button" className="btn btn-primary btn-block" onClick={m.reload}>Try again</button>
+            : m.stage === 'empty' && <button type="button" className="btn btn-ghost btn-block" onClick={onForget}>Load another wallet</button>}
+        </div>
+      </section>
+    );
+  }
+
+  const checked = m.stage === 'checked';
+  const sorted = [...m.rows].sort((a, b) => (rowUsd(b) ?? 0) - (rowUsd(a) ?? 0));
+  const VISIBLE = 7;
+  const flagged = (r: Row) => m.needsChoice(r) || !!m.choices[r.chainId];
+  const shownRows = showAll ? sorted : sorted.filter((r, i) => i < VISIBLE || flagged(r));
+  const hiddenRows = sorted.filter((r) => !shownRows.includes(r));
+  const hiddenUsd = hiddenRows.reduce((s, r) => s + (rowUsd(r) ?? 0), 0);
+
+  const selectedAll = m.rows.filter((r) => m.selected.has(r.chainId) && r.canSweep && m.blockedReason(r) !== 'Destination');
+  const totalUsd = m.rows.reduce((s, r) => s + (rowUsd(r) ?? 0), 0);
+  // Before a destination is chosen, count what is selected; after, what can actually go
+  const counted = m.destination === null ? selectedAll : m.selectedRows;
+  const routed = counted.filter((r) => !m.choices[r.chainId]);
+  const feeUsd = routed.reduce((s, r) => s + serviceFeeUsd(rowUsd(r) ?? 0), 0);
+  const destPrice = m.destRow ? price(m.destRow.token) : undefined;
+  const receiveUsd = m.destRow ? usdValue(m.readyTotal, m.destRow.decimals, destPrice) : null;
+  const readyRoutedUsd = m.readyRows.filter((r) => !m.choices[r.chainId]).reduce((s, r) => s + (rowUsd(r) ?? 0), 0);
+  const gasUsd = receiveUsd === null ? null : Math.max(0, readyRoutedUsd - receiveUsd - feeUsd);
+  const burned = m.selectedRows.filter((r) => m.choices[r.chainId] === 'burn');
+  const donated = m.selectedRows.filter((r) => m.choices[r.chainId] === 'donate');
+
+  let action: { label: string; onClick?: () => void; disabled?: boolean };
+  if (m.destination === null) action = { label: 'Choose where it goes', onClick: () => setPickerOpen(true) };
+  else if (!m.recipientValid) action = { label: 'Enter a valid address', disabled: true };
+  else if (m.selectedRows.length === 0) action = { label: 'Select a chain to sweep', disabled: true };
+  else if (checked) action = { label: `Sweep ${m.readyRows.length} chain${m.readyRows.length === 1 ? '' : 's'}`, onClick: () => setConfirmOpen(true), disabled: m.busy };
+  else action = { label: m.busy ? 'Checking…' : 'Check sweep', onClick: m.check, disabled: m.busy };
+
+  return (
+    <section className="card" aria-labelledby="sweep-title">
+      <WalletHead title="Sweep" address={m.address} titleId="sweep-title" />
+      <p className="wallet-line">
+        Loaded <span className="addr">{m.address}</span>. Check this is the wallet you meant.
+        {clipboard === 'cleared' && ' Clipboard wiped.'}
+      </p>
+
+      <div className="panel">
+        <div className="panel-label">
+          <span>From</span>
+          <button type="button" className="link-btn" onClick={m.reload} disabled={m.busy}><RefreshIcon /> Refresh</button>
+        </div>
+        <div className="total">
+          <div>
+            <div className="amt">{formatUsd(totalUsd) || `${m.rows.length} chains`}</div>
+            <div className="sub">{m.rows.length} chain{m.rows.length === 1 ? '' : 's'}, {selectedAll.length} selected</div>
+          </div>
+        </div>
+        <ul className="rows">
+          {shownRows.map((r) => {
+            const st = m.states[r.chainId];
+            const blocked = m.blockedReason(r);
+            const isDest = blocked === 'Destination';
+            const choice = m.choices[r.chainId];
+            const needs = m.needsChoice(r);
+            const disabled = m.busy || isDest || !r.canSweep || (!!blocked && !choice);
+            const on = m.selected.has(r.chainId) && !disabled;
+            return (
+              <li key={r.chainId} className={`row${needs || choice ? ' flag' : ''}`}>
+                <input
+                  type="checkbox"
+                  className="check"
+                  checked={on}
+                  disabled={disabled}
+                  onChange={() => m.toggle(r.chainId)}
+                  aria-label={`Sweep ${r.name}`}
+                />
+                <ChainIcon chainId={r.chainId} name={r.name} />
+                <span className="name">{r.name}</span>
+                <span className="right">
+                  {formatUsd(rowUsd(r)) || '-'}
+                  <span className="bal">
+                    {st?.phase === 'ready' && !choice && <span className="ok-text">Ready, </span>}
+                    {formatAmount(r.balance, r.decimals)} {r.token}
+                  </span>
+                </span>
+                {isDest && <span className="detail muted">Destination chain: nothing to move</span>}
+                {!r.canSweep && <span className="detail muted">Too small to sweep</span>}
+                {st?.phase === 'quoting' && <span className="detail muted">Checking route…</span>}
+                {st?.phase === 'no-route' && !needs && <span className="detail warn-text">{st.detail}</span>}
+                {needs && (
+                  <span className="detail split">
+                    <span className="warn-text">{blocked ?? st?.detail}</span>
+                    <button type="button" className="choose" onClick={() => setMenuFor(menuFor === r.chainId ? null : r.chainId)} aria-expanded={menuFor === r.chainId}>
+                      No route: choose <ChevronIcon />
+                    </button>
+                  </span>
+                )}
+                {needs && menuFor === r.chainId && (
+                  <span className="menu" role="group" aria-label={`What to do with ${r.name}`}>
+                    <span className="menu-title">Nothing can carry {r.token} to {m.destRow?.name ?? 'the destination'} right now. Instead:</span>
+                    {CHOICES.map((c) => (
+                      <button
+                        key={c.label}
+                        type="button"
+                        className={`menu-item${c.danger ? ' danger' : ''}${c.choice === null ? ' quiet' : ''}`}
+                        onClick={() => {
+                          if (c.choice) m.setChoice(r.chainId, c.choice);
+                          else if (m.selected.has(r.chainId)) m.toggle(r.chainId);
+                          setMenuFor(null);
+                        }}
+                      >
+                        <b>{c.label}</b>
+                        <span>{c.text(amountText(r))}</span>
+                      </button>
+                    ))}
+                  </span>
+                )}
+                {choice && (
+                  <span className="detail split">
+                    <span className={choice === 'burn' ? 'danger-text strong' : 'warn-text strong'}>
+                      {choice === 'burn' ? 'Burn all, not received' : 'Donate all to ZeroDust'}
+                    </span>
+                    <button type="button" className="link-btn" onClick={() => m.setChoice(r.chainId, null)} disabled={m.busy}>Change</button>
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        {hiddenRows.length > 0 && (
+          <button type="button" className="more" onClick={() => setShowAll(true)}>
+            {hiddenRows.length} more chain{hiddenRows.length === 1 ? '' : 's'}, {formatUsd(hiddenUsd)}
+          </button>
+        )}
+      </div>
+
+      <div className="arrow" aria-hidden="true"><span><i><DownIcon /></i></span></div>
+
+      <div className="panel">
+        <div className="panel-label">
+          <span>To</span>
+          {editing || !m.toSelf
+            ? <button type="button" className="link-btn" onClick={() => { m.setRecipient(m.address); setEditing(false); }}>Use my wallet</button>
+            : <button type="button" className="link-btn" onClick={() => setEditing(true)}>Receive at: your wallet <PencilIcon /></button>}
+        </div>
+        <div className="to-row">
+          <button type="button" className="chain-pill" onClick={() => setPickerOpen(true)} disabled={m.busy}>
+            {m.destRow ? <ChainIcon chainId={m.destRow.chainId} name={m.destRow.name} size={28} /> : <span className="ci ci-empty" aria-hidden="true" />}
+            <span>{m.destRow ? m.destRow.token : 'Choose chain'}{m.destRow && <small>{m.destRow.name}</small>}</span>
+            <ChevronIcon />
+          </button>
+          <div className="recv">
+            {checked && m.destRow
+              ? <><div className="amt">{formatAmount(m.readyTotal, m.destRow.decimals, 6)} {m.destRow.token}</div><div className="sub">{formatUsd(receiveUsd)}</div></>
+              : <div className="sub">{m.destination === null ? 'Pick the chain that receives everything' : 'Check for a quote'}</div>}
+          </div>
+        </div>
+        {(editing || !m.toSelf) && (
+          <div className="recipient">
+            <label className="addr-label" htmlFor="recipient">Receive at</label>
+            <input
+              id="recipient"
+              className={`addr-field${m.recipientValid ? '' : ' invalid'}`}
+              value={m.recipient}
+              onChange={(e) => m.setRecipient(e.target.value)}
+              spellCheck={false}
+              autoComplete="off"
+              disabled={m.busy}
+              aria-invalid={!m.recipientValid}
+              aria-describedby="recipient-help"
+            />
+            {!m.recipientValid && <p id="recipient-help" className="field-error" role="alert">Not a valid address: 0x and 40 hex characters.</p>}
+            {m.recipientValid && !m.toSelf && (
+              <div id="recipient-help" className="addr-warn" role="alert">
+                <b>This is not the loaded wallet.</b> Check it character by character. A sweep to the wrong address cannot be undone.
+                <div className="addr-chunks">{chunk(m.recipient)}</div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <dl className="summary">
+        {checked && m.destRow && (
+          <div><dt>You receive</dt><dd>{formatAmount(m.readyTotal, m.destRow.decimals, 6)} {m.destRow.token}{formatUsd(receiveUsd) && ` (${formatUsd(receiveUsd)})`}</dd></div>
+        )}
+        <div><dt>ZeroDust fee</dt><dd>{checked ? '' : 'about '}{formatUsd(feeUsd) || '$0.00'}</dd></div>
+        {checked && gasUsd !== null && <div><dt>Gas and bridges</dt><dd>{formatUsd(gasUsd) || '$0.00'}</dd></div>}
+        {burned.length > 0 && <div><dt>Burned</dt><dd className="danger-text">{burned.map(amountText).join(', ')}</dd></div>}
+        {donated.length > 0 && <div><dt>Donated</dt><dd className="warn-text">{donated.map(amountText).join(', ')}</dd></div>}
+        <div><dt>Chains</dt><dd>{counted.length} of {m.rows.length}</dd></div>
+      </dl>
+      <p className="footnote">
+        {checked ? 'Each chain is quoted again when it is swept.' : 'Check gets real quotes and simulates every chain. Nothing is sent.'}
+      </p>
+      <div className="actions">
+        <button type="button" className="btn btn-primary btn-block" onClick={action.onClick} disabled={action.disabled}>
+          {action.label}
+        </button>
+      </div>
+
+      <DestinationPicker
+        open={pickerOpen}
+        dests={m.dests}
+        sourceCount={m.sourceCount}
+        current={m.destination}
+        onPick={(id) => { m.setDestination(id); setPickerOpen(false); }}
+        onClose={() => setPickerOpen(false)}
+      />
+      <ConfirmDialog open={confirmOpen} model={m} onCancel={() => setConfirmOpen(false)} onConfirm={() => { setConfirmOpen(false); void m.sweep(); }} />
+    </section>
+  );
+}
+
+/** 0x 4B1c 9a7E ... for reading an address character by character */
+function chunk(address: string): string {
+  const body = address.replace(/^0x/i, '');
+  return `0x ${body.match(/.{1,4}/g)?.join(' ') ?? ''}`;
+}
+

@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Plugin } from 'vite';
 
 /** Base64 sha384 digest in the form an `integrity` attribute takes */
@@ -25,21 +27,25 @@ export function addIntegrity(html: string, files: Map<string, string | Uint8Arra
   });
 }
 
-/** Vite plugin: Subresource Integrity on the built HTML */
+/**
+ * Vite plugin: Subresource Integrity on the built HTML. Runs after the files
+ * are written and hashes them as they are on disk: Vite still rewrites
+ * chunks (preload helpers for dynamic imports) after generateBundle, so a
+ * hash taken earlier can be wrong. scripts/check-dist.mjs re-verifies.
+ */
 export function sri(): Plugin {
   return {
     name: 'zerodust-sri',
     apply: 'build',
     enforce: 'post',
-    generateBundle(_options, bundle) {
-      const files = new Map<string, string | Uint8Array>();
-      for (const [fileName, output] of Object.entries(bundle)) {
-        files.set(fileName, output.type === 'chunk' ? output.code : output.source);
-      }
-      for (const output of Object.values(bundle)) {
-        if (output.type === 'asset' && output.fileName.endsWith('.html')) {
-          output.source = addIntegrity(String(output.source), files);
-        }
+    writeBundle(options, bundle) {
+      const dir = options.dir!;
+      const files = new Map<string, Uint8Array>();
+      for (const fileName of Object.keys(bundle)) files.set(fileName, readFileSync(join(dir, fileName)));
+      for (const fileName of Object.keys(bundle)) {
+        if (!fileName.endsWith('.html')) continue;
+        const path = join(dir, fileName);
+        writeFileSync(path, addIntegrity(readFileSync(path, 'utf8'), files));
       }
     },
   };
