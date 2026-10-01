@@ -1,0 +1,125 @@
+import { expect, test, type Page } from '@playwright/test';
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
+import { mockNetwork } from './fixtures';
+
+/** Every place a key could leak to: DOM, input values, storage, requests, console */
+async function watchForKey(page: Page, key: string) {
+  const bare = key.slice(2).toLowerCase();
+  const leaks: string[] = [];
+  page.on('request', (r) => {
+    const text = `${r.url()} ${r.postData() ?? ''}`.toLowerCase();
+    if (text.includes(bare)) leaks.push(`request to ${r.url()}`);
+  });
+  page.on('console', (m) => {
+    if (m.text().toLowerCase().includes(bare)) leaks.push('console');
+  });
+  const cspViolations: string[] = [];
+  page.on('console', (m) => {
+    if (/Content Security Policy|Refused to/.test(m.text())) cspViolations.push(m.text());
+  });
+  return {
+    leaks,
+    cspViolations,
+    async checkPage() {
+      const found = await page.evaluate((k) => {
+        const html = document.documentElement.outerHTML.toLowerCase();
+        const inputs = [...document.querySelectorAll('input')].map((i) => i.value.toLowerCase()).join(' ');
+        const storage = JSON.stringify({ ...localStorage, ...sessionStorage }).toLowerCase();
+        return [html.includes(k) && 'DOM', inputs.includes(k) && 'input value', storage.includes(k) && 'storage'].filter(Boolean);
+      }, bare);
+      leaks.push(...(found as string[]));
+    },
+  };
+}
+
+test('the key never reaches the DOM, storage, a request or the console', async ({ page }) => {
+  const key = generatePrivateKey();
+  const address = privateKeyToAccount(key).address;
+  await mockNetwork(page, address);
+  const watch = await watchForKey(page, key);
+
+  await page.goto('/');
+  const input = page.locator('.keyfield input');
+  await input.focus();
+  await page.keyboard.type(key, { delay: 2 });
+  await expect(page.locator('#key-count')).toHaveText('66 characters');
+  expect(await input.inputValue()).toBe('');
+  await watch.checkPage();
+
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'Sweep' })).toBeVisible();
+  await expect(page.locator('.wallet-line')).toContainText(address);
+  await expect(page.locator('.row')).toHaveCount(3);
+  await watch.checkPage();
+
+  expect(watch.leaks).toEqual([]);
+  expect(watch.cspViolations).toEqual([]);
+});
+
+test('pasting a key wipes the clipboard', async ({ page, context, browserName }) => {
+  test.skip(browserName !== 'chromium', 'clipboard permissions');
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const key = generatePrivateKey();
+  await mockNetwork(page, privateKeyToAccount(key).address);
+  await page.goto('/');
+  await page.evaluate((k) => navigator.clipboard.writeText(k), key);
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.press('ControlOrMeta+V');
+  await expect(page.locator('.wallet-line')).toContainText('Clipboard wiped.');
+  // The site's Permissions-Policy blocks clipboard reads, so read it from a
+  // helper page served without that policy
+  const reader = await context.newPage();
+  await reader.route('http://localhost:4175/__clipboard', (r) => r.fulfill({ contentType: 'text/html', body: '<p>clipboard</p>' }));
+  await reader.goto('http://localhost:4175/__clipboard');
+  expect(await reader.evaluate(() => navigator.clipboard.readText())).toBe('');
+});
+
+test('rejects something that is not a key, without echoing it', async ({ page }) => {
+  await mockNetwork(page, privateKeyToAccount(generatePrivateKey()).address);
+  await page.goto('/');
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.type('abc123');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('alert')).toHaveText(/not a private key/);
+  await expect(page.locator('#key-count')).toHaveText('Paste or type');
+});
+
+test('sweeps sponsored chains to one destination, burning a chain with no route', async ({ page }) => {
+  const key = generatePrivateKey();
+  const address = privateKeyToAccount(key).address;
+  const { swept } = await mockNetwork(page, address);
+  const watch = await watchForKey(page, key);
+
+  await page.goto('/');
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.row')).toHaveCount(3);
+
+  // No default destination: the button asks for one
+  await page.getByRole('button', { name: 'Choose where it goes' }).click();
+  await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /Arbitrum/ }).click();
+
+  // Scroll has no route out: choose burn
+  await page.getByRole('button', { name: /No route: choose/ }).click();
+  await page.getByRole('button', { name: /^Burn all/ }).click();
+  await expect(page.getByText('Burn all, not received')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Check sweep' }).click();
+  await expect(page.getByRole('button', { name: 'Sweep 3 chains' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.summary')).toContainText('You receive');
+  expect(swept.size).toBe(0);
+
+  await page.getByRole('button', { name: 'Sweep 3 chains' }).click();
+  const confirm = page.getByRole('dialog', { name: /Sweep 3 chains to Arbitrum/ });
+  await expect(confirm).toContainText('Scroll:');
+  await expect(confirm).toContainText('is burned. You will not receive it.');
+  await confirm.getByRole('button', { name: 'Sweep 3 chains' }).click();
+
+  await expect(page.getByText('3 of 3 at zero')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.done-zero')).toHaveCount(3);
+  expect([...swept].sort()).toEqual([10, 534352, 8453].sort());
+  await watch.checkPage();
+  expect(watch.leaks).toEqual([]);
+  expect(watch.cspViolations).toEqual([]);
+});

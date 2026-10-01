@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
-import { sri } from './build/sri';
+import { sri } from './build/sri.ts';
 
 // The production security headers live in vercel.json; `vite preview` serves
 // the same ones, so a CSP violation shows up locally before it ships.
