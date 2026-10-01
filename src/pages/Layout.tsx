@@ -23,11 +23,11 @@ export function StaticNav() {
   );
 }
 
-export function StaticPage({ children }: { children: ReactNode }) {
+export function StaticPage({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return (
     <>
       <StaticNav />
-      <main className="doc">{children}</main>
+      <main className={wide ? 'page-wide' : 'doc'}>{children}</main>
       <footer className="foot">
         <span>ZeroDust</span>
         <span className="foot-links">

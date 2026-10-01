@@ -39,7 +39,7 @@ machine.
 - `src/` the page (`App.tsx`, `components/`, `styles/tokens.css` for the palette)
 - `build/` Vite plugins (SRI)
 - `scripts/` build checks and the build hash
-- `content/docs/` developer docs from the previous site, to be carried over
+- `content/docs/` developer docs and `content/legal/` terms and privacy, Markdown rendered at build time
 - `public/` static files served as is (`llms.txt`, `openapi.json`, `.well-known/`)
 - `src/direct/` direct chains: plan client, independent plan checks, in-page fork replay
   (ethereumjs), signing and broadcast to the chain's RPC
