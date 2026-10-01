@@ -28,7 +28,7 @@ export function RightPanel() {
   return (
     <aside className="side">
       <details className="fold">
-        <summary><span>Fees</span><span className="gist">1% per chain, max $0.50</span></summary>
+        <summary><span>Fees</span><span className="gist">5% under $1, then 1% ($0.05 to $0.50)</span></summary>
         <dl>
           <dt>$1 or more</dt><dd>1%, $0.05 to $0.50</dd>
           <dt>Under $1</dt><dd>5%</dd>
