@@ -41,6 +41,8 @@ machine.
 - `scripts/` build checks and the build hash
 - `content/docs/` developer docs from the previous site, to be carried over
 - `public/` static files served as is (`llms.txt`, `openapi.json`, `.well-known/`)
+- `src/direct/` direct chains: plan client, independent plan checks, in-page fork replay
+  (ethereumjs), signing and broadcast to the chain's RPC
 - `src/chains/rpcs.ts` the public RPC per chain the page reads from. Each passed
   `scripts/probe-rpcs.mjs` (CORS for the site, right chain ID, the read calls answer); every host
   must also be in the CSP's `connect-src` (`tests/csp-hosts.test.ts` fails otherwise).

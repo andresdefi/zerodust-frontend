@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
-import type { Row, SweepModel } from '../sweep/useSweep';
+import { isExit, type Row, type SweepModel } from '../sweep/useSweep';
 
 /** Last stop before anything is sent: every chain, its amount, and any burn or donation spelled out */
 export function ConfirmDialog({ open, model: m, onCancel, onConfirm }: {
@@ -22,7 +22,8 @@ export function ConfirmDialog({ open, model: m, onCancel, onConfirm }: {
     const usd = formatUsd(usdValue(r.balance, r.decimals, m.prices[r.token]));
     return `${formatAmount(r.balance, r.decimals)} ${r.token}${usd ? ` (${usd})` : ''}`;
   };
-  const routed = m.readyRows.filter((r) => !m.choices[r.chainId]);
+  const routed = m.readyRows.filter((r) => !m.choices[r.chainId] || isExit(m.choices[r.chainId]));
+  const exits = m.readyRows.filter((r) => isExit(m.choices[r.chainId]));
   const burned = m.readyRows.filter((r) => m.choices[r.chainId] === 'burn');
   const donated = m.readyRows.filter((r) => m.choices[r.chainId] === 'donate');
   const dest = m.destRow;
@@ -36,6 +37,7 @@ export function ConfirmDialog({ open, model: m, onCancel, onConfirm }: {
       <ul className="dlist">
         {routed.map((r) => <li key={r.chainId}><span>{r.name}</span><span>{amount(r)}</span></li>)}
       </ul>
+      {exits.map((r) => <p key={r.chainId} className="donate-note">{r.name}: swapped out through LI.FI; the few cents of gas reserve left are {m.choices[r.chainId] === 'exit-burn' ? 'burned' : 'donated to ZeroDust'}.</p>)}
       {burned.map((r) => <p key={r.chainId} className="burn-note">{r.name}: {amount(r)} is burned. You will not receive it.</p>)}
       {donated.map((r) => <p key={r.chainId} className="donate-note">{r.name}: {amount(r)} is donated to ZeroDust. You will not receive it.</p>)}
       {dest && routed.length > 0 && (
