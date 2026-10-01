@@ -4,7 +4,6 @@ import { expect, test } from '@playwright/test';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { mockNetwork } from './fixtures';
 
-const OUT = '/Users/bastianvidela/ZeroDust/design/prototype/shots/pr5';
 
 test('static pages render with their only script, under the site CSP', async ({ page }) => {
   const csp: string[] = [];
@@ -12,7 +11,6 @@ test('static pages render with their only script, under the site CSP', async ({ 
   for (const name of ['security', 'offline']) {
     await page.goto(`/${name}.html`);
     await expect(page.locator('h1')).toBeVisible();
-    await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: true });
   }
   await page.goto('/security.html');
   // The build record fills the site hash
@@ -39,6 +37,5 @@ test('the offline file matches its published hash and runs from disk under its o
   await expect(page.locator('.row')).toHaveCount(4);
   // Logos travel inside the file
   expect(await page.locator('img.ci').first().getAttribute('src')).toMatch(/^data:image\/svg\+xml/);
-  await page.screenshot({ path: `${OUT}/offline-file.png`, fullPage: true });
   expect(csp).toEqual([]);
 });
