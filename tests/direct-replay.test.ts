@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { checkReplay, etherlinkInclusionGas, hardforkFor, pragueFloorGas, replay } from '../src/direct/replay';
+import { checkReplay, etherlinkInclusionGas, GASLIMIT_MAX_OVER_USED, hardforkFor, pragueFloorGas, replay } from '../src/direct/replay';
 import type { PlanTx } from '../src/direct/plan';
 
 const FROM = '0x1111111111111111111111111111111111111111';
@@ -7,6 +7,9 @@ const TO = '0x2222222222222222222222222222222222222222';
 const PRICE = 25_000_000_000n;
 const BALANCE = 10n ** 17n;
 const hex = (n: bigint | number) => `0x${n.toString(16)}`;
+
+/** A contract that only returns (STOP): a deposit target whose execution costs nothing past intrinsic gas */
+const CONTRACT = '0x3333333333333333333333333333333333333333';
 
 /** A chain's public RPC, offline: one funded wallet, everything else empty */
 function fakeRpc() {
@@ -17,7 +20,7 @@ function fakeRpc() {
         case 'eth_getBlockByNumber': return { number: hex(1000), timestamp: hex(1_800_000_000), gasLimit: hex(30_000_000) };
         case 'eth_getBalance': return hex(String(params[0]).toLowerCase() === FROM ? BALANCE : 0n);
         case 'eth_getTransactionCount': return hex(String(params[0]).toLowerCase() === FROM ? 4 : 0);
-        case 'eth_getCode': return '0x';
+        case 'eth_getCode': return String(params[0]).toLowerCase() === CONTRACT ? '0x00' : '0x';
         case 'eth_getStorageAt': return hex(0);
         default: throw new Error(`unexpected ${method}`);
       }
@@ -68,6 +71,58 @@ describe('checkReplay', () => {
     const txs = [{ ...transfer(21_000n + inclusion), gasPrice: price.toString() }];
     expect(() => checkReplay(42793, txs, { results: [ok(21_000n)], after: inclusion * price }, null)).not.toThrow();
     expect(() => checkReplay(42793, txs, { results: [ok(21_000n)], after: 0n }, null)).toThrow(/keep/);
+  });
+});
+
+describe('replay: chains that charge the whole gas limit (Monad)', () => {
+  const MONAD = 143;
+  const FEE = 10n ** 15n;
+  /** fee transfer (21,000) + a call with a limit above what it uses, spending BALANCE to the wei */
+  const set = (callGas: bigint, valueDelta = 0n): PlanTx[] => {
+    const value = BALANCE - FEE - 21_000n * PRICE - callGas * PRICE + valueDelta;
+    return [
+      { kind: 'fee', to: TO, data: '0x', gas: '21000', gasPrice: PRICE.toString(), nonce: 4, value: FEE.toString() },
+      { kind: 'sweep', to: CONTRACT, data: '0xabcdef', gas: callGas.toString(), gasPrice: PRICE.toString(), nonce: 5, value: value.toString() },
+    ];
+  };
+
+  it('accepts a set whose arithmetic is exact even though the fork refunds the unused gas', async () => {
+    vi.stubGlobal('fetch', fakeRpc());
+    const txs = set(60_000n);
+    const r = await replay(MONAD, FROM, txs);
+    const used = r.results[1]!.gasUsed;
+    expect(used).toBeLessThan(60_000n);
+    // The fork gave back (limit - used) x price; on Monad the wallet ends at 0
+    expect(r.after).toBe((60_000n - used) * PRICE);
+    expect(() => checkReplay(MONAD, txs, r, null)).not.toThrow();
+    // The same replay on an exact-gas chain is dust
+    expect(() => checkReplay(43114, txs, r, null)).toThrow(/not its limit/);
+  });
+
+  it('refuses a set that does not spend the balance exactly (the wallet would keep wei)', async () => {
+    vi.stubGlobal('fetch', fakeRpc());
+    const txs = set(60_000n, -1n);
+    const r = await replay(MONAD, FROM, txs);
+    expect(() => checkReplay(MONAD, txs, r, null)).toThrow(/keep 1 wei/);
+  });
+
+  it('refuses a limit below what the call uses, or far above it', async () => {
+    const txs = set(60_000n);
+    const used = (n: bigint) => ({ ok: true, gasUsed: n });
+    expect(() => checkReplay(MONAD, txs, { results: [used(21_000n), used(60_001n)], after: 0n }, null)).toThrow(/over its limit/);
+    vi.stubGlobal('fetch', fakeRpc());
+    const wasteful = set(1_000_000n);
+    const r = await replay(MONAD, FROM, wasteful);
+    expect(BigInt(wasteful[1]!.gas)).toBeGreaterThan(r.results[1]!.gasUsed * GASLIMIT_MAX_OVER_USED);
+    expect(() => checkReplay(MONAD, wasteful, r, null)).toThrow(/asks for 1000000 gas/);
+  });
+
+  it('swap exit: the leftover is judged without the fork\'s refunds', () => {
+    const txs = set(60_000n);
+    const results = [{ ok: true, gasUsed: 21_000n }, { ok: true, gasUsed: 40_000n }];
+    const refunds = 20_000n * PRICE;
+    expect(() => checkReplay(MONAD, txs, { results, after: refunds + 5n }, { leftoverMax: 5n })).not.toThrow();
+    expect(() => checkReplay(MONAD, txs, { results, after: refunds + 6n }, { leftoverMax: 5n })).toThrow(/more than planned/);
   });
 });
 

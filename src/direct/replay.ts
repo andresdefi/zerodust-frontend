@@ -6,7 +6,7 @@ import { createAccount, createAddressFromString, hexToBytes, KECCAK256_NULL, KEC
 import { createVM, runTx } from '@ethereumjs/vm';
 import { keccak256 } from 'viem';
 import { DIRECT_RPC_URLS } from '../chains/rpcs';
-import type { PlanTx } from './plan';
+import { GASLIMIT_CHAINS, type PlanTx } from './plan';
 
 // The local sweeper replays every signed set on an anvil fork before sending.
 // A browser cannot run anvil and the public RPCs cannot simulate, so the page
@@ -95,15 +95,46 @@ export function etherlinkInclusionGas(data: string, gasPrice: bigint): bigint {
 export const ETHERLINK = 42793;
 
 /**
+ * A contract call's limit may be at most this many times what the fork used.
+ * The chain's own gas schedule can price a call higher than the fork's
+ * Ethereum one (Monad's estimate for an Across deposit: 726,807; the same
+ * call on an Ethereum-priced fork: 400,947), and the planner adds 25%; past
+ * that, a limit only wastes the wallet's money.
+ */
+export const GASLIMIT_MAX_OVER_USED = 4n;
+
+/**
  * What a replay must show before the set is signed. Exact sets: every
  * transaction uses exactly its gas and the wallet ends at 0. Swap exits:
  * nothing reverts and what is left fits the planned leftover.
+ *
+ * Chains that charge the whole gas limit (GASLIMIT_CHAINS): the fork refunds
+ * unused gas and the chain does not, so gasUsed may be below the limit; the
+ * wallet ends at 0 on-chain because verifyPlan already required
+ * sum(value) + sum(limit x price) == balance. Here every transaction must
+ * succeed within its limit, and the fork must keep exactly the refunds it gave.
  */
 export function checkReplay(chainId: number, txs: PlanTx[], r: ReplayResult, exit: { leftoverMax: bigint } | null): void {
   const fail = (why: string): never => { throw new Error(`Replay refused the set: ${why}`); };
   r.results.forEach((x, i) => {
     if (!x.ok) fail(`transaction ${i + 1} reverts (${x.error ?? 'unknown'})`);
   });
+  if (GASLIMIT_CHAINS.has(chainId)) {
+    let refunded = 0n;
+    r.results.forEach((x, i) => {
+      const t = txs[i]!;
+      const limit = BigInt(t.gas);
+      if (x.gasUsed > limit) fail(`transaction ${i + 1} would use ${x.gasUsed} gas, over its limit ${t.gas}`);
+      if (t.data !== '0x' && limit > x.gasUsed * GASLIMIT_MAX_OVER_USED) fail(`transaction ${i + 1} asks for ${t.gas} gas but uses ${x.gasUsed}`);
+      refunded += (limit - x.gasUsed) * BigInt(t.gasPrice);
+    });
+    if (exit) {
+      if (r.after - refunded > exit.leftoverMax) fail('the swap would leave more than planned');
+      return;
+    }
+    if (r.after !== refunded) fail(`the wallet would keep ${r.after - refunded} wei`);
+    return;
+  }
   if (exit) {
     if (r.after > exit.leftoverMax) fail('the swap would leave more than planned');
     return;

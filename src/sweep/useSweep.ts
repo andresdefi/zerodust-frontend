@@ -350,7 +350,7 @@ export function useSweep(account: LocalAccount) {
       const sent = await broadcast(plan, await signPlan(account, plan), (h) => { hash = h; });
       if (sent.feePaidTx) feePaid.current[row.chainId] = sent.feePaidTx;
       if (!sent.ok) {
-        update({ phase: 'failed', detail: 'A transaction reverted or did not confirm' });
+        update({ phase: 'failed', detail: sent.reason ?? 'A transaction reverted or did not confirm' });
         return;
       }
       if (mode === 'exit') {

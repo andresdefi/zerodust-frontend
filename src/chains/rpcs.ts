@@ -71,4 +71,6 @@ export const DIRECT_RPC_URLS: Record<number, string> = {
   14: 'https://flare-api.flare.network/ext/C/rpc',
   30: 'https://public-node.rsk.co',
   5064014: 'https://rpc.ethereal.trade',
+  // Monad: passed probe-rpcs on 2026-10-02
+  143: 'https://rpc.monad.xyz',
 };

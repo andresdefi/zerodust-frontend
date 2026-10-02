@@ -14,7 +14,21 @@ export const RELAY_DEPOSIT_NATIVE = '0x49290c1c';
 /** LI.FI's contract (the same address on the chains it serves) */
 export const LIFI_DIAMOND = '0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE';
 
-export type DirectRoute = 'gaszip' | 'relay' | 'transfer' | 'burn' | 'donate' | 'lifi';
+/**
+ * Chains that charge gasLimit x gasPrice and refund nothing (the API's kind
+ * 'gaslimit'): any sufficient limit leaves exactly 0. Pinned here, not taken
+ * from the API: on a chain that refunds, a plan checked this way would leave
+ * dust. The page refuses a plan when /direct/chains disagrees.
+ */
+export const GASLIMIT_CHAINS: ReadonlySet<number> = new Set([143]);
+/**
+ * Monad's reserve rule: a transaction that takes the wallet below 10 MON
+ * reverts unless no other transaction from it landed in the past 3 blocks,
+ * so each transaction waits this many blocks after the previous one's block.
+ */
+export const TX_GAP_BLOCKS: Readonly<Record<number, number>> = { 143: 4 };
+
+export type DirectRoute = 'gaszip' | 'relay' | 'across' | 'transfer' | 'burn' | 'donate' | 'lifi';
 export type PlanMode = 'route' | 'burn' | 'donate' | 'exit';
 
 export interface PlanTx {
@@ -40,6 +54,10 @@ export interface DirectPlan {
   balance: string;
   leftoverMax?: string;
   tool?: string;
+  /** Chains with a reserve rule (Monad): blocks between transactions (the page uses its own TX_GAP_BLOCKS) */
+  txGapBlocks?: number;
+  /** Across: unix seconds after which the deposit reverts; the page recomputes it from the calldata */
+  expiresAt?: number;
 }
 
 export interface DirectChainInfo {
@@ -49,6 +67,9 @@ export interface DirectChainInfo {
   decimals: number;
   explorerUrl: string;
   rpcUrl: string;
+  /** The chain's gas rule: evm, arbitrum, etherlink or gaslimit */
+  kind?: string;
+  txGapBlocks?: number;
 }
 
 export interface DirectBalance {
@@ -89,9 +110,15 @@ export const preparePlan = (t: Target & { mode: Exclude<PlanMode, 'exit'>; feePa
 
 export const prepareExit = (t: Target & { feePaidTx?: string }) => get<DirectPlan>('exit', { ...t });
 
-/** Polls a bridge; `quoted` lets the API record delivered vs quoted (no address or hash is stored) */
+/**
+ * Polls a bridge; `quoted` lets the API record delivered vs quoted (no address
+ * or hash is stored). Across looks deposits up by origin chain, so it always
+ * gets fromChainId.
+ */
 export const deliveryStatus = (plan: DirectPlan, hash: string, toChainId?: number) =>
   get<{ state: 'pending' | 'delivered' | 'failed'; destTx?: string }>('status', {
     route: plan.route, hash, requestId: plan.requestId ?? undefined,
-    quoted: plan.quoted, fromChainId: plan.quoted ? plan.chainId : undefined, toChainId: plan.quoted ? toChainId : undefined,
+    quoted: plan.quoted,
+    fromChainId: plan.quoted || plan.route === 'across' ? plan.chainId : undefined,
+    toChainId: plan.quoted ? toChainId : undefined,
   });
