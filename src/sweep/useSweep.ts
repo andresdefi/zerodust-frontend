@@ -473,6 +473,17 @@ export function useSweep(account: LocalAccount) {
 export type SweepModel = ReturnType<typeof useSweep>;
 
 /** Errors that mean no bridge can take this chain to the destination (not transient ones) */
+/**
+ * What a chain row says when it cannot be swept: the same plain words on every
+ * chain, whatever the method behind it (the raw reason stays in a tooltip)
+ */
+export function plainReason(detail: string, token: string, chain: string): string {
+  if (isNoRoute(detail)) return `No bridge takes ${token} out of ${chain} right now`;
+  if (/does not cover|INSUFFICIENT|too small/i.test(detail)) return 'Too small to cover its own transfer';
+  if (/refused|unsafe|safety/i.test(detail)) return 'Stopped before signing: the plan failed a safety check';
+  return 'Could not check this chain right now. Try again in a moment.';
+}
+
 export function isNoRoute(message: string): boolean {
   return /Chain Disabled|Limit Exceeded|not supported|no routes|does not deliver|router call|Insuf+icient Liquidity|No bridge|NO_ROUTE/i.test(message);
 }

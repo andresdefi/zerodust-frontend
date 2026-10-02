@@ -8,7 +8,7 @@ import { WalletHead } from './WalletHead';
 import { ChevronIcon, DownIcon, PencilIcon, RefreshIcon } from './icons';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
 import { serviceFeeUsd } from '../lib/fees';
-import { isExit, type Choice, type Row, type SweepModel } from '../sweep/useSweep';
+import { isExit, plainReason, type Choice, type Row, type SweepModel } from '../sweep/useSweep';
 
 const CHOICES: Record<Choice | 'leave', { label: string; text: (amount: string, dest: string) => string; danger?: boolean; quiet?: boolean }> = {
   'exit-donate': { label: 'Swap out', text: (_a, d) => `Swap to a token a bridge takes, then send it to ${d}. The few cents of gas reserve left are donated to ZeroDust.` },
@@ -134,7 +134,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                   aria-label={`Sweep ${r.name}`}
                 />
                 <ChainIcon chainId={r.chainId} name={r.name} />
-                <span className="name"><span className="name-line">{r.name}{r.direct && <span className="tag" title="No sponsor here: the wallet pays its own gas out of the balance, in exact transactions">direct</span>}</span></span>
+                <span className="name"><span className="name-line">{r.name}</span></span>
                 <span className="right">
                   {formatUsd(rowUsd(r)) || '-'}
                   <span className="bal">
@@ -144,11 +144,8 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                 </span>
                 {isDest && <span className="detail muted">Destination chain: nothing to move</span>}
                 {!r.canSweep && <span className="detail muted">Too small to sweep</span>}
-                {st?.phase === 'quoting' && <span className="detail muted">{st.detail ?? 'Checking route…'}</span>}
-                {r.direct && st?.fee !== undefined && st.fee > 0n && st.phase === 'ready' && (
-                  <span className="detail muted">You pay this chain's gas from the balance. ZeroDust fee {formatAmount(st.fee, r.decimals)} {r.token}{formatUsd(usdValue(st.fee, r.decimals, price(r.token))) && ` (${formatUsd(usdValue(st.fee, r.decimals, price(r.token)))})`}</span>
-                )}
-                {st?.phase === 'no-route' && !needs && <span className="detail warn-text">{st.detail}</span>}
+                {st?.phase === 'quoting' && <span className="detail muted">Checking…</span>}
+                {st?.phase === 'no-route' && !needs && <span className="detail warn-text" title={st.detail}>{plainReason(st.detail ?? '', r.token, r.name)}</span>}
                 {needs && (
                   <span className="detail split">
                     <span className="warn-text">{blocked ?? st?.detail}</span>
