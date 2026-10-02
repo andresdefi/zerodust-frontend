@@ -88,7 +88,7 @@ Whether a bridge can take the balance to a destination right now. Quotes only.
 
 Response:
 
-- `{ "available": true }`: Gas.zip, Relay or (on gas-limit chains) Across has a route.
+- `{ "available": true }`: Gas.zip or Relay has a route.
 - `{ "available": false, "exit": true, "reason": "..." }`: no direct route, but a swap-then-bridge exit (`/direct/exit`) exists. `exit: false` means neither exists.
 - `{ "available": null, "reason": "..." }`: a bridge did not answer; try again. Also `{ "available": null }` when the balance is 0.
 
@@ -102,7 +102,7 @@ The unsigned transactions that take the chain to exactly 0.
 | `mode` | `route` (default), `burn` or `donate` |
 | `feePaidTx` | Optional hash of an earlier fee transaction |
 
-- `route`: an optional fee transaction, then the sweep. Same chain (`toChainId` = `chainId`) is a plain transfer to `recipient`, which must not be `from`. Cross-chain asks Gas.zip and Relay, and Across on gas-limit chains, and keeps the larger output.
+- `route`: an optional fee transaction, then the sweep. Same chain (`toChainId` = `chainId`) is a plain transfer to `recipient`, which must not be `from`. Cross-chain asks Gas.zip and Relay and keeps the larger output.
 - `burn`: one transfer of everything to `0x000000000000000000000000000000000000dEaD`. `toChainId` and `recipient` are still required but not used.
 - `donate`: one transfer of everything to ZeroDust.
 
@@ -121,9 +121,9 @@ Response:
 | `txGapBlocks` | Gas-limit chains with a reserve rule (Monad): blocks to wait after each transaction's block before sending the next |
 | `expiresAt` | Across only: unix seconds after which the deposit reverts on-chain. Across quotes live about 30 seconds; never send the sweep after this |
 
-#### Across
+#### Across (not offered at the moment)
 
-Across is used only on gas-limit chains: its deposit runs a swap that would refund gas elsewhere. The sweep is one `swapAndBridge` call to Across's SpokePoolPeriphery (`0x97CCDBea4632140639aD5eA9b944aa034eb15fD4`): the native token is swapped and bridged, and on the destination Across's MulticallHandler swaps into the native gas token and sends it to `recipient`. Before signing, decode it and check at least: the SpokePool is Across's for the source chain, the depositor is `from`, the destination chain is `toChainId`, there is no submission fee, the deposit goes to Across's handler for the destination, the message's fallback recipient and every drain is `recipient`, no destination call carries value or moves a token except approving 0x's AllowanceHolder, the 0x swap pays the handler at least `receive`, and its Settler is 0x's registered one (`ownerOf(2)` or `prev(2)` on `0x00000000000004533Fe15556B1E086BB1A72cEae`). If the destination swap fails, Across refunds the deposit to `from` on the source chain (as USDC, not the native token).
+The API does not currently plan Across routes: Across moves these tokens through swaps on both ends, and a failed destination swap refunds USDC rather than the native token. If it is turned on, it is used only on gas-limit chains: its deposit runs a swap that would refund gas elsewhere. The sweep is one `swapAndBridge` call to Across's SpokePoolPeriphery (`0x97CCDBea4632140639aD5eA9b944aa034eb15fD4`): the native token is swapped and bridged, and on the destination Across's MulticallHandler swaps into the native gas token and sends it to `recipient`. Before signing, decode it and check at least: the SpokePool is Across's for the source chain, the depositor is `from`, the destination chain is `toChainId`, there is no submission fee, the deposit goes to Across's handler for the destination, the message's fallback recipient and every drain is `recipient`, no destination call carries value or moves a token except approving 0x's AllowanceHolder, the 0x swap pays the handler at least `receive`, and its Settler is 0x's registered one (`ownerOf(2)` or `prev(2)` on `0x00000000000004533Fe15556B1E086BB1A72cEae`). If the destination swap fails, Across refunds the deposit to `from` on the source chain (as USDC, not the native token).
 
 Before signing, check that the plan is what you asked for and that the sum of `value + gas x gasPrice` over `txs` equals `balance` and the wallet's current balance. Then sign and broadcast the transactions in order to the chain's RPC. If the balance changed, request a new plan.
 

@@ -181,6 +181,7 @@ test('refuses a direct plan that pays someone else, and sends nothing', async ({
   expect(sent).toEqual([]);
 });
 
+// The API does not offer Across (owner, 2026-10-02); the page still verifies one if it ever arrives
 test('sweeps Monad through Across: gas-limit rules, deposit decoded and its Settler checked in the page', async ({ page }) => {
   const key = generatePrivateKey();
   const { swept, sent } = await mockNetwork(page, privateKeyToAccount(key).address, { monad: true });
@@ -191,7 +192,7 @@ test('sweeps Monad through Across: gas-limit rules, deposit decoded and its Sett
   await page.keyboard.press('Enter');
   await expect(page.locator('.row')).toHaveCount(4);
   const monad = page.locator('.row', { hasText: 'Monad' });
-  await expect(monad.locator('.tag')).toHaveText('direct');
+  await expect(monad.locator('.tag')).toHaveCount(0);
   for (const name of ['Base', 'Optimism', 'Scroll']) await page.getByRole('checkbox', { name: `Sweep ${name}` }).uncheck();
   await page.getByRole('button', { name: 'Choose where it goes' }).click();
   await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^Base/ }).click();
@@ -221,7 +222,9 @@ test('refuses an Across plan whose deposit pays someone else, and sends nothing'
   await page.getByRole('button', { name: 'Choose where it goes' }).click();
   await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^Base/ }).click();
   await page.getByRole('button', { name: 'Check sweep' }).click();
-  await expect(page.locator('.row', { hasText: 'Monad' })).toContainText('Plan refused: Across deposit refused: the fallback recipient is not the address you set', { timeout: 30_000 });
+  const refused = page.locator('.row', { hasText: 'Monad' }).locator('.warn-text');
+  await expect(refused).toHaveText('Stopped before signing: the plan failed a safety check', { timeout: 30_000 });
+  await expect(refused).toHaveAttribute('title', /Across deposit refused: the fallback recipient is not the address you set/);
   await expect(page.getByRole('button', { name: /^Sweep \d/ })).toHaveCount(0);
   expect(sent).toEqual([]);
 });
