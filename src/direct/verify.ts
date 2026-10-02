@@ -1,4 +1,5 @@
-import { BURN_ADDRESS, GASZIP_DEPOSIT, LIFI_DIAMOND, RELAY_DEPOSIT_NATIVE, ZERODUST_ADDRESS, type DirectPlan, type PlanMode } from './plan';
+import { verifyAcrossDeposit } from './across';
+import { BURN_ADDRESS, GASLIMIT_CHAINS, GASZIP_DEPOSIT, LIFI_DIAMOND, RELAY_DEPOSIT_NATIVE, ZERODUST_ADDRESS, type DirectPlan, type PlanMode } from './plan';
 
 // The API is untrusted input: before anything is signed, the page checks the
 // plan against what the owner asked for and against chain state it read
@@ -25,8 +26,15 @@ export function totalSpend(plan: Pick<DirectPlan, 'txs'>): bigint {
 /** The service fee is at most 5% of the balance (the schedule's highest rate) */
 export const MAX_FEE_SHARE = 20n; // 1/20 = 5%
 
-export function verifyPlan(plan: DirectPlan, ctx: PlanContext): void {
+/** What the caller still has to confirm on-chain or in time before signing */
+export interface PlanChecks {
+  /** Across: the destination swap's 0x Settler (confirm in 0x's registry) and when the deposit expires */
+  across?: { settler: string; expiresAt: number };
+}
+
+export function verifyPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
   const fail = (why: string): never => { throw new Error(`Plan refused: ${why}`); };
+  const gasLimitChain = GASLIMIT_CHAINS.has(ctx.chainId);
   if (plan.chainId !== ctx.chainId) fail('it is for another chain');
   if (plan.txs.length < 1 || plan.txs.length > 2) fail('expected one or two transactions');
   if (BigInt(plan.balance) !== ctx.balance) fail('the balance changed since it was planned; check again');
@@ -37,6 +45,8 @@ export function verifyPlan(plan: DirectPlan, ctx: PlanContext): void {
     if (BigInt(t.gasPrice) !== price || price <= 0n) fail('gas prices differ');
     if (BigInt(t.gas) < 21_000n || BigInt(t.value) < 0n) fail('a transaction has impossible gas or value');
     if (t.kind === 'fee' && i !== 0) fail('the fee must come first');
+    // A chain that charges the whole limit: a plain transfer is exactly 21,000, never more
+    if (gasLimitChain && t.data === '0x' && BigInt(t.gas) !== 21_000n) fail('a plain transfer asks for more than 21,000 gas');
   });
 
   const [first] = plan.txs;
@@ -61,14 +71,14 @@ export function verifyPlan(plan: DirectPlan, ctx: PlanContext): void {
   switch (ctx.mode) {
     case 'burn':
       if (plan.route !== 'burn' || !eq(last.to, BURN_ADDRESS) || last.data !== '0x') fail('the burn does not go to the burn address');
-      return;
+      return {};
     case 'donate':
       if (plan.route !== 'donate' || !eq(last.to, ZERODUST_ADDRESS) || last.data !== '0x') fail('the donation does not go to ZeroDust');
-      return;
+      return {};
     case 'exit':
       if (plan.route !== 'lifi' || last.kind !== 'swap' || !eq(last.to, LIFI_DIAMOND)) fail('the swap does not go to LI.FI\'s contract');
       if (ctx.toChainId === ctx.chainId) fail('a swap exit must leave the chain');
-      return;
+      return {};
     case 'route':
       break;
   }
@@ -76,7 +86,7 @@ export function verifyPlan(plan: DirectPlan, ctx: PlanContext): void {
   if (ctx.toChainId === ctx.chainId) {
     if (plan.route !== 'transfer' || !eq(last.to, ctx.recipient) || last.data !== '0x') fail('the transfer does not go to the address you set');
     if (eq(ctx.recipient, ctx.from)) fail('a same-chain sweep needs another address');
-    return;
+    return {};
   }
   if (plan.route === 'gaszip') {
     if (!eq(last.to, GASZIP_DEPOSIT)) fail('the deposit does not go to Gas.zip');
@@ -86,12 +96,26 @@ export function verifyPlan(plan: DirectPlan, ctx: PlanContext): void {
       ? /^0x01[0-9a-f]{4}$/i.test(last.data)
       : new RegExp(`^0x02${recipientBody}[0-9a-f]{4}$`, 'i').test(last.data);
     if (!ok) fail('the Gas.zip deposit does not name the address you set');
-    return;
+    return {};
   }
   if (plan.route === 'relay') {
     if (!last.data.toLowerCase().startsWith(RELAY_DEPOSIT_NATIVE)) fail('the Relay call is not a plain deposit');
     if (!eq(`0x${last.data.slice(34, 74)}`, ctx.from)) fail('the Relay deposit does not credit this wallet');
-    return;
+    return {};
   }
-  fail(`unknown route ${plan.route}`);
+  if (plan.route === 'across') {
+    // Its swap refunds gas, so only where the whole limit is charged does it leave exactly 0
+    if (!gasLimitChain) fail('Across is only used on chains that charge the whole gas limit');
+    if (BigInt(plan.receive) <= 0n) fail('it shows nothing arriving');
+    try {
+      const across = verifyAcrossDeposit(last, {
+        chainId: ctx.chainId, toChainId: ctx.toChainId, from: ctx.from, recipient: ctx.recipient,
+        value: BigInt(last.value), minNative: BigInt(plan.receive),
+      });
+      return { across };
+    } catch (error) {
+      return fail((error as Error).message);
+    }
+  }
+  return fail(`unknown route ${plan.route}`);
 }
