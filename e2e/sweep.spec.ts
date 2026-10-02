@@ -175,3 +175,48 @@ test('refuses a direct plan that pays someone else, and sends nothing', async ({
   await expect(page.getByRole('button', { name: /^Sweep \d/ })).toHaveCount(0);
   expect(sent).toEqual([]);
 });
+
+test('sweeps Monad through Across: gas-limit rules, deposit decoded and its Settler checked in the page', async ({ page }) => {
+  const key = generatePrivateKey();
+  const { swept, sent } = await mockNetwork(page, privateKeyToAccount(key).address, { monad: true });
+  const watch = await watchForKey(page, key);
+  await page.goto('/');
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.row')).toHaveCount(4);
+  const monad = page.locator('.row', { hasText: 'Monad' });
+  await expect(monad.locator('.tag')).toHaveText('direct');
+  for (const name of ['Base', 'Optimism', 'Scroll']) await page.getByRole('checkbox', { name: `Sweep ${name}` }).uncheck();
+  await page.getByRole('button', { name: 'Choose where it goes' }).click();
+  await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^Base/ }).click();
+  await page.getByRole('button', { name: 'Check sweep' }).click();
+  await expect(page.getByRole('button', { name: 'Sweep 1 chain' })).toBeVisible({ timeout: 30_000 });
+  expect(sent).toEqual([]);
+
+  await page.getByRole('button', { name: 'Sweep 1 chain' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Sweep 1 chain' }).click();
+  await expect(page.getByText('1 of 1 at zero')).toBeVisible({ timeout: 60_000 });
+  expect(sent).toHaveLength(2);
+  expect(swept.has(143)).toBe(true);
+  await watch.checkPage();
+  expect(watch.leaks).toEqual([]);
+  expect(watch.cspViolations).toEqual([]);
+});
+
+test('refuses an Across plan whose deposit pays someone else, and sends nothing', async ({ page }) => {
+  const key = generatePrivateKey();
+  const { sent } = await mockNetwork(page, privateKeyToAccount(key).address, { monad: true, tamper: true });
+  await page.goto('/');
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.row')).toHaveCount(4);
+  for (const name of ['Base', 'Optimism', 'Scroll']) await page.getByRole('checkbox', { name: `Sweep ${name}` }).uncheck();
+  await page.getByRole('button', { name: 'Choose where it goes' }).click();
+  await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^Base/ }).click();
+  await page.getByRole('button', { name: 'Check sweep' }).click();
+  await expect(page.locator('.row', { hasText: 'Monad' })).toContainText('Plan refused: Across deposit refused: the fallback recipient is not the address you set', { timeout: 30_000 });
+  await expect(page.getByRole('button', { name: /^Sweep \d/ })).toHaveCount(0);
+  expect(sent).toEqual([]);
+});

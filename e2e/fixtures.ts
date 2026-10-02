@@ -10,6 +10,7 @@ import type { Page, Route } from '@playwright/test';
 import { buildSweepIntentTypedData } from '@zerodust/sdk';
 import type { Address, Hex } from 'viem';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../src/chains/rpcs';
+import { ACROSS, acrossDepositData, addressWord } from '../tests/fixtures/across-direct';
 
 export const API = 'https://api.zerodust.xyz';
 const ZERODUST = '0x3732398281d0606aCB7EC1D490dFB0591BE4c4f2';
@@ -119,8 +120,41 @@ function avaxPlan(nonce: number) {
   };
 }
 
+/** A gas-limit direct chain (Monad) holding MONAD_BALANCE when `monad` is on, swept through Across */
+export const MONAD = 143;
+export const MONAD_BALANCE = 63n * 10n ** 18n;
+const MONAD_PRICE = 112_200_000_000n;
+
+/**
+ * The API's plan for Monad to Base: fee, then an Across swapAndBridge whose
+ * limit is above what the fork uses (Monad charges the whole limit), exact.
+ * The quote timestamp is as Across sets it: 3,570 s ago (30 s to live).
+ */
+function monadPlan(nonce: number, recipient: string, tamper: boolean) {
+  const fee = 10n ** 18n;
+  const gas = 200_000n;
+  const value = MONAD_BALANCE - fee - 21_000n * MONAD_PRICE - gas * MONAD_PRICE;
+  // A compromised API: the deposit's fallback and drains pay an attacker
+  const payTo = tamper ? `0x${'ba'.repeat(20)}` : recipient;
+  const data = acrossDepositData({ from: recipient, recipient: payTo, value, quoteTimestamp: nowSeconds() - 3570 });
+  return {
+    chainId: MONAD, route: 'across', requestId: null, receive: '714787782428686', quoted: '736894621060501', fee: fee.toString(), balance: MONAD_BALANCE.toString(),
+    txGapBlocks: 4,
+    txs: [
+      { kind: 'fee', to: ZERODUST_SPONSOR, data: '0x', value: fee.toString(), gas: '21000', gasPrice: MONAD_PRICE.toString(), nonce },
+      { kind: 'sweep', to: ACROSS.periphery, data, value: value.toString(), gas: gas.toString(), gasPrice: MONAD_PRICE.toString(), nonce: nonce + 1 },
+    ],
+  };
+}
+
 /** Everything the page may call, answered offline; returns what was swept */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; tamper?: boolean } = {}) {
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean } = {}) {
+  /** The funded direct chain, if any */
+  const DIRECT = opts.monad ? MONAD : AVAX;
+  const DIRECT_BALANCE = opts.monad ? MONAD_BALANCE : AVAX_BALANCE;
+  const directInfo = opts.monad
+    ? { chainId: MONAD, name: 'Monad', token: 'MON', decimals: 18, explorerUrl: 'https://monadvision.com' }
+    : { chainId: AVAX, name: 'Avalanche', token: 'AVAX', decimals: 18, explorerUrl: 'https://snowtrace.io' };
   const quotes = new Map<string, ReturnType<typeof quote> & { from: number; to: number }>();
   const swept = new Set<number>();
   const sweeps = new Map<string, { fromChainId: number; toChainId: number }>();
@@ -146,11 +180,20 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       return json(route, { fromChainId: from, destinations: CHAINS.filter((c) => c.chainId !== from).map((c) => ({ chainId: c.chainId, name: c.name, nativeSymbol: 'ETH', nativeDecimals: 18, bridges: ['relay'], zerodustChain: true })) });
     }
     if (path === '/prices') return json(route, { prices: { ETH: 2697.86 } });
-    if (path === '/direct/chains') return json(route, { chains: [{ chainId: AVAX, name: 'Avalanche', token: 'AVAX', decimals: 18, explorerUrl: 'https://snowtrace.io', rpcUrl: DIRECT_RPC_URLS[AVAX] }], prices: { AVAX: 25 } });
+    if (path === '/direct/chains') {
+      return json(route, {
+        chains: [
+          { chainId: AVAX, name: 'Avalanche', token: 'AVAX', decimals: 18, explorerUrl: 'https://snowtrace.io', rpcUrl: DIRECT_RPC_URLS[AVAX], kind: 'evm' },
+          { chainId: MONAD, name: 'Monad', token: 'MON', decimals: 18, explorerUrl: 'https://monadvision.com', rpcUrl: DIRECT_RPC_URLS[MONAD], kind: 'gaslimit', txGapBlocks: 4 },
+        ],
+        prices: { AVAX: 25, MON: 0.034 },
+      });
+    }
     if (path.startsWith('/direct/balances/')) {
-      return json(route, opts.direct ? [{ chainId: AVAX, name: 'Avalanche', token: 'AVAX', decimals: 18, explorerUrl: 'https://snowtrace.io', balance: (swept.has(AVAX) ? 0n : AVAX_BALANCE).toString() }] : []);
+      return json(route, opts.direct || opts.monad ? [{ ...directInfo, balance: (swept.has(DIRECT) ? 0n : DIRECT_BALANCE).toString() }] : []);
     }
     if (path === '/direct/route') return json(route, { available: true });
+    if (path === '/direct/prepare' && opts.monad) return json(route, monadPlan(directNonce, url.searchParams.get('recipient')!, !!opts.tamper));
     if (path === '/direct/prepare') {
       const plan = avaxPlan(directNonce);
       // A compromised API: the same amounts, but the deposit credits an attacker on Base
@@ -194,6 +237,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
   // The public RPCs: balance and nonce as the quotes expect; 0 once swept.
   // Direct chain (Avalanche): the page also replays on a fork and broadcasts here.
   let directNonce = 4;
+  let head = 1000;
   const sent: string[] = [];
   const rpcChains = new Map([...Object.entries(RPC_URLS), ...Object.entries(DIRECT_RPC_URLS)].map(([id, url]) => [new URL(url).origin, Number(id)]));
   await page.route((url) => rpcChains.has(url.origin), async (route) => {
@@ -202,16 +246,25 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     const body = route.request().postDataJSON() as { id: number; method: string; params?: unknown[] } | Array<{ id: number; method: string; params?: unknown[] }>;
     const answer = (r: { id: number; method: string; params?: unknown[] }) => {
       const isUser = String(r.params?.[0] ?? '').toLowerCase() === user.toLowerCase();
-      const direct = chainId === AVAX;
+      const direct = chainId === AVAX || chainId === MONAD;
       const balance = direct
-        ? (isUser && opts.direct && !swept.has(AVAX) ? AVAX_BALANCE : 0n)
+        ? (isUser && chainId === DIRECT && (opts.direct || opts.monad) && !swept.has(DIRECT) ? DIRECT_BALANCE : 0n)
         : (FUNDED.includes(chainId) && !swept.has(chainId) ? BALANCE : 0n);
       if (r.method === 'eth_sendRawTransaction') {
         sent.push(String(r.params![0]));
         directNonce += 1;
         // The sweep is the second transaction: after it the wallet is empty
-        if (sent.length === 2) swept.add(AVAX);
+        if (sent.length === 2) swept.add(DIRECT);
         return { jsonrpc: '2.0', id: r.id, result: `0x${sent.length.toString(16).padStart(64, '0')}` };
+      }
+      if (r.method === 'eth_blockNumber') {
+        head += 1;
+        return { jsonrpc: '2.0', id: r.id, result: `0x${head.toString(16)}` };
+      }
+      // 0x's Settler registry on a destination (Across routes): ownerOf(2) is the fixture's Settler
+      if (r.method === 'eth_call') {
+        const data = String((r.params?.[0] as { data?: string } | undefined)?.data ?? '');
+        return { jsonrpc: '2.0', id: r.id, result: addressWord(data.startsWith('0x6352211e') ? ACROSS.settler : ZERO) };
       }
       const result = {
         eth_chainId: `0x${chainId.toString(16)}`,
@@ -221,7 +274,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
         eth_getCode: '0x',
         eth_getStorageAt: `0x${'0'.repeat(64)}`,
         eth_getBlockByNumber: { number: '0x3e8', timestamp: `0x${Math.floor(Date.now() / 1000).toString(16)}`, gasLimit: '0x1c9c380' },
-        eth_getTransactionReceipt: { status: '0x1' },
+        eth_getTransactionReceipt: { status: '0x1', blockNumber: `0x${head.toString(16)}` },
       }[r.method];
       return result === undefined ? { jsonrpc: '2.0', id: r.id, error: { code: -32601, message: `unmocked ${r.method}` } } : { jsonrpc: '2.0', id: r.id, result };
     };
