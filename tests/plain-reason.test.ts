@@ -12,6 +12,8 @@ describe('plainReason', () => {
   it('says when the balance is too small, when a safety check stopped it, and otherwise to try again', () => {
     expect(plainReason('The balance does not cover the gas', 'ETH', 'Base')).toBe('Too small to cover its own transfer');
     expect(plainReason('Plan refused: the fee is above 5% of the balance', 'FLR', 'Flare')).toBe('Stopped before signing: the plan failed a safety check');
+    // The SDK words it 'Refusing to sign' (Doma before its Relay depository was allowlisted)
+    expect(plainReason('Refusing to sign: call target 0x4cD0 is not a known bridge contract on chain 97477', 'ETH', 'Doma')).toBe('Stopped before signing: the plan failed a safety check');
     expect(plainReason('Relay gas did not settle; try again', 'MON', 'Monad')).toBe('Could not check this chain right now. Try again in a moment.');
   });
 });

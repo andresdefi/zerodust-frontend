@@ -480,7 +480,7 @@ export type SweepModel = ReturnType<typeof useSweep>;
 export function plainReason(detail: string, token: string, chain: string): string {
   if (isNoRoute(detail)) return `No bridge takes ${token} out of ${chain} right now`;
   if (/does not cover|INSUFFICIENT|too small/i.test(detail)) return 'Too small to cover its own transfer';
-  if (/refused|unsafe|safety/i.test(detail)) return 'Stopped before signing: the plan failed a safety check';
+  if (/refus|unsafe|safety/i.test(detail)) return 'Stopped before signing: the plan failed a safety check';
   return 'Could not check this chain right now. Try again in a moment.';
 }
 
