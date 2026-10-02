@@ -44,7 +44,7 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
             <div className="amt">{done.length} of {swept.length} at zero</div>
             <div className="sub">
               {failed.length > 0 ? `${failed.length} need${failed.length === 1 ? 's' : ''} attention. ` : ''}
-              {dest && arrived > 0n ? `About ${formatAmount(arrived, dest.decimals, 6)} ${dest.token} on its way to ${dest.name}` : 'Keep this tab open until every chain shows 0'}
+              {dest && arrived > 0n ? `At least ${formatAmount(arrived, dest.decimals, 6)} ${dest.token} on its way to ${dest.name}` : 'Keep this tab open until every chain shows 0'}
             </div>
             <div className="bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}><i style={{ transform: `scaleX(${pct / 100})` }} /></div>
           </>
@@ -53,7 +53,7 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
       <div className="panel">
         {finished && dest && arrived > 0n && (
           <div className="received">
-            <div><div className="bal">Arriving on {dest.name} at {m.toSelf ? 'your wallet' : 'the address you set'}</div><div className="amt">{formatAmount(arrived, dest.decimals, 6)} {dest.token}</div></div>
+            <div><div className="bal">At least this arrives on {dest.name} at {m.toSelf ? 'your wallet' : 'the address you set'}</div><div className="amt">{formatAmount(arrived, dest.decimals, 6)} {dest.token}</div></div>
             <div className="sub">{arrivedUsd}</div>
           </div>
         )}

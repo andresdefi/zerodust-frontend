@@ -214,7 +214,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
           </button>
           <div className="recv">
             {checked && m.destRow
-              ? <><div className="amt">{formatAmount(m.readyTotal, m.destRow.decimals, 6)} {m.destRow.token}</div><div className="sub">{formatUsd(receiveUsd)}</div></>
+              ? <><div className="amt">{formatAmount(m.readyTotal, m.destRow.decimals, 6)} {m.destRow.token}</div><div className="sub">at least {formatUsd(receiveUsd)}</div></>
               : <div className="sub">{m.destination === null ? 'Pick the chain that receives everything' : 'Check for a quote'}</div>}
           </div>
         </div>
@@ -245,7 +245,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
 
       <dl className="summary">
         {checked && m.destRow && (
-          <div><dt>You receive</dt><dd>{formatAmount(m.readyTotal, m.destRow.decimals, 6)} {m.destRow.token}{formatUsd(receiveUsd) && ` (${formatUsd(receiveUsd)})`}</dd></div>
+          <div><dt>You receive at least</dt><dd>{formatAmount(m.readyTotal, m.destRow.decimals, 6)} {m.destRow.token}{formatUsd(receiveUsd) && ` (${formatUsd(receiveUsd)})`}</dd></div>
         )}
         <div><dt>ZeroDust fee</dt><dd>{checked ? '' : 'about '}{formatUsd(feeUsd) || '$0.00'}</dd></div>
         {checked && gasUsd !== null && <div><dt>Gas and bridges</dt><dd>{formatUsd(gasUsd) || '$0.00'}</dd></div>}

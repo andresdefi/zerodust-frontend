@@ -166,7 +166,7 @@ Response:
 | `quoteId` | UUID, used by `/authorization` and `/sweep` |
 | `version` | `3` |
 | `userBalance` | Balance at quote time |
-| `estimatedReceive` | Same-chain: exactly `userBalance - fees.maxTotalFeeWei`. Cross-chain: the bridge's expected output less 0.5%. |
+| `estimatedReceive` | The least that arrives. Same-chain: exactly `userBalance - fees.maxTotalFeeWei` (the actual fee can only be lower). Cross-chain: the bridge's expected output less 3%, because bridges settle at their own price on delivery. |
 | `mode` | `0` transfer (same-chain), `1` bridge call (cross-chain) |
 | `fees` | See below |
 | `autoRevoke` | Always `true` |
@@ -177,7 +177,7 @@ Response:
 | `authNonce` | The wallet's transaction count, which the EIP-7702 delegation must use |
 | `validForSeconds` | `55` |
 
-`intent.minReceive` is the least the contract will accept: equal to `estimatedReceive` for a same-chain sweep, 95% of it for a cross-chain sweep.
+`intent.minReceive` is the least the contract will accept: equal to `estimatedReceive` for a same-chain sweep; for a cross-chain sweep, the bridge's expected output less 0.5%, then 5%.
 
 #### Fees in a quote
 
