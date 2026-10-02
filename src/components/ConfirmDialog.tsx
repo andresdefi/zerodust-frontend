@@ -42,7 +42,7 @@ export function ConfirmDialog({ open, model: m, onCancel, onConfirm }: {
       {donated.map((r) => <p key={r.chainId} className="donate-note">{r.name}: {amount(r)} is donated to ZeroDust. You will not receive it.</p>)}
       {dest && routed.length > 0 && (
         <p className="dest-note">
-          You receive about <strong>{formatAmount(m.readyTotal, dest.decimals, 6)} {dest.token}{receiveUsd && ` (${receiveUsd})`}</strong> on {dest.name} at{' '}
+          You receive at least <strong>{formatAmount(m.readyTotal, dest.decimals, 6)} {dest.token}{receiveUsd && ` (${receiveUsd})`}</strong> on {dest.name} at{' '}
           {m.toSelf ? <><strong>your wallet</strong>, {shortAddress(m.recipient)}</> : <strong className="addr">{m.recipient}</strong>}.
         </p>
       )}
