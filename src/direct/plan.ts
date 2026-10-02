@@ -21,6 +21,20 @@ export const LIFI_DIAMOND = '0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE';
  * dust. The page refuses a plan when /direct/chains disagrees.
  */
 export const GASLIMIT_CHAINS: ReadonlySet<number> = new Set([143]);
+
+/**
+ * ZK-stack chains (direct kind 'zk'): the ZeroDust paymaster pays all gas, so a
+ * fee transaction plus a sweep whose values add up to the balance leave exactly
+ * 0. Pinned here, not taken from the API: a plan naming another paymaster is
+ * refused. Deployed 2026-10-02 (contracts-zk), owner and approver ZeroDust.
+ */
+export const ZK_PAYMASTERS: Readonly<Record<number, string>> = {
+  324: '0x986e4Bb55AEEE6a8c80c28Ca787b13E216fD25B8', // zkSync Era
+  2741: '0x986e4Bb55AEEE6a8c80c28Ca787b13E216fD25B8', // Abstract
+  232: '0x986e4Bb55AEEE6a8c80c28Ca787b13E216fD25B8', // Lens
+};
+/** IPaymasterFlow.general(bytes): the only paymaster flow a plan may use */
+export const PAYMASTER_GENERAL = '0x8c5a3445';
 /**
  * Monad's reserve rule: a transaction that takes the wallet below 10 MON
  * reverts unless no other transaction from it landed in the past 3 blocks,
@@ -39,6 +53,10 @@ export interface PlanTx {
   gas: string;
   gasPrice: string;
   nonce: number;
+  /** ZK-stack chains: an EIP-712 (type 113) transaction naming the ZeroDust paymaster */
+  paymaster?: string;
+  paymasterInput?: string;
+  gasPerPubdata?: string;
 }
 
 export interface DirectPlan {
@@ -50,6 +68,8 @@ export interface DirectPlan {
   /** Bridge routes: the bridge's raw quote before the 3% display buffer, echoed to /direct/status for delivery stats */
   quoted?: string;
   fee: string;
+  /** ZK-stack chains: the gas the fee transaction prepays (its value is fee + gasFee) */
+  gasFee?: string;
   /** The balance the plan spends (exactly, or minus the swap's leftover) */
   balance: string;
   leftoverMax?: string;
