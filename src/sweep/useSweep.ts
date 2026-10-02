@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getAddress, isAddress, type LocalAccount } from 'viem';
 import { ZeroDust, ZeroDustAgent, type Destination } from '@zerodust/sdk';
-import { RPC_URLS } from '../chains/rpcs';
+import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { inPool } from '../lib/pool';
 import { readState } from '../lib/rpc';
 import { deliveryStatus, directBalances, directChains, directRoute, BURN_ADDRESS, ZERODUST_ADDRESS, type PlanMode } from '../direct/plan';
@@ -154,7 +154,8 @@ export function useSweep(account: LocalAccount) {
           canSweep: b.canSweep,
           explorerUrl: byId.get(b.chainId)?.explorerUrl ?? '',
         }))
-        .concat(direct.map((d): Row => ({
+        // Only direct chains this page can serve (its own RPC list): the API may list a chain first
+        .concat(direct.filter((d) => DIRECT_RPC_URLS[d.chainId] !== undefined).map((d): Row => ({
           chainId: d.chainId, name: d.name, token: d.token, decimals: d.decimals, explorerUrl: d.explorerUrl,
           balance: BigInt(d.balance), canSweep: BigInt(d.balance) > 0n, direct: true,
         })))
