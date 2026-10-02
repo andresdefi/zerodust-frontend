@@ -50,6 +50,8 @@ export const RPC_URLS: Record<number, string> = {
   685689: 'https://gensyn-mainnet.g.alchemy.com/public',
   747474: 'https://rpc.katana.network',
   7777777: 'https://rpc.zora.energy/',
+  // Doma (2026-10-02): CORS for the site and Origin: null
+  97477: 'https://rpc.doma.xyz',
 };
 
 // Direct chains (no EIP-7702 in ZeroDust): the page reads balances, replays

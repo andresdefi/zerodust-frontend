@@ -31,10 +31,10 @@ What this means for an integration:
 
 ## Supported chains
 
-As of 1 October 2026 the live API lists:
+As of 2 October 2026 the live API lists:
 
-- 45 EIP-7702 chains, swept by the sponsor (`GET /chains`). Each entry's `crossChain.available` says whether a bridge currently accepts it as a cross-chain source.
-- 10 direct chains, swept by the wallet itself (`GET /direct/chains`).
+- 46 EIP-7702 chains, swept by the sponsor (`GET /chains`). Each entry's `crossChain.available` says whether a bridge currently accepts it as a cross-chain source.
+- 14 direct chains, swept by the wallet itself (`GET /direct/chains`).
 - Cross-chain destinations are not limited to ZeroDust chains: any EVM chain a bridge delivers native gas to qualifies. From Base there are 109 (`GET /destinations?fromChainId=8453`).
 
 These numbers change. Read them from the API rather than hardcoding them.
