@@ -174,7 +174,8 @@ test('a chain that cannot reach the destination can go to another chain instead'
   await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^Base/ }).click();
 
   const avax = page.locator('.row', { hasText: 'Avalanche' });
-  await expect(avax).toContainText('No bridge takes AVAX to Base right now');
+  // After the route is asked again (twice, 3 s apart) and Optimism is confirmed
+  await expect(avax).toContainText('No bridge takes AVAX to Base right now', { timeout: 20_000 });
   await avax.getByRole('button', { name: /No route: choose/ }).click();
   await page.getByRole('button', { name: /^Send to Optimism instead/ }).click();
   await expect(avax).toContainText('Goes to Optimism instead');
@@ -192,6 +193,24 @@ test('a chain that cannot reach the destination can go to another chain instead'
   await expect(avax).toContainText('0.0007 ETH to Optimism');
   expect(sent).toHaveLength(2);
   expect(swept.has(43114)).toBe(true);
+});
+
+test('a passing "unknown" route does not send a chain elsewhere', async ({ page }) => {
+  const key = generatePrivateKey();
+  await mockNetwork(page, privateKeyToAccount(key).address, { direct: true, hiccups: 1 });
+  await page.goto('/');
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.row')).toHaveCount(4);
+  await page.getByRole('checkbox', { name: 'Sweep Scroll' }).uncheck();
+  await page.getByRole('button', { name: 'Choose where it goes' }).click();
+  await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^Base/ }).click();
+  await page.getByRole('button', { name: 'Check sweep' }).click();
+  await expect(page.getByRole('button', { name: 'Sweep 2 chains' })).toBeVisible({ timeout: 30_000 });
+  const avax = page.locator('.row', { hasText: 'Avalanche' });
+  await expect(avax).not.toContainText('No bridge');
+  await expect(page.locator('.summary')).not.toContainText('Optimism');
 });
 
 test('refuses a direct plan that pays someone else, and sends nothing', async ({ page }) => {
