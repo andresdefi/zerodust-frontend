@@ -161,6 +161,39 @@ test('sweeps a direct chain: plan checked and replayed in the page, signed here,
   expect(watch.cspViolations).toEqual([]);
 });
 
+test('a chain that cannot reach the destination can go to another chain instead', async ({ page }) => {
+  const key = generatePrivateKey();
+  const { swept, sent } = await mockNetwork(page, privateKeyToAccount(key).address, { direct: true, onlyTo: 10 });
+  await page.goto('/');
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.row')).toHaveCount(4);
+  await page.getByRole('checkbox', { name: 'Sweep Scroll' }).uncheck();
+  await page.getByRole('button', { name: 'Choose where it goes' }).click();
+  await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^Base/ }).click();
+
+  const avax = page.locator('.row', { hasText: 'Avalanche' });
+  await expect(avax).toContainText('No bridge takes AVAX to Base right now');
+  await avax.getByRole('button', { name: /No route: choose/ }).click();
+  await page.getByRole('button', { name: /^Send to Optimism instead/ }).click();
+  await expect(avax).toContainText('Goes to Optimism instead');
+
+  await page.getByRole('button', { name: 'Check sweep' }).click();
+  await expect(page.getByRole('button', { name: 'Sweep 2 chains' })).toBeVisible({ timeout: 30_000 });
+  // One total per chain the funds arrive on
+  await expect(page.locator('.summary')).toContainText(/ETH on Base, 0\.0007 ETH on Optimism/);
+
+  await page.getByRole('button', { name: 'Sweep 2 chains' }).click();
+  const confirm = page.getByRole('dialog', { name: 'Sweep 2 chains to Base and Optimism?' });
+  await expect(confirm.locator('li', { hasText: 'Avalanche' })).toContainText('to Optimism');
+  await confirm.getByRole('button', { name: 'Sweep 2 chains' }).click();
+  await expect(page.getByText('2 of 2 at zero')).toBeVisible({ timeout: 60_000 });
+  await expect(avax).toContainText('0.0007 ETH to Optimism');
+  expect(sent).toHaveLength(2);
+  expect(swept.has(43114)).toBe(true);
+});
+
 test('refuses a direct plan that pays someone else, and sends nothing', async ({ page }) => {
   const key = generatePrivateKey();
   const { sent } = await mockNetwork(page, privateKeyToAccount(key).address, { direct: true, tamper: true });

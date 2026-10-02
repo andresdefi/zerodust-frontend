@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
-import { isExit, type Row, type SweepModel } from '../sweep/useSweep';
+import { isExit, isRouted, type Row, type SweepModel } from '../sweep/useSweep';
+import { totalsText, totalsUsd } from './SweepCard';
 
 /** Last stop before anything is sent: every chain, its amount, and any burn or donation spelled out */
 export function ConfirmDialog({ open, model: m, onCancel, onConfirm }: {
@@ -22,27 +23,34 @@ export function ConfirmDialog({ open, model: m, onCancel, onConfirm }: {
     const usd = formatUsd(usdValue(r.balance, r.decimals, m.prices[r.token]));
     return `${formatAmount(r.balance, r.decimals)} ${r.token}${usd ? ` (${usd})` : ''}`;
   };
-  const routed = m.readyRows.filter((r) => !m.choices[r.chainId] || isExit(m.choices[r.chainId]));
+  const routed = m.readyRows.filter((r) => isRouted(m.choices[r.chainId]));
   const exits = m.readyRows.filter((r) => isExit(m.choices[r.chainId]));
   const burned = m.readyRows.filter((r) => m.choices[r.chainId] === 'burn');
   const donated = m.readyRows.filter((r) => m.choices[r.chainId] === 'donate');
   const dest = m.destRow;
-  const receiveUsd = dest ? formatUsd(usdValue(m.readyTotal, dest.decimals, m.prices[dest.token])) : '';
+  const receiveUsd = formatUsd(totalsUsd(m.readyTotals, m.prices));
+  const destNames = m.readyTotals.map((t) => t.dest.name);
+  const toNames = destNames.length > 1 ? `${destNames.slice(0, -1).join(', ')} and ${destNames.at(-1)}` : dest?.name;
   const n = m.readyRows.length;
 
   return (
     <dialog ref={dialog} className="modal confirm" onClose={onCancel} aria-labelledby="confirm-title" aria-describedby="confirm-lead">
-      <h3 id="confirm-title">Sweep {n} chain{n === 1 ? '' : 's'}{dest ? ` to ${dest.name}` : ''}?</h3>
+      <h3 id="confirm-title">Sweep {n} chain{n === 1 ? '' : 's'}{toNames ? ` to ${toNames}` : ''}?</h3>
       <p id="confirm-lead" className="lead">Every balance below leaves your wallet and each chain ends at exactly 0. This cannot be undone.</p>
       <ul className="dlist">
-        {routed.map((r) => <li key={r.chainId}><span>{r.name}</span><span>{amount(r)}</span></li>)}
+        {routed.map((r) => (
+          <li key={r.chainId}>
+            <span>{r.name}{m.choices[r.chainId] === 'elsewhere' && <small> to {m.destOf(m.elsewhere[r.chainId]!)?.name}</small>}</span>
+            <span>{amount(r)}</span>
+          </li>
+        ))}
       </ul>
       {exits.map((r) => <p key={r.chainId} className="donate-note">{r.name}: swapped out through LI.FI; the few cents of gas reserve left are {m.choices[r.chainId] === 'exit-burn' ? 'burned' : 'donated to ZeroDust'}.</p>)}
       {burned.map((r) => <p key={r.chainId} className="burn-note">{r.name}: {amount(r)} is burned. You will not receive it.</p>)}
       {donated.map((r) => <p key={r.chainId} className="donate-note">{r.name}: {amount(r)} is donated to ZeroDust. You will not receive it.</p>)}
       {dest && routed.length > 0 && (
         <p className="dest-note">
-          You receive at least <strong>{formatAmount(m.readyTotal, dest.decimals, 6)} {dest.token}{receiveUsd && ` (${receiveUsd})`}</strong> on {dest.name} at{' '}
+          You receive at least <strong>{totalsText(m.readyTotals)}{receiveUsd && ` (${receiveUsd} in all)`}</strong> at{' '}
           {m.toSelf ? <><strong>your wallet</strong>, {shortAddress(m.recipient)}</> : <strong className="addr">{m.recipient}</strong>}.
         </p>
       )}

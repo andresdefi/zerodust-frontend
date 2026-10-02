@@ -148,7 +148,11 @@ function monadPlan(nonce: number, recipient: string, tamper: boolean) {
 }
 
 /** Everything the page may call, answered offline; returns what was swept */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean } = {}) {
+/**
+ * `onlyTo`: the direct chain's bridges reach only this chain; any other answers
+ * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base)
+ */
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number } = {}) {
   /** The funded direct chain, if any */
   const DIRECT = opts.monad ? MONAD : AVAX;
   const DIRECT_BALANCE = opts.monad ? MONAD_BALANCE : AVAX_BALANCE;
@@ -192,7 +196,10 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     if (path.startsWith('/direct/balances/')) {
       return json(route, opts.direct || opts.monad ? [{ ...directInfo, balance: (swept.has(DIRECT) ? 0n : DIRECT_BALANCE).toString() }] : []);
     }
-    if (path === '/direct/route') return json(route, { available: true });
+    if (path === '/direct/route') {
+      const to = Number(url.searchParams.get('toChainId'));
+      return json(route, opts.onlyTo === undefined || opts.onlyTo === to ? { available: true } : { available: null, reason: 'Gas.zip: Quote: Please Try Again' });
+    }
     if (path === '/direct/prepare' && opts.monad) return json(route, monadPlan(directNonce, url.searchParams.get('recipient')!, !!opts.tamper));
     if (path === '/direct/prepare') {
       const plan = avaxPlan(directNonce);
