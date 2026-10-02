@@ -382,7 +382,7 @@ export function useSweep(account: LocalAccount) {
       }
       update({ phase: 'sweeping', receive, fee, detail: 'bridging' });
       for (let i = 0; i < 90; i++) {
-        const s = await deliveryStatus(plan, hash!).catch(() => ({ state: 'pending' as const }));
+        const s = await deliveryStatus(plan, hash!, destination ?? undefined).catch(() => ({ state: 'pending' as const }));
         if (s.state === 'delivered') {
           update({ phase: 'done', receive, fee, detail: 'Balance reads 0 on-chain, delivered' });
           return;
