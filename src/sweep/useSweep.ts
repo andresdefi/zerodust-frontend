@@ -23,8 +23,16 @@ const PARALLEL_CHAINS = 3;
  * with a swap route can also swap out; the few cents of gas reserve the swap
  * leaves are then donated or burned, so the wallet still ends at exactly 0.
  */
-export type Choice = 'exit-donate' | 'exit-burn' | 'donate' | 'burn';
+export type Choice = 'exit-donate' | 'exit-burn' | 'donate' | 'burn' | 'elsewhere';
 export const isExit = (c?: Choice) => c === 'exit-donate' || c === 'exit-burn';
+/** The balance reaches the recipient (on the chosen chain, or on another one for 'elsewhere') */
+export const isRouted = (c?: Choice) => !c || isExit(c) || c === 'elsewhere';
+
+/**
+ * Chains offered instead when a source cannot reach the chosen destination
+ * ('elsewhere'): the balance goes to the same address on one of these.
+ */
+const ALT_CANDIDATES = [8453, 10, 42161, 1, 56, 137];
 
 export interface Row {
   chainId: number;
@@ -58,6 +66,14 @@ export interface RowState {
   choice?: Choice;
   /** Direct chains: ZeroDust's fee in the chain's token, paid as its own transfer */
   fee?: bigint;
+  /** Where `receive` arrives: the destination, or another chain for 'elsewhere' */
+  toChainId?: number;
+}
+
+/** What arrives on one chain */
+export interface DestTotal {
+  dest: DestOption;
+  amount: bigint;
 }
 
 export type Stage = 'loading' | 'error' | 'empty' | 'select' | 'checked' | 'sweeping' | 'done';
@@ -98,6 +114,10 @@ export function useSweep(account: LocalAccount) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [states, setStates] = useState<Record<number, RowState>>({});
   const [choices, setChoices] = useState<Record<number, Choice>>({});
+  // Direct sources that cannot reach the destination: the other chains a bridge takes them to
+  const [alts, setAlts] = useState<Record<number, number[]>>({});
+  // 'elsewhere' choices: the chain each of those sources goes to instead
+  const [elsewhere, setElsewhere] = useState<Record<number, number>>({});
   const [busy, setBusy] = useState(false);
   const [swept, setSwept] = useState(false);
   // Direct chains: a fee transfer that landed before its sweep failed is not charged again
@@ -209,22 +229,50 @@ export function useSweep(account: LocalAccount) {
       const result = await directRoute({ chainId: row.chainId, toChainId: destination, from: address, recipient })
         .catch(() => ({ available: null }));
       if (!cancelled) setDirectRoutes((prev) => ({ ...prev, [row.chainId]: result }));
+      if (result.available === true) return;
+      // Not confirmed to the destination: which other major chains can it go to?
+      const found: number[] = [];
+      for (const toChainId of ALT_CANDIDATES) {
+        if (cancelled) return;
+        if (toChainId === destination || toChainId === row.chainId) continue;
+        const alt = await directRoute({ chainId: row.chainId, toChainId, from: address, recipient }).catch(() => null);
+        if (alt?.available === true) found.push(toChainId);
+      }
+      if (!cancelled) setAlts((prev) => ({ ...prev, [row.chainId]: found }));
     });
     return () => { cancelled = true; };
     // Rows change identity on every refresh; which direct chains hold a balance is what matters
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address, destination, recipient, recipientValid, directKey]);
 
+  /** Alternatives are found per destination: a new one drops them and any 'elsewhere' choice */
+  const resetRoutes = () => {
+    setDirectRoutes({});
+    setAlts({});
+    setElsewhere({});
+    setChoices((prev) => Object.fromEntries(Object.entries(prev).filter(([, c]) => c !== 'elsewhere')));
+    setStates({});
+  };
+
   const setDestination = (chainId: number) => {
     setDestinationState(chainId);
-    setDirectRoutes({});
-    setStates({});
+    resetRoutes();
   };
 
   const setRecipient = (value: string) => {
     setRecipientState(value.trim());
-    setDirectRoutes({});
-    setStates({});
+    resetRoutes();
+  };
+
+  const destOf = (chainId: number) => dests.find((d) => d.chainId === chainId) ?? null;
+
+  /** Other chains this row can go to when it cannot reach the destination (only ones the page knows) */
+  const altsFor = (row: Row): DestOption[] => {
+    if (destination === null) return [];
+    const ids = row.direct
+      ? alts[row.chainId] ?? []
+      : routes[row.chainId]?.available === false ? [] : ALT_CANDIDATES.filter((id) => id !== destination && id !== row.chainId && routes[row.chainId]?.dests.has(id));
+    return ids.map(destOf).filter((d): d is DestOption => d !== null);
   };
 
   /** Why a row cannot go to the chosen destination, before anything is tried */
@@ -232,7 +280,10 @@ export function useSweep(account: LocalAccount) {
     if (choices[row.chainId] || destination === null) return null;
     if (row.chainId === destination) return toSelf ? 'Destination' : null;
     if (row.direct) {
-      return directRoutes[row.chainId]?.available === false ? `No bridge takes ${row.token} to ${destRow?.name ?? 'this chain'} right now` : null;
+      // Unconfirmed (null) counts as blocked only when another chain is confirmed instead
+      const available = directRoutes[row.chainId]?.available;
+      const blocked = available === false || (available === null && (alts[row.chainId]?.length ?? 0) > 0);
+      return blocked ? `No bridge takes ${row.token} to ${destRow?.name ?? 'this chain'} right now` : null;
     }
     const route = routes[row.chainId];
     if (!route) return null;
@@ -247,12 +298,12 @@ export function useSweep(account: LocalAccount) {
     const blocked = blockedReason(row);
     if (blocked && blocked !== 'Destination') return true;
     const state = states[row.chainId];
-    return state?.phase === 'no-route' && isNoRoute(state.detail ?? '');
+    return state?.phase === 'no-route' && (isNoRoute(state.detail ?? '') || altsFor(row).length > 0);
   };
 
   /** The choices a chain with no route gets: a swap out where one exists (direct chains), else donate or burn */
-  const choicesFor = (row: Row): Choice[] => {
-    const exit = row.direct && directRoutes[row.chainId]?.exit ? ['exit-donate', 'exit-burn'] as Choice[] : [];
+  const choicesFor = (row: Row): Array<Exclude<Choice, 'elsewhere'>> => {
+    const exit = row.direct && directRoutes[row.chainId]?.exit ? ['exit-donate', 'exit-burn'] as const : [];
     return [...exit, 'donate', 'burn'];
   };
 
@@ -264,7 +315,13 @@ export function useSweep(account: LocalAccount) {
       return next;
     });
 
-  const setChoice = (chainId: number, choice: Choice | null) => {
+  const setChoice = (chainId: number, choice: Choice | null, toChainId?: number) => {
+    setElsewhere((prev) => {
+      const next = { ...prev };
+      if (choice === 'elsewhere' && toChainId !== undefined) next[chainId] = toChainId;
+      else delete next[chainId];
+      return next;
+    });
     setChoices((prev) => {
       const next = { ...prev };
       if (choice) next[chainId] = choice;
@@ -280,13 +337,14 @@ export function useSweep(account: LocalAccount) {
     selected.has(r.chainId) && r.canSweep && !blockedReason(r) && recipientValid && destination !== null && states[r.chainId]?.phase !== 'done'
   );
   const readyRows = selectedRows.filter((r) => states[r.chainId]?.phase === 'ready');
-  const readyTotal = readyRows.reduce((sum, r) => sum + (states[r.chainId]?.receive ?? 0n), 0n);
+  const readyTotals = totalsByDest(readyRows.map((r) => states[r.chainId]!), destination, destOf);
 
   /** Where a row's balance goes: the destination (also for a swap exit), or burn/donate on its own chain */
   const targetFor = (row: Row) => {
     const choice = choices[row.chainId];
     if (choice === 'burn') return { toChainId: row.chainId, recipient: BURN_ADDRESS };
     if (choice === 'donate') return { toChainId: row.chainId, recipient: ZERODUST_ADDRESS };
+    if (choice === 'elsewhere') return { toChainId: elsewhere[row.chainId]!, recipient };
     return { toChainId: destination!, recipient };
   };
 
@@ -311,7 +369,7 @@ export function useSweep(account: LocalAccount) {
           const plan = await planChecked(directTarget(row), mode, feePaid.current[row.chainId]);
           setState(row.chainId, {
             phase: 'ready', choice, fee: BigInt(plan.fee),
-            ...(mode === 'burn' || mode === 'donate' ? {} : { receive: BigInt(plan.receive) }),
+            ...(mode === 'burn' || mode === 'donate' ? {} : { receive: BigInt(plan.receive), toChainId: targetFor(row).toChainId }),
           });
         } catch (error) {
           setState(row.chainId, { phase: 'no-route', detail: error instanceof Error ? error.message : 'No route' });
@@ -324,7 +382,9 @@ export function useSweep(account: LocalAccount) {
         { dryRun: true }
       );
       if (result.success && result.quote) {
-        setState(row.chainId, choice ? { phase: 'ready', choice } : { phase: 'ready', receive: BigInt(result.quote.estimatedReceive) });
+        setState(row.chainId, isRouted(choice) && !isExit(choice)
+          ? { phase: 'ready', choice, receive: BigInt(result.quote.estimatedReceive), toChainId: target.toChainId }
+          : { phase: 'ready', choice });
       } else {
         setState(row.chainId, { phase: 'no-route', detail: result.error ?? 'No quote' });
       }
@@ -340,8 +400,9 @@ export function useSweep(account: LocalAccount) {
   const sweepDirect = async (row: Row) => {
     const choice = choices[row.chainId];
     const mode = planModeFor(row);
+    const { toChainId } = targetFor(row);
     let hash: string | undefined;
-    const update = (s: Omit<RowState, 'choice'>) => setState(row.chainId, { ...s, choice, txHash: s.txHash ?? hash });
+    const update = (s: Omit<RowState, 'choice'>) => setState(row.chainId, { ...s, choice, toChainId, txHash: s.txHash ?? hash });
     try {
       update({ phase: 'sweeping', detail: 'Checking' });
       const plan = await planChecked(directTarget(row), mode, feePaid.current[row.chainId]);
@@ -383,7 +444,7 @@ export function useSweep(account: LocalAccount) {
       }
       update({ phase: 'sweeping', receive, fee, detail: 'bridging' });
       for (let i = 0; i < 90; i++) {
-        const s = await deliveryStatus(plan, hash!, destination ?? undefined).catch(() => ({ state: 'pending' as const }));
+        const s = await deliveryStatus(plan, hash!, toChainId).catch(() => ({ state: 'pending' as const }));
         if (s.state === 'delivered') {
           update({ phase: 'done', receive, fee, detail: 'Balance reads 0 on-chain, delivered' });
           return;
@@ -409,6 +470,7 @@ export function useSweep(account: LocalAccount) {
       if (row.direct) return sweepDirect(row);
       const choice = choices[row.chainId];
       const target = targetFor(row);
+      const toChainId = target.toChainId;
       setState(row.chainId, { phase: 'sweeping', detail: 'Signing', choice });
       const result = await agent.sweep(
         { fromChainId: row.chainId, toChainId: target.toChainId, destination: getAddress(target.recipient) },
@@ -422,7 +484,7 @@ export function useSweep(account: LocalAccount) {
       // delegation must be gone. The revoke is its own transaction, sent after
       // the sweep confirms, so allow it up to two minutes.
       setState(row.chainId, { phase: 'sweeping', detail: 'Checking on-chain', txHash: result.txHash, choice });
-      const receive = result.quote && !choice ? BigInt(result.quote.estimatedReceive) : undefined;
+      const receive = result.quote && (!choice || choice === 'elsewhere') ? BigInt(result.quote.estimatedReceive) : undefined;
       try {
         let onChain = await readState(row.chainId, address);
         for (let i = 0; i < 24 && !(onChain.balance === 0n && onChain.code === '0x'); i++) {
@@ -435,13 +497,14 @@ export function useSweep(account: LocalAccount) {
           phase: zero && revoked ? 'done' : 'failed',
           txHash: result.txHash,
           receive,
+          toChainId,
           choice,
           detail: zero && revoked
             ? 'Balance reads 0 on-chain, delegation revoked'
             : `Sent, but the chain shows ${zero ? '' : 'a balance left'}${!zero && !revoked ? ' and ' : ''}${revoked ? '' : 'the delegation still set'}`,
         });
       } catch {
-        setState(row.chainId, { phase: 'done', txHash: result.txHash, receive, choice, detail: 'Completed; the on-chain check could not run' });
+        setState(row.chainId, { phase: 'done', txHash: result.txHash, receive, toChainId, choice, detail: 'Completed; the on-chain check could not run' });
       }
     });
     setBusy(false);
@@ -467,11 +530,26 @@ export function useSweep(account: LocalAccount) {
   return {
     address, rows, stage, loadError, prices, dests, sourceCount, destination, destRow, setDestination,
     recipient, setRecipient, recipientValid, toSelf, selected, toggle, states, choices, setChoice, choicesFor,
-    blockedReason, needsChoice, selectedRows, readyRows, readyTotal, busy, check, sweep, reload,
+    altsFor, elsewhere, destOf, blockedReason, needsChoice, selectedRows, readyRows, readyTotals, busy, check, sweep, reload,
   };
 }
 
 export type SweepModel = ReturnType<typeof useSweep>;
+
+/** What arrives, per chain: the chosen destination first, then the others ('elsewhere') */
+export function totalsByDest(states: RowState[], destination: number | null, destOf: (chainId: number) => DestOption | null): DestTotal[] {
+  const sums = new Map<number, bigint>();
+  for (const s of states) {
+    if (s.receive === undefined || s.toChainId === undefined) continue;
+    sums.set(s.toChainId, (sums.get(s.toChainId) ?? 0n) + s.receive);
+  }
+  return [...sums]
+    .sort(([a], [b]) => Number(b === destination) - Number(a === destination))
+    .flatMap(([chainId, amount]) => {
+      const dest = destOf(chainId);
+      return dest ? [{ dest, amount }] : [];
+    });
+}
 
 /** Errors that mean no bridge can take this chain to the destination (not transient ones) */
 /**

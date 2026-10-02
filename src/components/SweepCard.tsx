@@ -8,9 +8,9 @@ import { WalletHead } from './WalletHead';
 import { ChevronIcon, DownIcon, PencilIcon, RefreshIcon } from './icons';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
 import { serviceFeeUsd } from '../lib/fees';
-import { isExit, plainReason, type Choice, type Row, type SweepModel } from '../sweep/useSweep';
+import { isRouted, plainReason, type Choice, type DestTotal, type Row, type SweepModel } from '../sweep/useSweep';
 
-const CHOICES: Record<Choice | 'leave', { label: string; text: (amount: string, dest: string) => string; danger?: boolean; quiet?: boolean }> = {
+const CHOICES: Record<Exclude<Choice, 'elsewhere'> | 'leave', { label: string; text: (amount: string, dest: string) => string; danger?: boolean; quiet?: boolean }> = {
   'exit-donate': { label: 'Swap out', text: (_a, d) => `Swap to a token a bridge takes, then send it to ${d}. The few cents of gas reserve left are donated to ZeroDust.` },
   'exit-burn': { label: 'Swap out, burn the cents left', text: () => 'Same, but the cents left are burned instead of donated.' },
   donate: { label: 'Donate all to ZeroDust', text: (a) => `${a} goes to ZeroDust. You receive nothing.` },
@@ -24,7 +24,23 @@ export const CHOICE_LABEL: Record<Choice, string> = {
   'exit-burn': 'Swap out; cents left burned',
   donate: 'Donate all to ZeroDust',
   burn: 'Burn all, not received',
+  elsewhere: 'Goes to another chain',
 };
+
+/** "0.0013 ETH on Base, 0.000015 ETH on Optimism" */
+export const totalsText = (totals: DestTotal[]) =>
+  totals.map((t) => `${formatAmount(t.amount, t.dest.decimals, 6)} ${t.dest.token} on ${t.dest.name}`).join(', ');
+
+/** Every destination's total in USD, or null while a price is missing */
+export function totalsUsd(totals: DestTotal[], prices: Record<string, number>): number | null {
+  let sum = 0;
+  for (const t of totals) {
+    const usd = usdValue(t.amount, t.dest.decimals, prices[t.dest.token]);
+    if (usd === null) return null;
+    sum += usd;
+  }
+  return sum;
+}
 
 export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; clipboard: ClipboardState; onForget: () => void }) {
   const m = model;
@@ -75,15 +91,16 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
   const totalUsd = m.rows.reduce((s, r) => s + (rowUsd(r) ?? 0), 0);
   // Before a destination is chosen, count what is selected; after, what can actually go
   const counted = m.destination === null ? selectedAll : m.selectedRows;
-  const routed = counted.filter((r) => !m.choices[r.chainId] || isExit(m.choices[r.chainId]));
+  const routed = counted.filter((r) => isRouted(m.choices[r.chainId]));
   // A direct chain's checked fee is exact; otherwise the published schedule
   const feeUsd = routed.reduce((s, r) => {
     const fee = m.states[r.chainId]?.fee;
     return s + (fee !== undefined ? usdValue(fee, r.decimals, price(r.token)) ?? 0 : serviceFeeUsd(rowUsd(r) ?? 0));
   }, 0);
-  const destPrice = m.destRow ? price(m.destRow.token) : undefined;
-  const receiveUsd = m.destRow ? usdValue(m.readyTotal, m.destRow.decimals, destPrice) : null;
-  const readyRoutedUsd = m.readyRows.filter((r) => !m.choices[r.chainId] || isExit(m.choices[r.chainId])).reduce((s, r) => s + (rowUsd(r) ?? 0), 0);
+  const mainTotal = m.readyTotals.find((t) => t.dest.chainId === m.destination)?.amount ?? 0n;
+  const otherTotals = m.readyTotals.filter((t) => t.dest.chainId !== m.destination);
+  const receiveUsd = m.destRow ? totalsUsd(m.readyTotals, m.prices) : null;
+  const readyRoutedUsd = m.readyRows.filter((r) => isRouted(m.choices[r.chainId])).reduce((s, r) => s + (rowUsd(r) ?? 0), 0);
   const gasUsd = receiveUsd === null ? null : Math.max(0, readyRoutedUsd - receiveUsd - feeUsd);
   const burned = m.selectedRows.filter((r) => m.choices[r.chainId] === 'burn');
   const donated = m.selectedRows.filter((r) => m.choices[r.chainId] === 'donate');
@@ -138,7 +155,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                 <span className="right">
                   {formatUsd(rowUsd(r)) || '-'}
                   <span className="bal">
-                    {st?.phase === 'ready' && (!choice || isExit(choice)) && <span className="ok-text">Ready, </span>}
+                    {st?.phase === 'ready' && isRouted(choice) && <span className="ok-text">Ready, </span>}
                     {formatAmount(r.balance, r.decimals)} {r.token}
                   </span>
                 </span>
@@ -157,6 +174,12 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                 {needs && menuFor === r.chainId && (
                   <span className="menu" role="group" aria-label={`What to do with ${r.name}`}>
                     <span className="menu-title">Nothing can carry {r.token} to {m.destRow?.name ?? 'the destination'} right now. Instead:</span>
+                    {m.altsFor(r).map((d) => (
+                      <button key={`to-${d.chainId}`} type="button" className="menu-item" onClick={() => { m.setChoice(r.chainId, 'elsewhere', d.chainId); setMenuFor(null); }}>
+                        <b>Send to {d.name} instead</b>
+                        <span>{amountText(r)} goes to {d.name}, to {m.toSelf ? 'your wallet' : 'the address you set'}. Everything else still goes to {m.destRow?.name ?? 'the destination'}.</span>
+                      </button>
+                    ))}
                     {[...m.choicesFor(r), 'leave' as const].map((key) => {
                       const c = CHOICES[key];
                       return (
@@ -179,7 +202,9 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                 )}
                 {choice && (
                   <span className="detail split">
-                    <span className={choice === 'burn' ? 'danger-text strong' : 'warn-text strong'}>{CHOICE_LABEL[choice]}</span>
+                    <span className={choice === 'burn' ? 'danger-text strong' : choice === 'elsewhere' ? 'strong' : 'warn-text strong'}>
+                      {choice === 'elsewhere' ? `Goes to ${m.destOf(m.elsewhere[r.chainId]!)?.name ?? 'another chain'} instead` : CHOICE_LABEL[choice]}
+                    </span>
                     <button type="button" className="link-btn" onClick={() => m.setChoice(r.chainId, null)} disabled={m.busy}>Change</button>
                   </span>
                 )}
@@ -211,7 +236,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
           </button>
           <div className="recv">
             {checked && m.destRow
-              ? <><div className="amt">{formatAmount(m.readyTotal, m.destRow.decimals, 6)} {m.destRow.token}</div><div className="sub">at least {formatUsd(receiveUsd)}</div></>
+              ? <><div className="amt">{formatAmount(mainTotal, m.destRow.decimals, 6)} {m.destRow.token}</div><div className="sub">{otherTotals.length > 0 ? `plus ${totalsText(otherTotals)}; at least ${formatUsd(receiveUsd)} in all` : `at least ${formatUsd(receiveUsd)}`}</div></>
               : <div className="sub">{m.destination === null ? 'Pick the chain that receives everything' : 'Check for a quote'}</div>}
           </div>
         </div>
@@ -242,7 +267,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
 
       <dl className="summary">
         {checked && m.destRow && (
-          <div><dt>You receive at least</dt><dd>{formatAmount(m.readyTotal, m.destRow.decimals, 6)} {m.destRow.token}{formatUsd(receiveUsd) && ` (${formatUsd(receiveUsd)})`}</dd></div>
+          <div><dt>You receive at least</dt><dd>{totalsText(m.readyTotals) || `0 ${m.destRow.token}`}{formatUsd(receiveUsd) && ` (${formatUsd(receiveUsd)})`}</dd></div>
         )}
         <div><dt>ZeroDust fee</dt><dd>{checked ? '' : 'about '}{formatUsd(feeUsd) || '$0.00'}</dd></div>
         {checked && gasUsd !== null && <div><dt>Gas and bridges</dt><dd>{formatUsd(gasUsd) || '$0.00'}</dd></div>}
