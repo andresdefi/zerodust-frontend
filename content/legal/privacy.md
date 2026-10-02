@@ -22,6 +22,7 @@ To quote and run a sweep, the API (api.zerodust.xyz) receives your wallet addres
 | Sweeps: wallet address, destination, chains, amounts, transaction hashes, status | The record of each sweep, to deliver it, answer questions and keep accounts | Kept |
 | Your signatures for a sweep | To execute it | Deleted 7 days after the sweep ends (once its delegation is revoked) |
 | Daily counts of quotes per chain pair | Capacity and usage, no addresses | Kept |
+| Delivery accuracy per bridge route: amount quoted vs delivered, the chains and the bridge | To keep the amounts we show at or below what arrives. No addresses, no transaction hashes | Deleted after 400 days |
 
 - **The API stores no IP addresses.** Its request logs record only the method, the route (for example `/balances/:address`, never the address itself), the status and the time taken. It uses your IP address in memory to apply rate limits and does not write it anywhere. (Cloudflare and Render, in front of the API, process connection data to deliver requests; see below.)
 - For chains without a sponsor, the API only plans transactions. It does not store those plans, and it never receives the signed transactions: your browser sends them to the chain itself.
@@ -42,4 +43,4 @@ You can ask what data ZeroDust holds about your wallet address, and ask for it t
 
 We will update this page when what we collect changes, and change the date below.
 
-Last updated: 1 October 2026.
+Last updated: 2 October 2026.

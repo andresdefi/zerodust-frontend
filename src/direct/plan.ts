@@ -33,6 +33,8 @@ export interface DirectPlan {
   requestId: string | null;
   txs: PlanTx[];
   receive: string;
+  /** Bridge routes: the bridge's raw quote before the 3% display buffer, echoed to /direct/status for delivery stats */
+  quoted?: string;
   fee: string;
   /** The balance the plan spends (exactly, or minus the swap's leftover) */
   balance: string;
@@ -87,5 +89,9 @@ export const preparePlan = (t: Target & { mode: Exclude<PlanMode, 'exit'>; feePa
 
 export const prepareExit = (t: Target & { feePaidTx?: string }) => get<DirectPlan>('exit', { ...t });
 
-export const deliveryStatus = (plan: DirectPlan, hash: string) =>
-  get<{ state: 'pending' | 'delivered' | 'failed'; destTx?: string }>('status', { route: plan.route, hash, requestId: plan.requestId ?? undefined });
+/** Polls a bridge; `quoted` lets the API record delivered vs quoted (no address or hash is stored) */
+export const deliveryStatus = (plan: DirectPlan, hash: string, toChainId?: number) =>
+  get<{ state: 'pending' | 'delivered' | 'failed'; destTx?: string }>('status', {
+    route: plan.route, hash, requestId: plan.requestId ?? undefined,
+    quoted: plan.quoted, fromChainId: plan.quoted ? plan.chainId : undefined, toChainId: plan.quoted ? toChainId : undefined,
+  });

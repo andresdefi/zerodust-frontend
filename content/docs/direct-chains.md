@@ -6,7 +6,7 @@ The planning endpoints are quote-only. They return unsigned transactions and nev
 
 ## Chains
 
-As of 2 October 2026, `GET /direct/chains` lists 12 chains:
+As of 2 October 2026, `GET /direct/chains` lists 13 chains:
 
 | Chain | ID | Token |
 |---|---|---|
@@ -22,6 +22,7 @@ As of 2 October 2026, `GET /direct/chains` lists 12 chains:
 | Immutable zkEVM | 13371 | IMX |
 | Etherlink | 42793 | XTZ |
 | Avalanche | 43114 | AVAX |
+| Ethereal | 5064014 | USDe |
 
 Read the list from the API rather than hardcoding it. Chains that charge an L1 data fee cannot be swept to exactly 0 this way and are not listed.
 
@@ -103,6 +104,7 @@ Response:
 | `requestId` | Relay's request ID, needed by `/direct/status`; otherwise `null` |
 | `txs` | Unsigned legacy transactions, in order, with consecutive nonces: `kind` (`fee`, `sweep` or `swap`), `to`, `data`, `value`, `gas`, `gasPrice`, `nonce` |
 | `receive` | The least that arrives: the bridge's quote less 3% (bridges settle at their own price on delivery), the exact value for a same-chain transfer, `0` for burn or donate |
+| `quoted` | Bridge and swap routes: the bridge's raw quote, before the 3%. Pass it back to `/direct/status` |
 | `fee` | ZeroDust's fee in wei, `0` when none |
 | `balance` | The balance this plan spends |
 
@@ -123,6 +125,7 @@ Delivery status of a direct sweep.
 | `route` | `gaszip`, `relay`, `lifi`, `transfer`, `burn` or `donate` |
 | `hash` | The sweep or swap transaction hash |
 | `requestId` | Required for `relay` |
+| `quoted`, `fromChainId`, `toChainId` | Optional: the plan's `quoted` and the chain pair. With them, the API records how much the bridge delivered against its quote, with no address or hash, to keep the 3% margin honest |
 
 Response: `{ "state": "pending" | "delivered" | "failed", "destTx": "0x..." }`. For `transfer`, `burn` and `donate` the state is `delivered`; confirm the transaction landed and the balance is 0 on the chain itself.
 
