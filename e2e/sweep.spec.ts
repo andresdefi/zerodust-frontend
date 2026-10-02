@@ -136,7 +136,8 @@ test('sweeps a direct chain: plan checked and replayed in the page, signed here,
   await page.keyboard.press('Enter');
   await expect(page.locator('.row')).toHaveCount(4);
   const avax = page.locator('.row', { hasText: 'Avalanche' });
-  await expect(avax.locator('.tag')).toHaveText('direct');
+  // Same row as every other chain: no method tag or per-row note
+  await expect(avax.locator('.tag')).toHaveCount(0);
   // Selected by default, like the sponsored chains; keep only Avalanche for this test
   for (const name of ['Base', 'Optimism', 'Scroll']) await page.getByRole('checkbox', { name: `Sweep ${name}` }).uncheck();
 
@@ -144,7 +145,8 @@ test('sweeps a direct chain: plan checked and replayed in the page, signed here,
   await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^Base/ }).click();
   await page.getByRole('button', { name: 'Check sweep' }).click();
   await expect(page.getByRole('button', { name: 'Sweep 1 chain' })).toBeVisible({ timeout: 30_000 });
-  await expect(avax).toContainText('ZeroDust fee 0.002 AVAX');
+  await expect(avax).not.toContainText('ZeroDust fee');
+  await expect(page.locator('.summary')).toContainText('ZeroDust fee');
   expect(sent).toEqual([]);
 
   await page.getByRole('button', { name: 'Sweep 1 chain' }).click();
@@ -171,7 +173,10 @@ test('refuses a direct plan that pays someone else, and sends nothing', async ({
   await page.getByRole('button', { name: 'Choose where it goes' }).click();
   await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^Base/ }).click();
   await page.getByRole('button', { name: 'Check sweep' }).click();
-  await expect(page.locator('.row', { hasText: 'Avalanche' })).toContainText('Plan refused: the Gas.zip deposit does not name the address you set', { timeout: 30_000 });
+  const refused = page.locator('.row', { hasText: 'Avalanche' }).locator('.warn-text');
+  await expect(refused).toHaveText('Stopped before signing: the plan failed a safety check', { timeout: 30_000 });
+  // The exact reason stays available on hover
+  await expect(refused).toHaveAttribute('title', /Plan refused: the Gas.zip deposit does not name the address you set/);
   await expect(page.getByRole('button', { name: /^Sweep \d/ })).toHaveCount(0);
   expect(sent).toEqual([]);
 });
