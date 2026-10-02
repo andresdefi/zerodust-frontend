@@ -18,6 +18,10 @@ export { API_URL, BURN_ADDRESS, ZERODUST_ADDRESS };
 /** Chains checked or swept at once; keeps well under the API's 60 quotes a minute */
 const PARALLEL_CHAINS = 3;
 
+/** A route the API could not confirm is asked again this often before other chains are offered */
+const ROUTE_RETRIES = 2;
+const ROUTE_RETRY_MS = 3000;
+
 /**
  * What to do with a chain no route takes to the destination. Direct chains
  * with a swap route can also swap out; the few cents of gas reserve the swap
@@ -226,8 +230,14 @@ export function useSweep(account: LocalAccount) {
     let cancelled = false;
     const direct = rows.filter((r) => r.direct && r.balance > 0n && r.chainId !== destination);
     void inPool(direct, PARALLEL_CHAINS, async (row) => {
-      const result = await directRoute({ chainId: row.chainId, toChainId: destination, from: address, recipient })
+      const probe = () => directRoute({ chainId: row.chainId, toChainId: destination, from: address, recipient })
         .catch(() => ({ available: null }));
+      let result = await probe();
+      // "Unknown" is often a bridge's passing hiccup: ask again before offering other chains
+      for (let i = 0; i < ROUTE_RETRIES && result.available === null && !cancelled; i++) {
+        await wait(ROUTE_RETRY_MS);
+        result = await probe();
+      }
       if (!cancelled) setDirectRoutes((prev) => ({ ...prev, [row.chainId]: result }));
       if (result.available === true) return;
       // Not confirmed to the destination: which other major chains can it go to?
