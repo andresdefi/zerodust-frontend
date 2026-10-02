@@ -6,11 +6,13 @@ The planning endpoints are quote-only. They return unsigned transactions and nev
 
 ## Chains
 
-As of 1 October 2026, `GET /direct/chains` lists 10 chains:
+As of 2 October 2026, `GET /direct/chains` lists 12 chains:
 
 | Chain | ID | Token |
 |---|---|---|
+| Flare | 14 | FLR |
 | Cronos | 25 | CRO |
+| Rootstock | 30 | RBTC |
 | XDC | 50 | XDC |
 | Fuse | 122 | FUSE |
 | Flow EVM | 747 | FLOW |
@@ -100,7 +102,7 @@ Response:
 | `route` | `gaszip`, `relay`, `transfer`, `burn` or `donate` |
 | `requestId` | Relay's request ID, needed by `/direct/status`; otherwise `null` |
 | `txs` | Unsigned legacy transactions, in order, with consecutive nonces: `kind` (`fee`, `sweep` or `swap`), `to`, `data`, `value`, `gas`, `gasPrice`, `nonce` |
-| `receive` | What arrives: the bridge's quote, the exact value for a same-chain transfer, `0` for burn or donate |
+| `receive` | The least that arrives: the bridge's quote less 3% (bridges settle at their own price on delivery), the exact value for a same-chain transfer, `0` for burn or donate |
 | `fee` | ZeroDust's fee in wei, `0` when none |
 | `balance` | The balance this plan spends |
 
