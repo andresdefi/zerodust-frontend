@@ -1,5 +1,5 @@
 import { verifyAcrossDeposit } from './across';
-import { BURN_ADDRESS, GASLIMIT_CHAINS, GASZIP_DEPOSIT, LIFI_DIAMOND, RELAY_DEPOSIT_NATIVE, ZERODUST_ADDRESS, type DirectPlan, type PlanMode } from './plan';
+import { BURN_ADDRESS, GASLIMIT_CHAINS, GASZIP_DEPOSIT, LIFI_DIAMOND, PAYMASTER_GENERAL, RELAY_DEPOSIT_NATIVE, ZERODUST_ADDRESS, ZK_PAYMASTERS, type DirectPlan, type PlanMode } from './plan';
 
 // The API is untrusted input: before anything is signed, the page checks the
 // plan against what the owner asked for and against chain state it read
@@ -35,6 +35,8 @@ export interface PlanChecks {
 export function verifyPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
   const fail = (why: string): never => { throw new Error(`Plan refused: ${why}`); };
   const gasLimitChain = GASLIMIT_CHAINS.has(ctx.chainId);
+  // ZK-stack chains: the paymaster pays the gas, so only values leave the wallet
+  const paymaster = ZK_PAYMASTERS[ctx.chainId];
   if (plan.chainId !== ctx.chainId) fail('it is for another chain');
   if (plan.txs.length < 1 || plan.txs.length > 2) fail('expected one or two transactions');
   if (BigInt(plan.balance) !== ctx.balance) fail('the balance changed since it was planned; check again');
@@ -47,19 +49,37 @@ export function verifyPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
     if (t.kind === 'fee' && i !== 0) fail('the fee must come first');
     // A chain that charges the whole limit: a plain transfer is exactly 21,000, never more
     if (gasLimitChain && t.data === '0x' && BigInt(t.gas) !== 21_000n) fail('a plain transfer asks for more than 21,000 gas');
+    if (paymaster) {
+      if (!t.paymaster || !eq(t.paymaster, paymaster)) fail('a transaction does not use ZeroDust\'s paymaster');
+      if (!t.paymasterInput?.toLowerCase().startsWith(PAYMASTER_GENERAL)) fail('the paymaster input is not the general flow');
+      if (!t.gasPerPubdata || BigInt(t.gasPerPubdata) <= 0n) fail('a transaction has no gas per pubdata limit');
+    } else if (t.paymaster !== undefined || t.paymasterInput !== undefined) {
+      fail('a paymaster appears on a chain that does not use one');
+    }
   });
 
   const [first] = plan.txs;
   const last = plan.txs[plan.txs.length - 1]!;
   const fee = first!.kind === 'fee' ? first! : null;
-  if (fee) {
+  if (fee && paymaster) {
+    // The fee transaction pays the service fee and prepays both transactions' gas to the paymaster
+    if (!eq(fee.to, paymaster) || fee.data !== '0x') fail('the fee does not go to the paymaster as a plain transfer');
+    const service = BigInt(plan.fee);
+    const gasFee = BigInt(plan.gasFee ?? '-1');
+    if (gasFee < 0n || BigInt(fee.value) !== service + gasFee) fail('the fee transaction is not the fee plus the gas');
+    if (service * MAX_FEE_SHARE > ctx.balance) fail('the fee is above 5% of the balance');
+    const maxGas = plan.txs.reduce((sum, t) => sum + BigInt(t.gas) * BigInt(t.gasPrice), 0n);
+    if (gasFee > maxGas) fail('it prepays more gas than both transactions may cost');
+    if ((ctx.mode === 'burn' || ctx.mode === 'donate') && service !== 0n) fail('burn and donate carry no fee');
+  } else if (fee) {
     if (!eq(fee.to, ZERODUST_ADDRESS) || fee.data !== '0x') fail('the fee does not go to ZeroDust as a plain transfer');
     if (BigInt(fee.value) * MAX_FEE_SHARE > ctx.balance) fail('the fee is above 5% of the balance');
     if (ctx.mode === 'burn' || ctx.mode === 'donate') fail('burn and donate carry no fee');
   }
   if (last.kind === 'fee') fail('the plan only pays the fee');
 
-  const spend = totalSpend(plan);
+  // Where a paymaster pays the gas, only the values leave the wallet
+  const spend = paymaster ? plan.txs.reduce((sum, t) => sum + BigInt(t.value), 0n) : totalSpend(plan);
   if (ctx.mode === 'exit') {
     if (spend > ctx.balance) fail('it spends more than the balance');
     if (!plan.leftoverMax || BigInt(plan.leftoverMax) < ctx.balance - spend) fail('the swap leftover is not bounded');

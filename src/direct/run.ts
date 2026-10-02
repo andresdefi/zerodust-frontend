@@ -1,7 +1,8 @@
+import { chainConfig as zkChainConfig } from 'viem/zksync';
 import type { Hex, LocalAccount } from 'viem';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { isRegisteredSettler, ZEROX_DEPLOYER, ZEROX_REGISTRY_CALLS } from './across';
-import { directChains, GASLIMIT_CHAINS, prepareExit, preparePlan, TX_GAP_BLOCKS, type DirectPlan, type PlanMode, type Target } from './plan';
+import { directChains, GASLIMIT_CHAINS, ZK_PAYMASTERS, prepareExit, preparePlan, TX_GAP_BLOCKS, type DirectPlan, type PlanMode, type Target } from './plan';
 import { checkReplay, replay } from './replay';
 import { verifyPlan } from './verify';
 
@@ -64,7 +65,11 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string)
   const [wallet, kinds] = await Promise.all([readWallet(t.chainId, t.from), apiChainKinds()]);
   // The page's own list decides how a plan is checked; the API must agree with it
   if ((kinds[t.chainId] === 'gaslimit') !== GASLIMIT_CHAINS.has(t.chainId)) throw new Error('Plan refused: the API and this page disagree on how this chain charges gas');
+  if ((kinds[t.chainId] === 'zk') !== (ZK_PAYMASTERS[t.chainId] !== undefined)) throw new Error('Plan refused: the API and this page disagree on how this chain pays gas');
   const checks = verifyPlan(plan, { ...t, mode, ...wallet });
+  // ZK-stack chains: the paymaster pays all gas, so the values adding up to the balance (checked
+  // above) is the whole exact-zero argument; there is no EVM fork to replay them on
+  if (ZK_PAYMASTERS[t.chainId]) return plan;
   // Never the API's expiry: the one in the deposit itself (or none)
   delete plan.expiresAt;
   if (checks.across) {
@@ -77,7 +82,23 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string)
   return plan;
 }
 
+/**
+ * ZK-stack chains: an EIP-712 (type 113) transaction naming the paymaster, signed the way viem's
+ * signEip712Transaction does it: the ZKsync transaction domain, signed by the account, serialized
+ */
+async function signZkTransaction(account: LocalAccount, chainId: number, t: DirectPlan['txs'][number]): Promise<Hex> {
+  const tx = {
+    chainId, from: account.address, to: t.to as `0x${string}`, data: t.data as Hex, value: BigInt(t.value), nonce: t.nonce,
+    gas: BigInt(t.gas), maxFeePerGas: BigInt(t.gasPrice), maxPriorityFeePerGas: 0n,
+    paymaster: t.paymaster as `0x${string}`, paymasterInput: t.paymasterInput as Hex, gasPerPubdata: BigInt(t.gasPerPubdata!),
+    type: 'eip712' as const,
+  };
+  const customSignature = await account.signTypedData(zkChainConfig.custom.getEip712Domain(tx) as never);
+  return zkChainConfig.serializers.transaction({ ...tx, customSignature }, { r: '0x0', s: '0x0', v: 0n }) as Hex;
+}
+
 export function signPlan(account: LocalAccount, plan: DirectPlan): Promise<Hex[]> {
+  if (ZK_PAYMASTERS[plan.chainId]) return Promise.all(plan.txs.map((t) => signZkTransaction(account, plan.chainId, t)));
   return Promise.all(plan.txs.map((t) => account.signTransaction({
     type: 'legacy',
     chainId: plan.chainId,
