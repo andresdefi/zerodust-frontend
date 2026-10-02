@@ -150,9 +150,11 @@ function monadPlan(nonce: number, recipient: string, tamper: boolean) {
 /** Everything the page may call, answered offline; returns what was swept */
 /**
  * `onlyTo`: the direct chain's bridges reach only this chain; any other answers
- * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base)
+ * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base);
+ * `hiccups`: the first route checks answer "unknown", then the real answer
  */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number } = {}) {
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number } = {}) {
+  let hiccups = opts.hiccups ?? 0;
   /** The funded direct chain, if any */
   const DIRECT = opts.monad ? MONAD : AVAX;
   const DIRECT_BALANCE = opts.monad ? MONAD_BALANCE : AVAX_BALANCE;
@@ -198,6 +200,11 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     }
     if (path === '/direct/route') {
       const to = Number(url.searchParams.get('toChainId'));
+      // A bridge's passing hiccup: the first answers are "unknown"
+      if (hiccups > 0) {
+        hiccups -= 1;
+        return json(route, { available: null, reason: 'Relay: 429' });
+      }
       return json(route, opts.onlyTo === undefined || opts.onlyTo === to ? { available: true } : { available: null, reason: 'Gas.zip: Quote: Please Try Again' });
     }
     if (path === '/direct/prepare' && opts.monad) return json(route, monadPlan(directNonce, url.searchParams.get('recipient')!, !!opts.tamper));
