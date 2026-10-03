@@ -8,7 +8,7 @@
 // must stay valid quotes, not shapes.
 import type { Page, Route } from '@playwright/test';
 import { buildSweepIntentTypedData } from '@zerodust/sdk';
-import type { Address, Hex } from 'viem';
+import { encodeFunctionData, keccak256, parseAbi, type Address, type Hex } from 'viem';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../src/chains/rpcs';
 import { ACROSS, acrossDepositData, addressWord } from '../tests/fixtures/across-direct';
 
@@ -32,6 +32,31 @@ export const CHAINS = [
 ];
 /** Chains the test wallet holds a balance on */
 export const FUNDED = [8453, 10, 534352];
+
+/** Mitosis (token delivery): its MITO leaves through Hyperlane as MITO on BNB Chain */
+export const MITOSIS = 124816;
+const MITOSIS_CHAIN = { chainId: MITOSIS, name: 'Mitosis', nativeToken: 'MITO', explorerUrl: 'https://mitoscan.io', available: true };
+const HYPERLANE_ROUTER = '0xF6CC9B10c607afB777380bF71F272E4D7037C3A9';
+const HYPERLANE_FEE = 16n * 10n ** 15n; // scaled to the shared test balance (0.53)
+const TRANSFER_REMOTE = parseAbi(['function transferRemote(uint32 destination, bytes32 recipient, uint256 amount) payable returns (bytes32)']);
+
+/** The API's Mitosis -> BNB Chain quote: the pinned router, transferRemote(56, user, routed - fee) */
+function mitosisQuote(destination: string) {
+  const q = quote(MITOSIS, 56, destination);
+  const routed = BALANCE - BigInt(q.fees.maxTotalFeeWei);
+  const callData = encodeFunctionData({
+    abi: TRANSFER_REMOTE,
+    functionName: 'transferRemote',
+    args: [56, `0x${destination.slice(2).toLowerCase().padStart(64, '0')}`, routed - HYPERLANE_FEE],
+  });
+  const received = ((routed - HYPERLANE_FEE) * 97n) / 100n;
+  return {
+    ...q,
+    estimatedReceive: received.toString(),
+    receiveToken: { symbol: 'MITO', address: '0x8e1e6BF7E13C400269987B65Ab2b5724b016CaEF', decimals: 18 },
+    intent: { ...q.intent, callTarget: HYPERLANE_ROUTER.toLowerCase(), callData, routeHash: keccak256(callData), minReceive: received.toString() },
+  };
+}
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
@@ -153,7 +178,9 @@ function monadPlan(nonce: number, recipient: string, tamper: boolean) {
  * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base);
  * `hiccups`: the first route checks answer "unknown", then the real answer
  */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number } = {}) {
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean } = {}) {
+  const chains = opts.mitosis ? [...CHAINS, MITOSIS_CHAIN] : CHAINS;
+  const funded = opts.mitosis ? [...FUNDED, MITOSIS] : FUNDED;
   let hiccups = opts.hiccups ?? 0;
   /** The funded direct chain, if any */
   const DIRECT = opts.monad ? MONAD : AVAX;
@@ -169,23 +196,26 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     const url = new URL(route.request().url());
     const path = url.pathname;
     if (path === '/chains') {
-      return json(route, { chains: CHAINS.map((c) => ({ ...c, nativeTokenDecimals: 18, minBalance: '0', contractAddress: ZERODUST, enabled: true, crossChain: { available: c.available } })) });
+      return json(route, { chains: chains.map((c) => ({ ...c, nativeTokenDecimals: 18, minBalance: '0', contractAddress: ZERODUST, enabled: true, crossChain: { available: c.available } })) });
     }
     if (path === `/balances/${user}` || path.toLowerCase() === `/balances/${user.toLowerCase()}`) {
       return json(route, {
         address: user,
-        chains: CHAINS.map((c) => ({
+        chains: chains.map((c) => ({
           chainId: c.chainId, name: c.name, nativeToken: c.nativeToken,
-          balance: FUNDED.includes(c.chainId) && !swept.has(c.chainId) ? BALANCE.toString() : '0',
-          balanceFormatted: '', canSweep: FUNDED.includes(c.chainId) && !swept.has(c.chainId), minBalance: '0',
+          balance: funded.includes(c.chainId) && !swept.has(c.chainId) ? BALANCE.toString() : '0',
+          balanceFormatted: '', canSweep: funded.includes(c.chainId) && !swept.has(c.chainId), minBalance: '0',
         })),
       });
     }
     if (path === '/destinations') {
       const from = Number(url.searchParams.get('fromChainId'));
+      if (from === MITOSIS) {
+        return json(route, { fromChainId: from, destinations: [{ chainId: 56, name: 'BNB Chain', nativeSymbol: 'BNB', nativeDecimals: 18, bridges: ['hyperlane'], zerodustChain: true }] });
+      }
       return json(route, { fromChainId: from, destinations: CHAINS.filter((c) => c.chainId !== from).map((c) => ({ chainId: c.chainId, name: c.name, nativeSymbol: 'ETH', nativeDecimals: 18, bridges: ['relay'], zerodustChain: true })) });
     }
-    if (path === '/prices') return json(route, { prices: { ETH: 2697.86 } });
+    if (path === '/prices') return json(route, { prices: { ETH: 2697.86, MITO: 0.0158 } });
     if (path === '/direct/chains') {
       return json(route, {
         chains: [
@@ -219,7 +249,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       const p = url.searchParams;
       const from = Number(p.get('fromChainId'));
       const to = Number(p.get('toChainId'));
-      const q = quote(from, to, p.get('destination')!);
+      const q = from === MITOSIS ? mitosisQuote(p.get('destination')!) : quote(from, to, p.get('destination')!);
       quotes.set(q.quoteId, { ...q, from, to });
       return json(route, q);
     }
@@ -263,7 +293,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       const direct = chainId === AVAX || chainId === MONAD;
       const balance = direct
         ? (isUser && chainId === DIRECT && (opts.direct || opts.monad) && !swept.has(DIRECT) ? DIRECT_BALANCE : 0n)
-        : (FUNDED.includes(chainId) && !swept.has(chainId) ? BALANCE : 0n);
+        : (funded.includes(chainId) && !swept.has(chainId) ? BALANCE : 0n);
       if (r.method === 'eth_sendRawTransaction') {
         sent.push(String(r.params![0]));
         directNonce += 1;
