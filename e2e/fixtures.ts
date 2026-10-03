@@ -40,6 +40,27 @@ const HYPERLANE_ROUTER = '0xF6CC9B10c607afB777380bF71F272E4D7037C3A9';
 const HYPERLANE_FEE = 16n * 10n ** 15n; // scaled to the shared test balance (0.53)
 const TRANSFER_REMOTE = parseAbi(['function transferRemote(uint32 destination, bytes32 recipient, uint256 amount) payable returns (bytes32)']);
 
+/** Endurance (token delivery, own wallet only): ACE leaves through Fusionist's bridge as ACE on BNB Chain */
+export const ENDURANCE = 648;
+const ENDURANCE_CHAIN = { chainId: ENDURANCE, name: 'Endurance', nativeToken: 'ACE', explorerUrl: 'https://explorer-endurance.fusionist.io', available: true };
+const ENDURANCE_BRIDGE = '0xf3310e3f0D46FF5EE7daB69C73452D0ff3979Bed';
+const ENDURANCE_FEE = 10n ** 16n; // scaled to the shared test balance (0.53)
+const REQUEST_FROM_USER = parseAbi(['function requestFromUser(uint256 nonce_, uint256 amount_) payable']);
+
+/** The API's Endurance -> BNB Chain quote: requestFromUser(next nonce, routed - fee); only for the user's own address */
+function enduranceQuote(destination: string) {
+  const q = quote(ENDURANCE, 56, destination);
+  const routed = BALANCE - BigInt(q.fees.maxTotalFeeWei);
+  const callData = encodeFunctionData({ abi: REQUEST_FROM_USER, functionName: 'requestFromUser', args: [1n, routed - ENDURANCE_FEE] });
+  const received = ((routed - ENDURANCE_FEE) * 97n) / 100n;
+  return {
+    ...q,
+    estimatedReceive: received.toString(),
+    receiveToken: { symbol: 'ACE', address: '0xc27A719105A987b4c34116223CAE8bd8F4B5def4', decimals: 18 },
+    intent: { ...q.intent, callTarget: ENDURANCE_BRIDGE.toLowerCase(), callData, routeHash: keccak256(callData), minReceive: received.toString() },
+  };
+}
+
 /** The API's Mitosis -> BNB Chain quote: the pinned router, transferRemote(56, user, routed - fee) */
 function mitosisQuote(destination: string) {
   const q = quote(MITOSIS, 56, destination);
@@ -178,9 +199,9 @@ function monadPlan(nonce: number, recipient: string, tamper: boolean) {
  * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base);
  * `hiccups`: the first route checks answer "unknown", then the real answer
  */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean } = {}) {
-  const chains = opts.mitosis ? [...CHAINS, MITOSIS_CHAIN] : CHAINS;
-  const funded = opts.mitosis ? [...FUNDED, MITOSIS] : FUNDED;
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean } = {}) {
+  const chains = [...CHAINS, ...(opts.mitosis ? [MITOSIS_CHAIN] : []), ...(opts.endurance ? [ENDURANCE_CHAIN] : [])];
+  const funded = [...FUNDED, ...(opts.mitosis ? [MITOSIS] : []), ...(opts.endurance ? [ENDURANCE] : [])];
   let hiccups = opts.hiccups ?? 0;
   /** The funded direct chain, if any */
   const DIRECT = opts.monad ? MONAD : AVAX;
@@ -210,12 +231,15 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     }
     if (path === '/destinations') {
       const from = Number(url.searchParams.get('fromChainId'));
+      if (from === ENDURANCE) {
+        return json(route, { fromChainId: from, destinations: [{ chainId: 56, name: 'BNB Chain', nativeSymbol: 'BNB', nativeDecimals: 18, bridges: ['endurance'], zerodustChain: true }] });
+      }
       if (from === MITOSIS) {
         return json(route, { fromChainId: from, destinations: [{ chainId: 56, name: 'BNB Chain', nativeSymbol: 'BNB', nativeDecimals: 18, bridges: ['hyperlane'], zerodustChain: true }] });
       }
       return json(route, { fromChainId: from, destinations: CHAINS.filter((c) => c.chainId !== from).map((c) => ({ chainId: c.chainId, name: c.name, nativeSymbol: 'ETH', nativeDecimals: 18, bridges: ['relay'], zerodustChain: true })) });
     }
-    if (path === '/prices') return json(route, { prices: { ETH: 2697.86, MITO: 0.0158 } });
+    if (path === '/prices') return json(route, { prices: { ETH: 2697.86, MITO: 0.0158, ACE: 0.18 } });
     if (path === '/direct/chains') {
       return json(route, {
         chains: [
@@ -249,7 +273,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       const p = url.searchParams;
       const from = Number(p.get('fromChainId'));
       const to = Number(p.get('toChainId'));
-      const q = from === MITOSIS ? mitosisQuote(p.get('destination')!) : quote(from, to, p.get('destination')!);
+      const q = from === MITOSIS ? mitosisQuote(p.get('destination')!) : from === ENDURANCE ? enduranceQuote(p.get('destination')!) : quote(from, to, p.get('destination')!);
       quotes.set(q.quoteId, { ...q, from, to });
       return json(route, q);
     }

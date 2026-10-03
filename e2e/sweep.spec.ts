@@ -241,6 +241,36 @@ test('token delivery: Mitosis is swept to exactly 0 and arrives as MITO (a token
   expect(swept.has(124816)).toBe(true);
 });
 
+test('token delivery, own wallet only: Endurance goes as ACE to this wallet on BNB Chain, and is blocked for another recipient', async ({ page }) => {
+  const key = generatePrivateKey();
+  const { swept } = await mockNetwork(page, privateKeyToAccount(key).address, { endurance: true });
+  await page.goto('/');
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.row')).toHaveCount(4);
+  for (const name of ['Base', 'Optimism', 'Scroll']) await page.getByRole('checkbox', { name: `Sweep ${name}` }).uncheck();
+  await page.getByRole('button', { name: 'Choose where it goes' }).click();
+  await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^BNB Chain/ }).click();
+  const endurance = page.locator('.row', { hasText: 'Endurance' });
+  await expect(endurance).toContainText('Arrives as ACE (a token) on BNB Chain, not as gas, to this wallet only');
+
+  // Another recipient: the bridge cannot pay it, so the row is blocked
+  await page.getByRole('button', { name: /Receive at: your wallet/ }).click();
+  await page.locator('#recipient').fill('0x2222222222222222222222222222222222222222');
+  await expect(endurance).toContainText('Endurance can only be swept to your own wallet');
+  await page.getByRole('button', { name: 'Use my wallet' }).click();
+
+  await page.getByRole('button', { name: 'Check sweep' }).click();
+  await expect(page.getByRole('button', { name: 'Sweep 1 chain' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.summary')).toContainText(/ACE \(token\) on BNB Chain/);
+  await page.getByRole('button', { name: 'Sweep 1 chain' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Sweep 1 chain' }).click();
+  await expect(page.getByText('1 of 1 at zero')).toBeVisible({ timeout: 60_000 });
+  await expect(endurance).toContainText('ACE (token) to BNB Chain');
+  expect(swept.has(648)).toBe(true);
+});
+
 test('refuses a direct plan that pays someone else, and sends nothing', async ({ page }) => {
   const key = generatePrivateKey();
   const { sent } = await mockNetwork(page, privateKeyToAccount(key).address, { direct: true, tamper: true });

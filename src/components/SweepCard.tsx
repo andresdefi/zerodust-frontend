@@ -8,6 +8,7 @@ import { WalletHead } from './WalletHead';
 import { ChevronIcon, DownIcon, PencilIcon, RefreshIcon } from './icons';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
 import { serviceFeeUsd } from '../lib/fees';
+import { deliversOnlyToSender } from '@zerodust/sdk';
 import { isRouted, plainReason, rowToken, type Choice, type DestTotal, type Row, type SweepModel } from '../sweep/useSweep';
 
 const CHOICES: Record<Exclude<Choice, 'elsewhere'> | 'leave', { label: string; text: (amount: string, dest: string) => string; danger?: boolean; quiet?: boolean }> = {
@@ -164,7 +165,11 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                 {!isDest && !blocked && (() => {
                   const to = m.elsewhere[r.chainId] ?? m.destination;
                   const token = to === null ? undefined : rowToken(r.chainId, to);
-                  return token && <span className="detail warn-text">Arrives as {token.symbol} (a token) on {m.destOf(to!)?.name ?? 'the destination'}, not as gas</span>;
+                  return token && (
+                    <span className="detail warn-text">
+                      Arrives as {token.symbol} (a token) on {m.destOf(to!)?.name ?? 'the destination'}, not as gas{deliversOnlyToSender(r.chainId, to!) ? ', to this wallet only' : ''}
+                    </span>
+                  );
                 })()}
                 {!r.canSweep && <span className="detail muted">Too small to sweep</span>}
                 {st?.phase === 'quoting' && <span className="detail muted">Checking…</span>}
@@ -179,7 +184,11 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                 )}
                 {needs && menuFor === r.chainId && (
                   <span className="menu" role="group" aria-label={`What to do with ${r.name}`}>
-                    <span className="menu-title">Nothing can carry {r.token} to {m.destRow?.name ?? 'the destination'} right now. Instead:</span>
+                    <span className="menu-title">
+                      {!m.toSelf && m.destination !== null && deliversOnlyToSender(r.chainId, m.destination)
+                        ? `${r.name}'s bridge can only send to the loaded wallet, not to the address you set. Use your wallet as the recipient, or instead:`
+                        : `Nothing can carry ${r.token} to ${m.destRow?.name ?? 'the destination'} right now. Instead:`}
+                    </span>
                     {m.altsFor(r).map((d) => (
                       <button key={`to-${d.chainId}`} type="button" className="menu-item" onClick={() => { m.setChoice(r.chainId, 'elsewhere', d.chainId); setMenuFor(null); }}>
                         <b>Send to {d.name} instead{rowToken(r.chainId, d.chainId) ? ` as ${rowToken(r.chainId, d.chainId)!.symbol} (token)` : ''}</b>
