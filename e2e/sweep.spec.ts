@@ -108,6 +108,10 @@ test('sweeps sponsored chains to one destination, burning a chain with no route'
   await page.getByRole('button', { name: 'Check sweep' }).click();
   await expect(page.getByRole('button', { name: 'Sweep 3 chains' })).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.summary')).toContainText('You receive');
+  // The bridge doing the bridging is named, per chain and in the summary
+  await expect(page.locator('.summary')).toContainText('Bridged byRelay');
+  await expect(page.locator('.row', { hasText: 'Optimism' })).toContainText('Bridged by Relay');
+  await expect(page.locator('.footnote')).toContainText('The bridges named above carry the funds across chains');
   expect(swept.size).toBe(0);
 
   await page.getByRole('button', { name: 'Sweep 3 chains' }).click();
@@ -146,6 +150,7 @@ test('sweeps a direct chain: plan checked and replayed in the page, signed here,
   await page.getByRole('button', { name: 'Check sweep' }).click();
   await expect(page.getByRole('button', { name: 'Sweep 1 chain' })).toBeVisible({ timeout: 30_000 });
   await expect(avax).not.toContainText('ZeroDust fee');
+  await expect(avax).toContainText('Bridged by Gas.zip');
   await expect(page.locator('.summary')).toContainText('ZeroDust fee');
   expect(sent).toEqual([]);
 
@@ -231,6 +236,7 @@ test('token delivery: Mitosis is swept to exactly 0 and arrives as MITO (a token
   await expect(page.getByRole('button', { name: 'Sweep 1 chain' })).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.summary')).toContainText(/MITO \(token\) on BNB Chain/);
   await expect(page.locator('.summary')).not.toContainText('BNB on BNB Chain');
+  await expect(mitosis).toContainText('Bridged by Hyperlane');
 
   await page.getByRole('button', { name: 'Sweep 1 chain' }).click();
   const confirm = page.getByRole('dialog', { name: /Sweep 1 chain/ });
@@ -267,7 +273,7 @@ test('token delivery, own wallet only: Endurance goes as ACE to this wallet on B
   await page.getByRole('button', { name: 'Sweep 1 chain' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Sweep 1 chain' }).click();
   await expect(page.getByText('1 of 1 at zero')).toBeVisible({ timeout: 60_000 });
-  await expect(endurance).toContainText('ACE (token) to BNB Chain');
+  await expect(endurance).toContainText('ACE (token) to BNB Chain via Endurance Bridge');
   expect(swept.has(648)).toBe(true);
 });
 

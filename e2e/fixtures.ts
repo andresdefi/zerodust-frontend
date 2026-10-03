@@ -56,6 +56,7 @@ function enduranceQuote(destination: string) {
   return {
     ...q,
     estimatedReceive: received.toString(),
+    bridge: { name: 'endurance', displayName: 'Endurance Bridge' },
     receiveToken: { symbol: 'ACE', address: '0xc27A719105A987b4c34116223CAE8bd8F4B5def4', decimals: 18 },
     intent: { ...q.intent, callTarget: ENDURANCE_BRIDGE.toLowerCase(), callData, routeHash: keccak256(callData), minReceive: received.toString() },
   };
@@ -74,6 +75,7 @@ function mitosisQuote(destination: string) {
   return {
     ...q,
     estimatedReceive: received.toString(),
+    bridge: { name: 'hyperlane', displayName: 'Hyperlane' },
     receiveToken: { symbol: 'MITO', address: '0x8e1e6BF7E13C400269987B65Ab2b5724b016CaEF', decimals: 18 },
     intent: { ...q.intent, callTarget: HYPERLANE_ROUTER.toLowerCase(), callData, routeHash: keccak256(callData), minReceive: received.toString() },
   };
@@ -98,6 +100,7 @@ function quote(fromChainId: number, toChainId: number, destination: string) {
       revokeGasUnits: '50000',
     },
     autoRevoke: true,
+    ...(sameChain ? {} : { bridge: { name: 'relay', displayName: 'Relay' } }),
     intent: {
       mode: sameChain ? 0 : 1,
       destination: destination.toLowerCase(),

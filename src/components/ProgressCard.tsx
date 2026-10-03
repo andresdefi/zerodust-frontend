@@ -68,7 +68,7 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
             const to = st.toChainId !== undefined ? m.destOf(st.toChainId) : null;
             const what = st.choice === 'burn' ? `Burned ${formatAmount(r.balance, r.decimals)} ${r.token}`
               : st.choice === 'donate' ? `Donated ${formatAmount(r.balance, r.decimals)} ${r.token}`
-              : st.receive !== undefined && to ? `${formatAmount(st.receive, st.token?.decimals ?? to.decimals, 6)} ${st.token ? `${st.token.symbol} (token)` : to.token} to ${to.name}` : '';
+              : st.receive !== undefined && to ? `${formatAmount(st.receive, st.token?.decimals ?? to.decimals, 6)} ${st.token ? `${st.token.symbol} (token)` : to.token} to ${to.name}${m.bridgeOf[r.chainId] ? ` via ${m.bridgeOf[r.chainId]}` : ''}` : '';
             return (
               <li key={r.chainId} className="row">
                 <span />
