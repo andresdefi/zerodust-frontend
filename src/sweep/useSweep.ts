@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getAddress, isAddress, type LocalAccount } from 'viem';
-import { ZeroDust, ZeroDustAgent, deliveredToken, type Destination } from '@zerodust/sdk';
+import { ZeroDust, ZeroDustAgent, deliveredToken, deliversOnlyToSender, type Destination } from '@zerodust/sdk';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { inPool } from '../lib/pool';
 import { readState } from '../lib/rpc';
@@ -296,7 +296,9 @@ export function useSweep(account: LocalAccount) {
     if (destination === null) return [];
     const ids = row.direct
       ? alts[row.chainId] ?? []
-      : routes[row.chainId]?.available === false ? [] : ALT_CANDIDATES.filter((id) => id !== destination && id !== row.chainId && routes[row.chainId]?.dests.has(id));
+      : routes[row.chainId]?.available === false ? [] : ALT_CANDIDATES.filter((id) => id !== destination && id !== row.chainId && routes[row.chainId]?.dests.has(id)
+        // A bridge that pays only the sender cannot reach another recipient on any chain
+        && (toSelf || !deliversOnlyToSender(row.chainId, id)));
     return ids.map(destOf).filter((d): d is DestOption => d !== null);
   };
 
@@ -310,6 +312,8 @@ export function useSweep(account: LocalAccount) {
       const blocked = available === false || (available === null && (alts[row.chainId]?.length ?? 0) > 0);
       return blocked ? `No bridge takes ${row.token} to ${destRow?.name ?? 'this chain'} right now` : null;
     }
+    // Its bridge has no recipient: it can only pay the loaded wallet (Endurance)
+    if (!toSelf && deliversOnlyToSender(row.chainId, destination)) return `${row.name} can only be swept to your own wallet`;
     const route = routes[row.chainId];
     if (!route) return null;
     if (route.available === false) return `No bridge takes ${row.token} out of ${row.name} right now`;

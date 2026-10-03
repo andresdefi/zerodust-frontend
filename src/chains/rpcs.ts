@@ -53,6 +53,7 @@ export const RPC_URLS: Record<number, string> = {
   // Doma (2026-10-02): CORS for the site and Origin: null
   97477: 'https://rpc.doma.xyz',
   124816: 'https://rpc.mitosis.org',
+  648: 'https://rpc-endurance.fusionist.io',
 };
 
 // Direct chains (no EIP-7702 in ZeroDust): the page reads balances, replays
