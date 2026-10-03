@@ -104,6 +104,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
   const receiveUsd = m.destRow ? totalsUsd(m.readyTotals, m.prices) : null;
   const readyRoutedUsd = m.readyRows.filter((r) => isRouted(m.choices[r.chainId])).reduce((s, r) => s + (rowUsd(r) ?? 0), 0);
   const gasUsd = receiveUsd === null ? null : Math.max(0, readyRoutedUsd - receiveUsd - feeUsd);
+  const readyBridges = [...new Set(m.readyRows.map((r) => m.bridgeOf[r.chainId]).filter((b): b is string => !!b))];
   const burned = m.selectedRows.filter((r) => m.choices[r.chainId] === 'burn');
   const donated = m.selectedRows.filter((r) => m.choices[r.chainId] === 'donate');
 
@@ -173,6 +174,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                 })()}
                 {!r.canSweep && <span className="detail muted">Too small to sweep</span>}
                 {st?.phase === 'quoting' && <span className="detail muted">Checking…</span>}
+                {st?.phase === 'ready' && m.bridgeOf[r.chainId] && <span className="detail muted">Bridged by {m.bridgeOf[r.chainId]}</span>}
                 {st?.phase === 'no-route' && !needs && <span className="detail warn-text" title={st.detail}>{plainReason(st.detail ?? '', r.token, r.name)}</span>}
                 {needs && (
                   <span className="detail split">
@@ -293,6 +295,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
         {checked && m.destRow && (
           <div><dt>You receive at least</dt><dd>{totalsText(m.readyTotals) || `0 ${m.destRow.token}`}{formatUsd(receiveUsd) && ` (${formatUsd(receiveUsd)})`}</dd></div>
         )}
+        {checked && readyBridges.length > 0 && <div><dt>Bridged by</dt><dd>{readyBridges.join(', ')}</dd></div>}
         <div><dt>ZeroDust fee</dt><dd>{checked ? '' : 'about '}{formatUsd(feeUsd) || '$0.00'}</dd></div>
         {checked && gasUsd !== null && <div><dt>Gas and bridges</dt><dd>{formatUsd(gasUsd) || '$0.00'}</dd></div>}
         {burned.length > 0 && <div><dt>Burned</dt><dd className="danger-text">{burned.map(amountText).join(', ')}</dd></div>}
@@ -301,6 +304,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
       </dl>
       <p className="footnote">
         {checked ? 'Each chain is quoted again when it is swept.' : 'Check gets real quotes and simulates every chain. Nothing is sent.'}
+        {checked && readyBridges.length > 0 && ' The bridges named above carry the funds across chains; ZeroDust builds each transfer and checks it before you sign.'}
       </p>
       <div className="actions">
         <button type="button" className="btn btn-primary btn-block" onClick={action.onClick} disabled={action.disabled}>

@@ -40,7 +40,10 @@ export function ConfirmDialog({ open, model: m, onCancel, onConfirm }: {
       <ul className="dlist">
         {routed.map((r) => (
           <li key={r.chainId}>
-            <span>{r.name}{m.choices[r.chainId] === 'elsewhere' && <small> to {m.destOf(m.elsewhere[r.chainId]!)?.name}</small>}</span>
+            <span>
+              {r.name}{m.choices[r.chainId] === 'elsewhere' && <small> to {m.destOf(m.elsewhere[r.chainId]!)?.name}</small>}
+              {m.bridgeOf[r.chainId] && <small> via {m.bridgeOf[r.chainId]}</small>}
+            </span>
             <span>{amount(r)}</span>
           </li>
         ))}
