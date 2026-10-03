@@ -79,6 +79,14 @@ export interface RowState {
   token?: { symbol: string; decimals: number };
 }
 
+/** Display names of the bridges a direct plan can use (the API's own adapters name the sponsored ones) */
+const DIRECT_BRIDGE_NAMES: Record<string, string> = { gaszip: 'Gas.zip', relay: 'Relay', across: 'Across', lifi: 'LI.FI' };
+
+/** The bridge that carries a sponsored quote, as the API names it (none for a same-chain transfer) */
+function quoteBridge(quote: unknown): string | undefined {
+  return (quote as { bridge?: { displayName?: string } } | undefined)?.bridge?.displayName;
+}
+
 /** The token a row delivers instead of gas on `toChainId`, if any (owner decision 2026-10-03) */
 export function rowToken(sourceChainId: number, toChainId: number): RowState['token'] {
   const t = deliveredToken(sourceChainId, toChainId);
@@ -137,6 +145,15 @@ export function useSweep(account: LocalAccount) {
   const [alts, setAlts] = useState<Record<number, number[]>>({});
   // 'elsewhere' choices: the chain each of those sources goes to instead
   const [elsewhere, setElsewhere] = useState<Record<number, number>>({});
+  // Which bridge carries each chain (owner, 2026-10-03: say plainly the bridging is theirs, not ZeroDust's)
+  const [bridgeOf, setBridgeOf] = useState<Record<number, string>>({});
+  const setBridge = (chainId: number, name: string | undefined) =>
+    setBridgeOf((prev) => {
+      const next = { ...prev };
+      if (name) next[chainId] = name;
+      else delete next[chainId];
+      return next;
+    });
   const [busy, setBusy] = useState(false);
   const [swept, setSwept] = useState(false);
   // Direct chains: a fee transfer that landed before its sweep failed is not charged again
@@ -277,6 +294,7 @@ export function useSweep(account: LocalAccount) {
     setElsewhere({});
     setChoices((prev) => Object.fromEntries(Object.entries(prev).filter(([, c]) => c !== 'elsewhere')));
     setStates({});
+    setBridgeOf({});
   };
 
   const setDestination = (chainId: number) => {
@@ -396,6 +414,7 @@ export function useSweep(account: LocalAccount) {
           const mode = planModeFor(row);
           setState(row.chainId, { phase: 'quoting', detail: 'Replaying on a fork of the chain' });
           const plan = await planChecked(directTarget(row), mode, feePaid.current[row.chainId]);
+          setBridge(row.chainId, DIRECT_BRIDGE_NAMES[plan.route]);
           setState(row.chainId, {
             phase: 'ready', choice, fee: BigInt(plan.fee),
             ...(mode === 'burn' || mode === 'donate' ? {} : { receive: BigInt(plan.receive), toChainId: targetFor(row).toChainId }),
@@ -411,6 +430,7 @@ export function useSweep(account: LocalAccount) {
         { dryRun: true }
       );
       if (result.success && result.quote) {
+        setBridge(row.chainId, quoteBridge(result.quote));
         setState(row.chainId, isRouted(choice) && !isExit(choice)
           ? { phase: 'ready', choice, receive: BigInt(result.quote.estimatedReceive), toChainId: target.toChainId, token: rowToken(row.chainId, target.toChainId) }
           : { phase: 'ready', choice });
@@ -437,6 +457,7 @@ export function useSweep(account: LocalAccount) {
       const plan = await planChecked(directTarget(row), mode, feePaid.current[row.chainId]);
       const fee = BigInt(plan.fee);
       const receive = mode === 'burn' || mode === 'donate' ? undefined : BigInt(plan.receive);
+      setBridge(row.chainId, DIRECT_BRIDGE_NAMES[plan.route]);
       update({ phase: 'sweeping', detail: 'Sending', fee });
       const sent = await broadcast(plan, await signPlan(account, plan), (h) => { hash = h; });
       if (sent.feePaidTx) feePaid.current[row.chainId] = sent.feePaidTx;
@@ -513,6 +534,7 @@ export function useSweep(account: LocalAccount) {
       // Trust the chain, not the API: the balance must read exactly 0 and the
       // delegation must be gone. The revoke is its own transaction, sent after
       // the sweep confirms, so allow it up to two minutes.
+      setBridge(row.chainId, quoteBridge(result.quote));
       setState(row.chainId, { phase: 'sweeping', detail: 'Checking on-chain', txHash: result.txHash, choice });
       const receive = result.quote && (!choice || choice === 'elsewhere') ? BigInt(result.quote.estimatedReceive) : undefined;
       try {
@@ -561,7 +583,7 @@ export function useSweep(account: LocalAccount) {
   return {
     address, rows, stage, loadError, prices, dests, sourceCount, destination, destRow, setDestination,
     recipient, setRecipient, recipientValid, toSelf, selected, toggle, states, choices, setChoice, choicesFor,
-    altsFor, elsewhere, destOf, blockedReason, needsChoice, selectedRows, readyRows, readyTotals, busy, check, sweep, reload,
+    altsFor, elsewhere, destOf, bridgeOf, blockedReason, needsChoice, selectedRows, readyRows, readyTotals, busy, check, sweep, reload,
   };
 }
 
