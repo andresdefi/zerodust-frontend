@@ -8,7 +8,7 @@ import { WalletHead } from './WalletHead';
 import { ChevronIcon, DownIcon, PencilIcon, RefreshIcon } from './icons';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
 import { serviceFeeUsd } from '../lib/fees';
-import { isRouted, plainReason, type Choice, type DestTotal, type Row, type SweepModel } from '../sweep/useSweep';
+import { isRouted, plainReason, rowToken, type Choice, type DestTotal, type Row, type SweepModel } from '../sweep/useSweep';
 
 const CHOICES: Record<Exclude<Choice, 'elsewhere'> | 'leave', { label: string; text: (amount: string, dest: string) => string; danger?: boolean; quiet?: boolean }> = {
   'exit-donate': { label: 'Swap out', text: (_a, d) => `Swap to a token a bridge takes, then send it to ${d}. The few cents of gas reserve left are donated to ZeroDust.` },
@@ -29,13 +29,13 @@ export const CHOICE_LABEL: Record<Choice, string> = {
 
 /** "0.0013 ETH on Base, 0.000015 ETH on Optimism" */
 export const totalsText = (totals: DestTotal[]) =>
-  totals.map((t) => `${formatAmount(t.amount, t.dest.decimals, 6)} ${t.dest.token} on ${t.dest.name}`).join(', ');
+  totals.map((t) => `${formatAmount(t.amount, t.decimals, 6)} ${t.symbol}${t.isToken ? ' (token)' : ''} on ${t.dest.name}`).join(', ');
 
 /** Every destination's total in USD, or null while a price is missing */
 export function totalsUsd(totals: DestTotal[], prices: Record<string, number>): number | null {
   let sum = 0;
   for (const t of totals) {
-    const usd = usdValue(t.amount, t.dest.decimals, prices[t.dest.token]);
+    const usd = usdValue(t.amount, t.decimals, prices[t.symbol]);
     if (usd === null) return null;
     sum += usd;
   }
@@ -97,8 +97,9 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
     const fee = m.states[r.chainId]?.fee;
     return s + (fee !== undefined ? usdValue(fee, r.decimals, price(r.token)) ?? 0 : serviceFeeUsd(rowUsd(r) ?? 0));
   }, 0);
-  const mainTotal = m.readyTotals.find((t) => t.dest.chainId === m.destination)?.amount ?? 0n;
-  const otherTotals = m.readyTotals.filter((t) => t.dest.chainId !== m.destination);
+  // The headline is the destination's gas; when only a token arrives (token delivery), that token
+  const headline: DestTotal | undefined = m.readyTotals.find((t) => t.dest.chainId === m.destination && !t.isToken) ?? m.readyTotals[0];
+  const otherTotals = m.readyTotals.filter((t) => t !== headline);
   const receiveUsd = m.destRow ? totalsUsd(m.readyTotals, m.prices) : null;
   const readyRoutedUsd = m.readyRows.filter((r) => isRouted(m.choices[r.chainId])).reduce((s, r) => s + (rowUsd(r) ?? 0), 0);
   const gasUsd = receiveUsd === null ? null : Math.max(0, readyRoutedUsd - receiveUsd - feeUsd);
@@ -160,6 +161,11 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                   </span>
                 </span>
                 {isDest && <span className="detail muted">Destination chain: nothing to move</span>}
+                {!isDest && !blocked && (() => {
+                  const to = m.elsewhere[r.chainId] ?? m.destination;
+                  const token = to === null ? undefined : rowToken(r.chainId, to);
+                  return token && <span className="detail warn-text">Arrives as {token.symbol} (a token) on {m.destOf(to!)?.name ?? 'the destination'}, not as gas</span>;
+                })()}
                 {!r.canSweep && <span className="detail muted">Too small to sweep</span>}
                 {st?.phase === 'quoting' && <span className="detail muted">Checking…</span>}
                 {st?.phase === 'no-route' && !needs && <span className="detail warn-text" title={st.detail}>{plainReason(st.detail ?? '', r.token, r.name)}</span>}
@@ -176,8 +182,11 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                     <span className="menu-title">Nothing can carry {r.token} to {m.destRow?.name ?? 'the destination'} right now. Instead:</span>
                     {m.altsFor(r).map((d) => (
                       <button key={`to-${d.chainId}`} type="button" className="menu-item" onClick={() => { m.setChoice(r.chainId, 'elsewhere', d.chainId); setMenuFor(null); }}>
-                        <b>Send to {d.name} instead</b>
-                        <span>{amountText(r)} goes to {d.name}, to {m.toSelf ? 'your wallet' : 'the address you set'}. Everything else still goes to {m.destRow?.name ?? 'the destination'}.</span>
+                        <b>Send to {d.name} instead{rowToken(r.chainId, d.chainId) ? ` as ${rowToken(r.chainId, d.chainId)!.symbol} (token)` : ''}</b>
+                        <span>
+                          {amountText(r)} goes to {d.name}, to {m.toSelf ? 'your wallet' : 'the address you set'}
+                          {rowToken(r.chainId, d.chainId) ? `, as the ${rowToken(r.chainId, d.chainId)!.symbol} token, not ${d.token} gas` : ''}. Everything else still goes to {m.destRow?.name ?? 'the destination'}.
+                        </span>
                       </button>
                     ))}
                     {[...m.choicesFor(r), 'leave' as const].map((key) => {
@@ -236,7 +245,13 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
           </button>
           <div className="recv">
             {checked && m.destRow
-              ? <><div className="amt">{formatAmount(mainTotal, m.destRow.decimals, 6)} {m.destRow.token}</div><div className="sub">{otherTotals.length > 0 ? `plus ${totalsText(otherTotals)}; at least ${formatUsd(receiveUsd)} in all` : `at least ${formatUsd(receiveUsd)}`}</div></>
+              ? <>
+                  <div className="amt">{headline ? `${formatAmount(headline.amount, headline.decimals, 6)} ${headline.symbol}` : `0 ${m.destRow.token}`}</div>
+                  <div className="sub">
+                    {headline?.isToken ? `a token on ${headline.dest.name}, not gas; ` : ''}
+                    {otherTotals.length > 0 ? `plus ${totalsText(otherTotals)}; at least ${formatUsd(receiveUsd)} in all` : `at least ${formatUsd(receiveUsd)}`}
+                  </div>
+                </>
               : <div className="sub">{m.destination === null ? 'Pick the chain that receives everything' : 'Check for a quote'}</div>}
           </div>
         </div>

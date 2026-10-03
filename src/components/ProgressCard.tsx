@@ -56,7 +56,7 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
           <div className="received">
             <div>
               <div className="bal">At least this arrives{arrivedOn} at {m.toSelf ? 'your wallet' : 'the address you set'}</div>
-              {arrived.map((t) => <div key={t.dest.chainId} className="amt">{formatAmount(t.amount, t.dest.decimals, 6)} {t.dest.token}{arrived.length > 1 && <small> on {t.dest.name}</small>}</div>)}
+              {arrived.map((t) => <div key={`${t.dest.chainId}:${t.symbol}`} className="amt">{formatAmount(t.amount, t.decimals, 6)} {t.symbol}{(arrived.length > 1 || t.isToken) && <small>{t.isToken ? ' (token)' : ''} on {t.dest.name}</small>}</div>)}
             </div>
             <div className="sub">{arrivedUsd}</div>
           </div>
@@ -68,7 +68,7 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
             const to = st.toChainId !== undefined ? m.destOf(st.toChainId) : null;
             const what = st.choice === 'burn' ? `Burned ${formatAmount(r.balance, r.decimals)} ${r.token}`
               : st.choice === 'donate' ? `Donated ${formatAmount(r.balance, r.decimals)} ${r.token}`
-              : st.receive !== undefined && to ? `${formatAmount(st.receive, to.decimals, 6)} ${to.token} to ${to.name}` : '';
+              : st.receive !== undefined && to ? `${formatAmount(st.receive, st.token?.decimals ?? to.decimals, 6)} ${st.token ? `${st.token.symbol} (token)` : to.token} to ${to.name}` : '';
             return (
               <li key={r.chainId} className="row">
                 <span />

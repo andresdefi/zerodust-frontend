@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getAddress, isAddress, type LocalAccount } from 'viem';
-import { ZeroDust, ZeroDustAgent, type Destination } from '@zerodust/sdk';
+import { ZeroDust, ZeroDustAgent, deliveredToken, type Destination } from '@zerodust/sdk';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { inPool } from '../lib/pool';
 import { readState } from '../lib/rpc';
@@ -72,12 +72,27 @@ export interface RowState {
   fee?: bigint;
   /** Where `receive` arrives: the destination, or another chain for 'elsewhere' */
   toChainId?: number;
+  /**
+   * Token delivery (a Hyperlane warp route, e.g. Mitosis): `receive` is this
+   * token on the destination, not its gas
+   */
+  token?: { symbol: string; decimals: number };
 }
 
-/** What arrives on one chain */
+/** The token a row delivers instead of gas on `toChainId`, if any (owner decision 2026-10-03) */
+export function rowToken(sourceChainId: number, toChainId: number): RowState['token'] {
+  const t = deliveredToken(sourceChainId, toChainId);
+  return t ? { symbol: t.symbol, decimals: t.decimals } : undefined;
+}
+
+/** What arrives on one chain, in one asset (its gas, or a delivered token) */
 export interface DestTotal {
   dest: DestOption;
   amount: bigint;
+  symbol: string;
+  decimals: number;
+  /** A token, not the chain's gas */
+  isToken: boolean;
 }
 
 export type Stage = 'loading' | 'error' | 'empty' | 'select' | 'checked' | 'sweeping' | 'done';
@@ -393,7 +408,7 @@ export function useSweep(account: LocalAccount) {
       );
       if (result.success && result.quote) {
         setState(row.chainId, isRouted(choice) && !isExit(choice)
-          ? { phase: 'ready', choice, receive: BigInt(result.quote.estimatedReceive), toChainId: target.toChainId }
+          ? { phase: 'ready', choice, receive: BigInt(result.quote.estimatedReceive), toChainId: target.toChainId, token: rowToken(row.chainId, target.toChainId) }
           : { phase: 'ready', choice });
       } else {
         setState(row.chainId, { phase: 'no-route', detail: result.error ?? 'No quote' });
@@ -481,6 +496,7 @@ export function useSweep(account: LocalAccount) {
       const choice = choices[row.chainId];
       const target = targetFor(row);
       const toChainId = target.toChainId;
+      const token = rowToken(row.chainId, toChainId);
       setState(row.chainId, { phase: 'sweeping', detail: 'Signing', choice });
       const result = await agent.sweep(
         { fromChainId: row.chainId, toChainId: target.toChainId, destination: getAddress(target.recipient) },
@@ -508,13 +524,14 @@ export function useSweep(account: LocalAccount) {
           txHash: result.txHash,
           receive,
           toChainId,
+          token,
           choice,
           detail: zero && revoked
             ? 'Balance reads 0 on-chain, delegation revoked'
             : `Sent, but the chain shows ${zero ? '' : 'a balance left'}${!zero && !revoked ? ' and ' : ''}${revoked ? '' : 'the delegation still set'}`,
         });
       } catch {
-        setState(row.chainId, { phase: 'done', txHash: result.txHash, receive, toChainId, choice, detail: 'Completed; the on-chain check could not run' });
+        setState(row.chainId, { phase: 'done', txHash: result.txHash, receive, toChainId, token, choice, detail: 'Completed; the on-chain check could not run' });
       }
     });
     setBusy(false);
@@ -546,19 +563,25 @@ export function useSweep(account: LocalAccount) {
 
 export type SweepModel = ReturnType<typeof useSweep>;
 
-/** What arrives, per chain: the chosen destination first, then the others ('elsewhere') */
+/**
+ * What arrives, per chain and asset: the chosen destination's gas first, then
+ * the rest ('elsewhere', delivered tokens). A token never adds into gas.
+ */
 export function totalsByDest(states: RowState[], destination: number | null, destOf: (chainId: number) => DestOption | null): DestTotal[] {
-  const sums = new Map<number, bigint>();
+  const sums = new Map<string, DestTotal>();
   for (const s of states) {
     if (s.receive === undefined || s.toChainId === undefined) continue;
-    sums.set(s.toChainId, (sums.get(s.toChainId) ?? 0n) + s.receive);
+    const dest = destOf(s.toChainId);
+    if (!dest) continue;
+    const symbol = s.token?.symbol ?? dest.token;
+    const key = `${dest.chainId}:${symbol}`;
+    const prev = sums.get(key);
+    sums.set(key, prev
+      ? { ...prev, amount: prev.amount + s.receive }
+      : { dest, amount: s.receive, symbol, decimals: s.token?.decimals ?? dest.decimals, isToken: !!s.token });
   }
-  return [...sums]
-    .sort(([a], [b]) => Number(b === destination) - Number(a === destination))
-    .flatMap(([chainId, amount]) => {
-      const dest = destOf(chainId);
-      return dest ? [{ dest, amount }] : [];
-    });
+  const rank = (t: DestTotal) => (t.dest.chainId === destination ? 0 : 2) + (t.isToken ? 1 : 0);
+  return [...sums.values()].sort((a, b) => rank(a) - rank(b));
 }
 
 /** Errors that mean no bridge can take this chain to the destination (not transient ones) */

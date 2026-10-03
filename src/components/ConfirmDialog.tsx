@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
-import { isExit, isRouted, type Row, type SweepModel } from '../sweep/useSweep';
+import { isExit, isRouted, rowToken, type Row, type SweepModel } from '../sweep/useSweep';
 import { totalsText, totalsUsd } from './SweepCard';
 
 /** Last stop before anything is sent: every chain, its amount, and any burn or donation spelled out */
@@ -45,6 +45,14 @@ export function ConfirmDialog({ open, model: m, onCancel, onConfirm }: {
           </li>
         ))}
       </ul>
+      {routed.map((r) => {
+        const to = m.elsewhere[r.chainId] ?? m.destination;
+        const token = to === null ? undefined : rowToken(r.chainId, to);
+        const dest = to === null ? null : m.destOf(to);
+        return token && dest && (
+          <p key={`token-${r.chainId}`} className="donate-note">{r.name}: arrives as {token.symbol}, a token on {dest.name}, not {dest.token} gas. You can swap or keep it there.</p>
+        );
+      })}
       {exits.map((r) => <p key={r.chainId} className="donate-note">{r.name}: swapped out through LI.FI; the few cents of gas reserve left are {m.choices[r.chainId] === 'exit-burn' ? 'burned' : 'donated to ZeroDust'}.</p>)}
       {burned.map((r) => <p key={r.chainId} className="burn-note">{r.name}: {amount(r)} is burned. You will not receive it.</p>)}
       {donated.map((r) => <p key={r.chainId} className="donate-note">{r.name}: {amount(r)} is donated to ZeroDust. You will not receive it.</p>)}
