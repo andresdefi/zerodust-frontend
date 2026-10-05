@@ -1,9 +1,9 @@
-import { useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import type { LocalAccount } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { ShieldIcon } from './icons';
 import { OFFLINE } from '../lib/env';
-import { useServiceStatus } from '../sweep/status';
+import { isPaused, useServiceStatus } from '../sweep/status';
 
 const KEY_PATTERN = /^(0x)?[0-9a-fA-F]{64}$/;
 
@@ -27,6 +27,11 @@ export function KeyEntry({ onAccount }: { onAccount: (account: LocalAccount, cli
   const [error, setError] = useState<string | null>(null);
   const [clipboard, setClipboard] = useState<ClipboardState>(null);
   const status = useServiceStatus();
+  // Paused: nothing can be swept, so no key is taken (anything typed before the status arrived is dropped)
+  const paused = isPaused(status);
+  useEffect(() => {
+    if (paused) buffer.current = '';
+  }, [paused]);
   // Set by the idle timeout before it reloads; read once (no key is stored, only this flag)
   const [forgotIdle] = useState(() => {
     try {
@@ -44,6 +49,7 @@ export function KeyEntry({ onAccount }: { onAccount: (account: LocalAccount, cli
   };
 
   const unlock = (clipboardState: ClipboardState = null) => {
+    if (paused) return;
     const raw = buffer.current.trim();
     reset();
     if (!KEY_PATTERN.test(raw)) {
@@ -92,16 +98,17 @@ export function KeyEntry({ onAccount }: { onAccount: (account: LocalAccount, cli
         <h2 id="load-title">Load wallet</h2>
       </div>
       <div className="load">
-        {status?.sponsoredSweeps === 'paused' && (
+        {paused && (
           <p className="status-notice" role="status">
-            {status.message ?? 'Sponsored sweeps are paused right now. They resume automatically.'}
+            {status?.message ?? 'ZeroDust is paused right now. Sweeps resume automatically; please come back shortly.'}
           </p>
         )}
         <p id="key-help">Type or paste the private key of the wallet you want to empty.</p>
-        <label className="keyfield">
+        <label className={paused ? 'keyfield is-disabled' : 'keyfield'}>
           <span className="visually-hidden">Private key</span>
           <input
             type="password"
+            disabled={paused}
             value=""
             onChange={() => {}}
             onKeyDown={onKeyDown}
@@ -119,9 +126,9 @@ export function KeyEntry({ onAccount }: { onAccount: (account: LocalAccount, cli
             aria-invalid={error ? true : undefined}
           />
           <span className="dots" aria-hidden="true">
-            {length > 0 ? '•'.repeat(length) : <span className="placeholder">Private key</span>}
+            {length > 0 && !paused ? '•'.repeat(length) : <span className="placeholder">{paused ? 'Paused' : 'Private key'}</span>}
           </span>
-          <span className="hint" id="key-count">{length > 0 ? `${length} characters` : 'Paste or type'}</span>
+          <span className="hint" id="key-count">{paused ? 'Unavailable' : length > 0 ? `${length} characters` : 'Paste or type'}</span>
         </label>
         {error && <p className="field-error" role="alert">{error}</p>}
         {clipboard === 'failed' && <p className="field-warn" role="alert">Could not wipe the clipboard. Copy something else now.</p>}
@@ -141,7 +148,7 @@ export function KeyEntry({ onAccount }: { onAccount: (account: LocalAccount, cli
         )}
       </div>
       <div className="actions">
-        <button type="button" className="btn btn-primary btn-block" onClick={() => unlock()} disabled={length === 0}>
+        <button type="button" className="btn btn-primary btn-block" onClick={() => unlock()} disabled={length === 0 || paused}>
           Load wallet
         </button>
       </div>
