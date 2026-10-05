@@ -4,7 +4,7 @@ import { OfflinePage } from './pages/OfflinePage';
 import { SecurityPage } from './pages/SecurityPage';
 import type { PageBuild } from './pages/build-record';
 import { DocsPage } from './pages/DocsPage';
-import { DOC_NAV, renderDoc, renderLegal } from './pages/docs';
+import { DOC_NAV, docPath, docSource, renderDoc, renderLegal } from './pages/docs';
 import { StaticPage } from './pages/Layout';
 
 export const PAGES: Record<string, { title: string; description: string; render: (build: PageBuild) => string }> = {
@@ -38,3 +38,17 @@ export const PAGES: Record<string, { title: string; description: string; render:
     }];
   })),
 };
+
+/**
+ * /llms-full.txt: every docs page's Markdown in sidebar order, site links made absolute,
+ * so it always matches the pages
+ */
+export function llmsFull(): string {
+  const pages = DOC_NAV.map((d) => {
+    const source = docSource(d.slug);
+    if (source === null) throw new Error(`llms-full: content/docs/${d.slug}.md is missing`);
+    const body = source.trim().replace(/\]\((\/[^)\s]*)\)/g, '](https://zerodust.xyz$1)');
+    return `<!-- https://zerodust.xyz${docPath(d.slug)} -->\n\n${body}`;
+  });
+  return `${pages.join('\n\n---\n\n')}\n`;
+}
