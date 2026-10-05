@@ -37,7 +37,7 @@ try {
   // Built without git (an upload without .git): the record says so
 }
 
-const { PAGES } = await import(join(root, 'dist-ssr', 'prerender.js'));
+const { PAGES, llmsFull } = await import(join(root, 'dist-ssr', 'prerender.js'));
 for (const [name, page] of Object.entries(PAGES)) {
   const body = page.render({ offlineSha256, commit });
   const html = `<!doctype html>
@@ -64,5 +64,8 @@ ${body}
   writeFileSync(file, html);
 }
 
+// The docs as one Markdown file for LLMs, generated so it cannot drift from the pages
+writeFileSync(join(dist, 'llms-full.txt'), llmsFull());
+
 rmSync(join(dist, 'theme-manifest.json'), { force: true });
-console.log(`prerender: ${Object.keys(PAGES).join(', ')}; offline page copied; commit ${commit.slice(0, 12)}`);
+console.log(`prerender: ${Object.keys(PAGES).join(', ')}, llms-full.txt; offline page copied; commit ${commit.slice(0, 12)}`);
