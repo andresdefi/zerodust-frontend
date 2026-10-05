@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getAddress, isAddress, type LocalAccount } from 'viem';
+import { getAddress, isAddress, parseUnits, type LocalAccount } from 'viem';
 import { ZeroDust, ZeroDustAgent, deliveredToken, deliversOnlyToSender, type Destination } from '@zerodust/sdk';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { inPool } from '../lib/pool';
@@ -7,6 +7,7 @@ import { readState } from '../lib/rpc';
 import { deliveryStatus, directBalances, directChains, directRoute, BURN_ADDRESS, ZERODUST_ADDRESS, type PlanMode } from '../direct/plan';
 import { broadcast, planChecked, settledBalance, signPlan } from '../direct/run';
 import { API_URL } from './constants';
+import { formatAmountUp } from '../lib/format';
 
 // Mirrors the local sweeper (local-sweeper/src/App.tsx), which is proven with
 // real funds: ZeroDust's sponsored (EIP-7702) chains through the SDK, and
@@ -67,6 +68,8 @@ export interface RowState {
   receive?: bigint;
   detail?: string;
   txHash?: string;
+  /** A transaction left this wallet (or the relayer took the sweep): a failure then needs checking */
+  sent?: boolean;
   choice?: Choice;
   /** Direct chains: ZeroDust's fee in the chain's token, paid as its own transfer */
   fee?: bigint;
@@ -134,7 +137,7 @@ export function useSweep(account: LocalAccount) {
   // every 10 min by the API), and which chains its bridges deliver to
   const [routes, setRoutes] = useState<Record<number, { available: boolean | null; dests: Set<number> }>>({});
   // Per direct source, for the chosen destination: can a bridge take it (exit: only a swap can)
-  const [directRoutes, setDirectRoutes] = useState<Record<number, { available: boolean | null; exit?: boolean }>>({});
+  const [directRoutes, setDirectRoutes] = useState<Record<number, { available: boolean | null; exit?: boolean; minimumBalanceWei?: string }>>({});
   // No default destination (owner decision): the owner picks the chain
   const [destination, setDestinationState] = useState<number | null>(null);
   const [recipient, setRecipientState] = useState<string>(address);
@@ -327,6 +330,8 @@ export function useSweep(account: LocalAccount) {
     if (row.direct) {
       // Unconfirmed (null) counts as blocked only when another chain is confirmed instead
       const available = directRoutes[row.chainId]?.available;
+      const minimum = directRoutes[row.chainId]?.minimumBalanceWei;
+      if (available === false && minimum) return tooSmallText(BigInt(minimum), row);
       const blocked = available === false || (available === null && (alts[row.chainId]?.length ?? 0) > 0);
       return blocked ? `No bridge takes ${row.token} to ${destRow?.name ?? 'this chain'} right now` : null;
     }
@@ -451,7 +456,8 @@ export function useSweep(account: LocalAccount) {
     const mode = planModeFor(row);
     const { toChainId } = targetFor(row);
     let hash: string | undefined;
-    const update = (s: Omit<RowState, 'choice'>) => setState(row.chainId, { ...s, choice, toChainId, txHash: s.txHash ?? hash });
+    let sentAny = false;
+    const update = (s: Omit<RowState, 'choice'>) => setState(row.chainId, { ...s, choice, toChainId, txHash: s.txHash ?? hash, sent: sentAny || hash !== undefined });
     try {
       update({ phase: 'sweeping', detail: 'Checking' });
       const plan = await planChecked(directTarget(row), mode, feePaid.current[row.chainId]);
@@ -460,7 +466,10 @@ export function useSweep(account: LocalAccount) {
       setBridge(row.chainId, DIRECT_BRIDGE_NAMES[plan.route]);
       update({ phase: 'sweeping', detail: 'Sending', fee });
       const sent = await broadcast(plan, await signPlan(account, plan), (h) => { hash = h; });
-      if (sent.feePaidTx) feePaid.current[row.chainId] = sent.feePaidTx;
+      if (sent.feePaidTx) {
+        feePaid.current[row.chainId] = sent.feePaidTx;
+        sentAny = true;
+      }
       if (!sent.ok) {
         update({ phase: 'failed', detail: sent.reason ?? 'A transaction reverted or did not confirm' });
         return;
@@ -528,7 +537,7 @@ export function useSweep(account: LocalAccount) {
         { timeoutMs: 300_000, onStatusChange: (s) => setState(row.chainId, { phase: 'sweeping', detail: s.status, choice }) }
       );
       if (!result.success) {
-        setState(row.chainId, { phase: 'failed', detail: result.error ?? 'Sweep failed', txHash: result.txHash, choice });
+        setState(row.chainId, { phase: 'failed', detail: result.error ?? 'Sweep failed', txHash: result.txHash, sent: !!(result.sweepId || result.txHash), choice });
         return;
       }
       // Trust the chain, not the API: the balance must read exactly 0 and the
@@ -615,7 +624,52 @@ export function totalsByDest(states: RowState[], destination: number | null, des
  * What a chain row says when it cannot be swept: the same plain words on every
  * chain, whatever the method behind it (the raw reason stays in a tooltip)
  */
-export function plainReason(detail: string, token: string, chain: string): string {
+/**
+ * The minimum the API names when a balance is too small to bridge
+ * (AMOUNT_TOO_LOW: "... it needs at least 17.94 MITO. ..."), or null
+ */
+export function minimumOf(detail: string | undefined, decimals: number): bigint | null {
+  const found = detail?.match(/needs at least (\d+(?:\.\d+)?) /);
+  if (!found) return null;
+  try {
+    return parseUnits(found[1]!, decimals);
+  } catch {
+    return null;
+  }
+}
+
+/** "Too small to bridge: needs at least 17.94 MITO, add 17.89 more" */
+export function tooSmallText(minimum: bigint, row: { balance: bigint; decimals: number; token: string }): string {
+  const more = minimum - row.balance;
+  return `Too small to bridge: needs at least ${formatAmountUp(minimum, row.decimals)} ${row.token}${more > 0n ? `, add ${formatAmountUp(more, row.decimals)} more` : ''}`;
+}
+
+/**
+ * What a failed row asks of the owner. Only a failure after something was sent
+ * needs checking; before that nothing moved, and the reason says what to do.
+ */
+export type FailureKind = 'too-small' | 'no-route' | 'stopped' | 'try-again' | 'check';
+
+export function failureKind(st: { detail?: string; sent?: boolean; txHash?: string }, decimals: number): FailureKind {
+  if (st.sent || st.txHash) return 'check';
+  const detail = st.detail ?? '';
+  if (minimumOf(detail, decimals) !== null) return 'too-small';
+  if (isNoRoute(detail)) return 'no-route';
+  if (/refus|unsafe|safety/i.test(detail)) return 'stopped';
+  return 'try-again';
+}
+
+export const FAILURE_LABEL: Record<FailureKind, string> = {
+  'too-small': 'Too small',
+  'no-route': 'No route',
+  stopped: 'Stopped',
+  'try-again': 'Try again',
+  check: 'Check needed',
+};
+
+export function plainReason(detail: string, token: string, chain: string, row?: { balance: bigint; decimals: number }): string {
+  const minimum = row ? minimumOf(detail, row.decimals) : null;
+  if (minimum !== null && row) return tooSmallText(minimum, { ...row, token });
   if (isNoRoute(detail)) return `No bridge takes ${token} out of ${chain} right now`;
   if (/does not cover|INSUFFICIENT|too small/i.test(detail)) return 'Too small to cover its own transfer';
   if (/refus|unsafe|safety/i.test(detail)) return 'Stopped before signing: the plan failed a safety check';

@@ -202,7 +202,7 @@ function monadPlan(nonce: number, recipient: string, tamper: boolean) {
  * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base);
  * `hiccups`: the first route checks answer "unknown", then the real answer
  */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean } = {}) {
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; tooSmall?: 'direct' | 'check' | 'sweep' } = {}) {
   const chains = [...CHAINS, ...(opts.mitosis ? [MITOSIS_CHAIN] : []), ...(opts.endurance ? [ENDURANCE_CHAIN] : [])];
   const funded = [...FUNDED, ...(opts.mitosis ? [MITOSIS] : []), ...(opts.endurance ? [ENDURANCE] : [])];
   let hiccups = opts.hiccups ?? 0;
@@ -215,6 +215,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
   const quotes = new Map<string, ReturnType<typeof quote> & { from: number; to: number }>();
   const swept = new Set<number>();
   const sweeps = new Map<string, { fromChainId: number; toChainId: number }>();
+  let mitosisQuotes = 0;
 
   await page.route(`${API}/**`, async (route) => {
     const url = new URL(route.request().url());
@@ -262,6 +263,10 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
         hiccups -= 1;
         return json(route, { available: null, reason: 'Relay: 429' });
       }
+      // Below every bridge's minimum: the API names the balance that would go through
+      if (opts.tooSmall === 'direct') {
+        return json(route, { available: false, reason: 'The balance is too small to bridge from Monad: it needs at least 64.2 MON. Add funds to sweep it.', minimumBalanceWei: (642n * 10n ** 17n).toString() });
+      }
       return json(route, opts.onlyTo === undefined || opts.onlyTo === to ? { available: true } : { available: null, reason: 'Gas.zip: Quote: Please Try Again' });
     }
     if (path === '/direct/prepare' && opts.monad) return json(route, monadPlan(directNonce, url.searchParams.get('recipient')!, !!opts.tamper));
@@ -275,6 +280,14 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     if (path === '/quote') {
       const p = url.searchParams;
       const from = Number(p.get('fromChainId'));
+      // Mitosis below Hyperlane's fee: refused at the check, or only once the sweep requotes
+      mitosisQuotes += from === MITOSIS ? 1 : 0;
+      if (from === MITOSIS && (opts.tooSmall === 'check' || (opts.tooSmall === 'sweep' && mitosisQuotes > 1))) {
+        return json(route, {
+          error: 'The balance is too small to bridge from Mitosis to BNB Chain: it needs at least 17.94 MITO. Add funds to sweep it, or sweep it on Mitosis.',
+          code: 'AMOUNT_TOO_LOW', minimumBalanceWei: '17940000000000000000',
+        }, 400);
+      }
       const to = Number(p.get('toChainId'));
       const q = from === MITOSIS ? mitosisQuote(p.get('destination')!) : from === ENDURANCE ? enduranceQuote(p.get('destination')!) : quote(from, to, p.get('destination')!);
       quotes.set(q.quoteId, { ...q, from, to });

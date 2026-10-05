@@ -175,12 +175,12 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                 {!r.canSweep && <span className="detail muted">Too small to sweep</span>}
                 {st?.phase === 'quoting' && <span className="detail muted">Checking…</span>}
                 {st?.phase === 'ready' && m.bridgeOf[r.chainId] && <span className="detail muted">Bridged by {m.bridgeOf[r.chainId]}</span>}
-                {st?.phase === 'no-route' && !needs && <span className="detail warn-text" title={st.detail}>{plainReason(st.detail ?? '', r.token, r.name)}</span>}
+                {st?.phase === 'no-route' && !needs && <span className="detail warn-text" title={st.detail}>{plainReason(st.detail ?? '', r.token, r.name, r)}</span>}
                 {needs && (
                   <span className="detail split">
                     <span className="warn-text">{blocked ?? st?.detail}</span>
                     <button type="button" className="choose" onClick={() => setMenuFor(menuFor === r.chainId ? null : r.chainId)} aria-expanded={menuFor === r.chainId}>
-                      No route: choose <ChevronIcon />
+                      {blocked?.startsWith('Too small') ? 'Too small' : 'No route'}: choose <ChevronIcon />
                     </button>
                   </span>
                 )}
@@ -189,7 +189,9 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                     <span className="menu-title">
                       {!m.toSelf && m.destination !== null && deliversOnlyToSender(r.chainId, m.destination)
                         ? `${r.name}'s bridge can only send to the loaded wallet, not to the address you set. Use your wallet as the recipient, or instead:`
-                        : `Nothing can carry ${r.token} to ${m.destRow?.name ?? 'the destination'} right now. Instead:`}
+                        : blocked?.startsWith('Too small')
+                          ? `Add ${r.token} on ${r.name} to bridge it, or instead:`
+                          : `Nothing can carry ${r.token} to ${m.destRow?.name ?? 'the destination'} right now. Instead:`}
                     </span>
                     {m.altsFor(r).map((d) => (
                       <button key={`to-${d.chainId}`} type="button" className="menu-item" onClick={() => { m.setChoice(r.chainId, 'elsewhere', d.chainId); setMenuFor(null); }}>
