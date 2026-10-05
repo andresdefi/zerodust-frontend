@@ -36,7 +36,8 @@ export function StaticPage({ children, wide = false }: { children: ReactNode; wi
           <a href="/docs">Docs</a>
           <a href="/terms">Terms</a>
           <a href="/privacy">Privacy</a>
-          <a href="https://github.com/andresdefi/zerodust-frontend">Source</a>
+          <a href="https://github.com/andresdefi/zerodust">Contracts and SDK</a>
+          <a href="https://github.com/andresdefi/zerodust-frontend">Site source</a>
         </span>
       </footer>
     </>

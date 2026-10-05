@@ -22,6 +22,7 @@ export function Nav() {
         <a href={`${SITE}/security`}>Security</a>
         <a href={`${SITE}/offline`}>Offline page</a>
         <a href={`${SITE}/docs`}>Docs</a>
+        <a href="https://github.com/andresdefi/zerodust">GitHub</a>
       </div>
       <button type="button" className="iconbtn" onClick={toggle} aria-label={`Switch to ${next} mode`}>
         {theme === 'dark' ? <SunIcon /> : <MoonIcon />}

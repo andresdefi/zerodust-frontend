@@ -43,6 +43,13 @@ export function RightPanel() {
           <li>ZeroDust never holds your funds.</li>
         </ul>
       </details>
+      <details className="fold">
+        <summary><span>Open source</span><span className="gist">Contracts, SDK and this site, on GitHub</span></summary>
+        <ul>
+          <li><a className="link" href="https://github.com/andresdefi/zerodust">andresdefi/zerodust</a>: the sweep contract, the SDK and the agent tools.</li>
+          <li><a className="link" href="https://github.com/andresdefi/zerodust-frontend">andresdefi/zerodust-frontend</a>: this site. Its build is reproducible: <a className="link" href={`${SITE}/security`}>check it</a>.</li>
+        </ul>
+      </details>
       <p className="note">
         {OFFLINE
           ? <>Offline page. Check for a newer version at <a className="link" href={`${SITE}/offline`}>zerodust.xyz/offline</a>.</>
