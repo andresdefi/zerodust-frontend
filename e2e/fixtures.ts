@@ -202,7 +202,7 @@ function monadPlan(nonce: number, recipient: string, tamper: boolean) {
  * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base);
  * `hiccups`: the first route checks answer "unknown", then the real answer
  */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; tooSmall?: 'direct' | 'check' | 'sweep' } = {}) {
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean } = {}) {
   const chains = [...CHAINS, ...(opts.mitosis ? [MITOSIS_CHAIN] : []), ...(opts.endurance ? [ENDURANCE_CHAIN] : [])];
   const funded = [...FUNDED, ...(opts.mitosis ? [MITOSIS] : []), ...(opts.endurance ? [ENDURANCE] : [])];
   let hiccups = opts.hiccups ?? 0;
@@ -277,6 +277,11 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       // A compromised API: the same amounts, but the deposit credits an attacker on Base
       if (opts.tamper) plan.txs[1]!.data = `0x02${'ba'.repeat(20)}0036`;
       return json(route, plan);
+    }
+    if (path === '/status') {
+      return json(route, opts.paused
+        ? { sponsoredSweeps: 'paused', directChains: 'available', message: 'Sponsored sweeps are paused: ZeroDust cannot sign right now. No funds are at risk and nothing needs doing; they resume automatically. Direct chains your wallet pays for itself still work, except zkSync Era, Abstract and Lens.' }
+        : { sponsoredSweeps: 'available', directChains: 'available', message: null });
     }
     if (path === '/reports' && route.request().method() === 'POST') {
       reports.push(route.request().postDataJSON() as Record<string, unknown>);
