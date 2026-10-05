@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
@@ -20,10 +21,21 @@ const siteHeaders = Object.fromEntries(
 //   check the integrity of a module loaded later) and static assets, with SRI;
 // - theme (--mode theme): the static pages' only script, added to dist/;
 // - ssr (--ssr src/prerender.tsx): only to render the static pages to HTML.
+/** The commit the site was built from, for sweep reports; 'unknown' without git */
+function commit(): string {
+  try {
+    return execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return 'unknown';
+  }
+}
+
 export default defineConfig(({ mode, isSsrBuild }) => {
   const offline = mode === 'offline';
   const theme = mode === 'theme';
   return {
+    // The offline file says 'offline' rather than a commit, so its published hash changes only with its content
+    define: { __SITE_VERSION__: JSON.stringify(offline ? 'offline' : commit()) },
     plugins: [react(), ...(offline || theme || isSsrBuild ? [] : [sri()])],
     base: offline ? './' : '/',
     resolve: offline

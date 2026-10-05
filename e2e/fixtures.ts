@@ -216,6 +216,8 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
   const swept = new Set<number>();
   const sweeps = new Map<string, { fromChainId: number; toChainId: number }>();
   let mitosisQuotes = 0;
+  /** POST /reports bodies, in order */
+  const reports: Array<Record<string, unknown>> = [];
 
   await page.route(`${API}/**`, async (route) => {
     const url = new URL(route.request().url());
@@ -275,6 +277,10 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       // A compromised API: the same amounts, but the deposit credits an attacker on Base
       if (opts.tamper) plan.txs[1]!.data = `0x02${'ba'.repeat(20)}0036`;
       return json(route, plan);
+    }
+    if (path === '/reports' && route.request().method() === 'POST') {
+      reports.push(route.request().postDataJSON() as Record<string, unknown>);
+      return json(route, { reference: `ZD-${(0x1a2b3c00 + reports.length).toString(16).toUpperCase()}` });
     }
     if (path === '/direct/status') return json(route, { state: 'delivered', destTx: `0x${'cd'.repeat(32)}` });
     if (path === '/quote') {
@@ -370,5 +376,5 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     route.abort('blockedbyclient')
   );
 
-  return { swept, sent };
+  return { swept, sent, reports };
 }
