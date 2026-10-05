@@ -94,6 +94,18 @@ test('a loaded key is forgotten after 15 minutes without activity', async ({ pag
   await expect(page.locator('.safety')).toContainText('forgotten after 15 minutes without activity');
 });
 
+test('says sponsored sweeps are paused before a key is entered, and nothing when they work', async ({ page }) => {
+  const key = generatePrivateKey();
+  await mockNetwork(page, privateKeyToAccount(key).address, { paused: true });
+  await page.goto('/');
+  await expect(page.getByRole('status').filter({ hasText: 'Sponsored sweeps are paused' })).toBeVisible();
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  await mockNetwork(page, privateKeyToAccount(key).address);
+  await page.reload();
+  await expect(page.locator('.keyfield')).toBeVisible();
+  await expect(page.getByText('Sponsored sweeps are paused')).toHaveCount(0);
+});
+
 test('rejects something that is not a key, without echoing it', async ({ page }) => {
   await mockNetwork(page, privateKeyToAccount(generatePrivateKey()).address);
   await page.goto('/');

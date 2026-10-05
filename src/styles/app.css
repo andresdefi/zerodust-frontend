@@ -107,6 +107,7 @@ a { color: inherit; }
 .keyfield .placeholder { color: var(--faint); letter-spacing: 0; }
 .field-error { margin-top: 10px; font-size: 13px; color: var(--danger); }
 .field-warn { margin-top: 10px; font-size: 13px; color: var(--warn); }
+.status-notice { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--warn); background: var(--warn-soft); color: var(--warn); font-size: 13.5px; line-height: 1.45; }
 
 /* Shared text tones */
 .muted { color: var(--muted); }

@@ -3,6 +3,7 @@ import type { LocalAccount } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { ShieldIcon } from './icons';
 import { OFFLINE } from '../lib/env';
+import { useServiceStatus } from '../sweep/status';
 
 const KEY_PATTERN = /^(0x)?[0-9a-fA-F]{64}$/;
 
@@ -25,6 +26,7 @@ export function KeyEntry({ onAccount }: { onAccount: (account: LocalAccount, cli
   const [length, setLength] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [clipboard, setClipboard] = useState<ClipboardState>(null);
+  const status = useServiceStatus();
   // Set by the idle timeout before it reloads; read once (no key is stored, only this flag)
   const [forgotIdle] = useState(() => {
     try {
@@ -90,6 +92,11 @@ export function KeyEntry({ onAccount }: { onAccount: (account: LocalAccount, cli
         <h2 id="load-title">Load wallet</h2>
       </div>
       <div className="load">
+        {status?.sponsoredSweeps === 'paused' && (
+          <p className="status-notice" role="status">
+            {status.message ?? 'Sponsored sweeps are paused right now. They resume automatically.'}
+          </p>
+        )}
         <p id="key-help">Type or paste the private key of the wallet you want to empty.</p>
         <label className="keyfield">
           <span className="visually-hidden">Private key</span>
