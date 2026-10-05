@@ -1,6 +1,6 @@
 # SDK overview
 
-`@zerodust/sdk` is the TypeScript SDK for ZeroDust. The current version is 0.5.4 (MIT licensed, source at [github.com/andresdefi/zerodust](https://github.com/andresdefi/zerodust/tree/main/sdk)).
+`@zerodust/sdk` is the TypeScript SDK for ZeroDust. The current version is 0.5.5 (MIT licensed, source at [github.com/andresdefi/zerodust](https://github.com/andresdefi/zerodust/tree/main/sdk)).
 
 ## Install
 
