@@ -6,6 +6,9 @@ import { OFFLINE } from '../lib/env';
 
 const KEY_PATTERN = /^(0x)?[0-9a-fA-F]{64}$/;
 
+/** sessionStorage flag the idle timeout leaves for the next load (never the key) */
+export const IDLE_FLAG = 'zd-idle-forgot';
+
 export type ClipboardState = 'cleared' | 'failed' | null;
 
 /**
@@ -22,6 +25,16 @@ export function KeyEntry({ onAccount }: { onAccount: (account: LocalAccount, cli
   const [length, setLength] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [clipboard, setClipboard] = useState<ClipboardState>(null);
+  // Set by the idle timeout before it reloads; read once (no key is stored, only this flag)
+  const [forgotIdle] = useState(() => {
+    try {
+      const flag = sessionStorage.getItem(IDLE_FLAG) === '1';
+      sessionStorage.removeItem(IDLE_FLAG);
+      return flag;
+    } catch {
+      return false;
+    }
+  });
 
   const reset = () => {
     buffer.current = '';
@@ -108,6 +121,8 @@ export function KeyEntry({ onAccount }: { onAccount: (account: LocalAccount, cli
         <div className="safety">
           <div><ShieldIcon /><span>The key stays in this tab. It is never sent, saved or shown. Only signatures leave.</span></div>
           <div><ShieldIcon /><span>Pasting wipes your clipboard. Typing keeps the key off it entirely.</span></div>
+          <div><ShieldIcon /><span>Browser extensions can read what you type or paste on any page. Use a private window with extensions off, or the offline page.</span></div>
+          {forgotIdle && <div><ShieldIcon /><span>The last key was forgotten after 15 minutes without activity.</span></div>}
         </div>
         {OFFLINE ? (
           <div className="offline"><span>You are running the offline page from your own disk.</span></div>

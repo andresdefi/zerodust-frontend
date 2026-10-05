@@ -74,6 +74,26 @@ test('pasting a key wipes the clipboard', async ({ page, context, browserName })
   expect(await reader.evaluate(() => navigator.clipboard.readText())).toBe('');
 });
 
+test('a loaded key is forgotten after 15 minutes without activity', async ({ page }) => {
+  await page.clock.install();
+  const key = generatePrivateKey();
+  await mockNetwork(page, privateKeyToAccount(key).address);
+  await page.goto('/');
+  await expect(page.locator('.safety')).toContainText('Browser extensions can read what you type');
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.row')).toHaveCount(3);
+  await page.clock.runFor(14 * 60 * 1000);
+  await expect(page.locator('.row')).toHaveCount(3);
+  await page.mouse.click(5, 5); // activity resets the timer
+  await page.clock.runFor(14 * 60 * 1000);
+  await expect(page.locator('.row')).toHaveCount(3);
+  await page.clock.runFor(2 * 60 * 1000);
+  await expect(page.locator('.keyfield input')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.safety')).toContainText('forgotten after 15 minutes without activity');
+});
+
 test('rejects something that is not a key, without echoing it', async ({ page }) => {
   await mockNetwork(page, privateKeyToAccount(generatePrivateKey()).address);
   await page.goto('/');
