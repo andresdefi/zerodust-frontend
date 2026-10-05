@@ -123,7 +123,8 @@ export const directChains = () => get<{ chains: DirectChainInfo[]; prices: Recor
 export const directBalances = (address: string) => get<DirectBalance[]>(`balances/${address}`);
 
 /** Before any check: can a bridge take it there (false + exit: only a swap can), null = unknown */
-export const directRoute = (t: Target) => get<{ available: boolean | null; exit?: boolean; reason?: string }>('route', { ...t });
+/** minimumBalanceWei: too small for every bridge, this balance would go through (AMOUNT_TOO_LOW) */
+export const directRoute = (t: Target) => get<{ available: boolean | null; exit?: boolean; reason?: string; minimumBalanceWei?: string }>('route', { ...t });
 
 export const preparePlan = (t: Target & { mode: Exclude<PlanMode, 'exit'>; feePaidTx?: string }) =>
   get<DirectPlan>('prepare', { ...t, mode: t.mode === 'route' ? undefined : t.mode });

@@ -2,7 +2,7 @@ import { CheckIcon } from './icons';
 import { ChainIcon } from './ChainIcon';
 import { WalletHead } from './WalletHead';
 import { formatAmount, formatUsd } from '../lib/format';
-import { totalsByDest, type SweepModel } from '../sweep/useSweep';
+import { FAILURE_LABEL, failureKind, minimumOf, tooSmallText, totalsByDest, type SweepModel } from '../sweep/useSweep';
 import { totalsText, totalsUsd } from './SweepCard';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -69,14 +69,18 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
             const what = st.choice === 'burn' ? `Burned ${formatAmount(r.balance, r.decimals)} ${r.token}`
               : st.choice === 'donate' ? `Donated ${formatAmount(r.balance, r.decimals)} ${r.token}`
               : st.receive !== undefined && to ? `${formatAmount(st.receive, st.token?.decimals ?? to.decimals, 6)} ${st.token ? `${st.token.symbol} (token)` : to.token} to ${to.name}${m.bridgeOf[r.chainId] ? ` via ${m.bridgeOf[r.chainId]}` : ''}` : '';
+            // Only a failure after something was sent needs checking; otherwise say what to do
+            const kind = st.phase === 'failed' ? failureKind(st, r.decimals) : null;
+            const minimum = kind === 'too-small' ? minimumOf(st.detail, r.decimals) : null;
+            const failedText = minimum !== null ? tooSmallText(minimum, r) : kind && kind !== 'check' ? `${st.detail} Nothing was sent.` : st.detail;
             return (
               <li key={r.chainId} className="row">
                 <span />
                 <ChainIcon chainId={r.chainId} name={r.name} />
-                <span className="name">{r.name}<span className="bal">{st.phase === 'failed' ? st.detail : what || st.detail}</span></span>
+                <span className="name">{r.name}<span className="bal">{st.phase === 'failed' ? failedText : what || st.detail}</span></span>
                 <span className="right">
                   {st.phase === 'done' && <span className="done-zero">0 left</span>}
-                  {st.phase === 'failed' && <span className="danger-text strong">Check needed</span>}
+                  {kind && <span className={`${kind === 'check' ? 'danger-text' : 'warn-text'} strong`}>{FAILURE_LABEL[kind]}</span>}
                   {st.phase === 'sweeping' && <span className="pill neutral"><span className="spin" aria-hidden="true" />{STATUS_LABEL[st.detail ?? ''] ?? st.detail}</span>}
                   {tx && <a className="tx" href={tx} target="_blank" rel="noreferrer noopener">View tx</a>}
                 </span>

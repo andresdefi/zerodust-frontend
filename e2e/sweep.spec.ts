@@ -267,6 +267,49 @@ test('token delivery: Mitosis is swept to exactly 0 and arrives as MITO (a token
   expect(swept.has(124816)).toBe(true);
 });
 
+test('a balance below every bridge minimum says how much to add, at load, at the check and at the sweep', async ({ page }) => {
+  const key = generatePrivateKey();
+  // Direct chain: known when the wallet loads
+  await mockNetwork(page, privateKeyToAccount(key).address, { monad: true, tooSmall: 'direct' });
+  await page.goto('/');
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: 'Choose where it goes' }).click();
+  await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^Base/ }).click();
+  const monad = page.locator('.row', { hasText: 'Monad' });
+  await expect(monad).toContainText(/Too small to bridge: needs at least 64\.2 MON, add [\d.]+ more/, { timeout: 30_000 });
+  await monad.getByRole('button', { name: 'Too small: choose' }).click();
+  await expect(monad).toContainText('Add MON on Monad to bridge it, or instead:');
+});
+
+for (const when of ['check', 'sweep'] as const) {
+  test(`a sponsored chain too small at the ${when} names the minimum, not a failure`, async ({ page }) => {
+    const key = generatePrivateKey();
+    await mockNetwork(page, privateKeyToAccount(key).address, { mitosis: true, tooSmall: when });
+    await page.goto('/');
+    await page.locator('.keyfield input').focus();
+    await page.keyboard.type(key, { delay: 1 });
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.row')).toHaveCount(4);
+    for (const name of ['Base', 'Optimism', 'Scroll']) await page.getByRole('checkbox', { name: `Sweep ${name}` }).uncheck();
+    await page.getByRole('button', { name: 'Choose where it goes' }).click();
+    await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^BNB Chain/ }).click();
+    await page.getByRole('button', { name: 'Check sweep' }).click();
+    const mitosis = page.locator('.row', { hasText: 'Mitosis' });
+    const text = 'Too small to bridge: needs at least 17.94 MITO, add 17.41 more';
+    if (when === 'check') {
+      await expect(mitosis).toContainText(text, { timeout: 30_000 });
+      return;
+    }
+    await page.getByRole('button', { name: 'Sweep 1 chain' }).click();
+    await page.getByRole('dialog', { name: /Sweep 1 chain/ }).getByRole('button', { name: 'Sweep 1 chain' }).click();
+    await expect(mitosis).toContainText(text, { timeout: 60_000 });
+    await expect(mitosis.locator('.warn-text', { hasText: 'Too small' })).toBeVisible();
+    await expect(mitosis).not.toContainText('Check needed');
+  });
+}
+
 test('token delivery, own wallet only: Endurance goes as ACE to this wallet on BNB Chain, and is blocked for another recipient', async ({ page }) => {
   const key = generatePrivateKey();
   const { swept } = await mockNetwork(page, privateKeyToAccount(key).address, { endurance: true });
