@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { CheckIcon } from './icons';
 import { ChainIcon } from './ChainIcon';
 import { WalletHead } from './WalletHead';
 import { formatAmount, formatUsd } from '../lib/format';
 import { FAILURE_LABEL, failureKind, minimumOf, tooSmallText, totalsByDest, type SweepModel } from '../sweep/useSweep';
+import { reportText } from '../sweep/report';
 import { totalsText, totalsUsd } from './SweepCard';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -23,6 +25,17 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
   const done = swept.filter((r) => m.states[r.chainId]!.phase === 'done');
   const failed = swept.filter((r) => m.states[r.chainId]!.phase === 'failed');
   const finished = m.stage === 'done';
+  /** Which row's details were just copied (the button says so for a moment) */
+  const [copied, setCopied] = useState<number | null>(null);
+  const copy = async (chainId: number, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(chainId);
+      setTimeout(() => setCopied((c) => (c === chainId ? null : c)), 2000);
+    } catch {
+      // Clipboard refused (permissions): nothing to undo; the reference is still on screen
+    }
+  };
   const arrived = totalsByDest(done.map((r) => m.states[r.chainId]!), m.destination, m.destOf).filter((t) => t.amount > 0n);
   const arrivedUsd = formatUsd(totalsUsd(arrived, m.prices));
   const arrivedOn = arrived.length === 1 ? ` on ${arrived[0]!.dest.name}` : '';
@@ -77,7 +90,21 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
               <li key={r.chainId} className="row">
                 <span />
                 <ChainIcon chainId={r.chainId} name={r.name} />
-                <span className="name">{r.name}<span className="bal">{st.phase === 'failed' ? failedText : what || st.detail}</span></span>
+                <span className="name">
+                  {r.name}
+                  <span className="bal">{st.phase === 'failed' ? failedText : what || st.detail}</span>
+                  {kind && st.report && (
+                    <span className="report">
+                      {st.reference ? <span>Ref {st.reference}</span> : null}
+                      <button type="button" className="copy-report" onClick={() => void copy(r.chainId, reportText({
+                        ...st.report!, chainName: r.name, toChainName: to?.name, label: FAILURE_LABEL[kind], reference: st.reference,
+                        explorerUrl: r.explorerUrl, at: new Date(),
+                      }))}>
+                        {copied === r.chainId ? 'Copied' : 'Copy details'}
+                      </button>
+                    </span>
+                  )}
+                </span>
                 <span className="right">
                   {st.phase === 'done' && <span className="done-zero">0 left</span>}
                   {kind && <span className={`${kind === 'check' ? 'danger-text' : 'warn-text'} strong`}>{FAILURE_LABEL[kind]}</span>}
@@ -89,6 +116,11 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
           })}
         </ul>
       </div>
+      {failed.length > 0 && (
+        <p className="footnote">
+          Something not right? Copy the details and send them to <a href="https://x.com/andresdefi" target="_blank" rel="noreferrer noopener">@andresdefi on X</a>. They hold no key.
+        </p>
+      )}
       <p className="footnote">
         {finished ? 'The key is still in this tab’s memory. Forget it when you are done.' : 'Keep this tab open until every chain shows 0. Results stay here until you leave.'}
       </p>

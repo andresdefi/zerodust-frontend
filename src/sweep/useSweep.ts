@@ -8,6 +8,7 @@ import { deliveryStatus, directBalances, directChains, directRoute, BURN_ADDRESS
 import { broadcast, planChecked, settledBalance, signPlan } from '../direct/run';
 import { API_URL } from './constants';
 import { formatAmountUp } from '../lib/format';
+import { sendReport, type SweepReport } from './report';
 
 // Mirrors the local sweeper (local-sweeper/src/App.tsx), which is proven with
 // real funds: ZeroDust's sponsored (EIP-7702) chains through the SDK, and
@@ -70,6 +71,10 @@ export interface RowState {
   txHash?: string;
   /** A transaction left this wallet (or the relayer took the sweep): a failure then needs checking */
   sent?: boolean;
+  /** What was reported to the API (POST /reports), for "Copy details" */
+  report?: SweepReport;
+  /** The API's reference for that report (ZD-1A2B3C4D); absent if it could not be recorded */
+  reference?: string;
   choice?: Choice;
   /** Direct chains: ZeroDust's fee in the chain's token, paid as its own transfer */
   fee?: bigint;
@@ -86,6 +91,11 @@ export interface RowState {
 const DIRECT_BRIDGE_NAMES: Record<string, string> = { gaszip: 'Gas.zip', relay: 'Relay', across: 'Across', lifi: 'LI.FI' };
 
 /** The bridge that carries a sponsored quote, as the API names it (none for a same-chain transfer) */
+/** The quote's bridge id (gaszip, relay, across, hyperlane, endurance), for reports */
+function bridgeName(quote: unknown): string | undefined {
+  return (quote as { bridge?: { name?: string } } | undefined)?.bridge?.name;
+}
+
 function quoteBridge(quote: unknown): string | undefined {
   return (quote as { bridge?: { displayName?: string } } | undefined)?.bridge?.displayName;
 }
@@ -163,6 +173,26 @@ export function useSweep(account: LocalAccount) {
   const feePaid = useRef<Record<number, string>>({});
 
   const setState = (chainId: number, state: RowState) => setStates((prev) => ({ ...prev, [chainId]: state }));
+
+  /**
+   * Reports a finished row (POST /reports) and puts the reference on it. Never
+   * throws or waits on the sweep: a failed report only means no reference.
+   */
+  const report = (row: Row, st: RowState, r: Omit<SweepReport, 'outcome' | 'failureKind' | 'address' | 'chainId' | 'detail'>) => {
+    const failed = st.phase === 'failed';
+    const full: SweepReport = {
+      ...r,
+      outcome: failed ? 'failed' : 'done',
+      ...(failed ? { failureKind: failureKind(st, row.decimals) } : {}),
+      address,
+      chainId: row.chainId,
+      ...(st.detail ? { detail: st.detail } : {}),
+    };
+    setStates((prev) => ({ ...prev, [row.chainId]: { ...prev[row.chainId]!, report: full } }));
+    void sendReport(full).then((reference) => {
+      if (reference) setStates((prev) => ({ ...prev, [row.chainId]: { ...prev[row.chainId]!, reference } }));
+    });
+  };
 
   const loadDestinations = useCallback(async (loadedRows: Row[], chainInfo: Map<number, ChainInfo>) => {
     const sources = loadedRows.filter((r) => r.canSweep && !r.direct);
@@ -457,15 +487,26 @@ export function useSweep(account: LocalAccount) {
     const { toChainId } = targetFor(row);
     let hash: string | undefined;
     let sentAny = false;
-    const update = (s: Omit<RowState, 'choice'>) => setState(row.chainId, { ...s, choice, toChainId, txHash: s.txHash ?? hash, sent: sentAny || hash !== undefined });
+    let route: string | undefined;
+    const hashes: string[] = [];
+    let last: RowState | undefined;
+    const update = (s: Omit<RowState, 'choice'>) => {
+      last = { ...s, choice, toChainId, txHash: s.txHash ?? hash, sent: sentAny || hash !== undefined };
+      setState(row.chainId, last);
+    };
+    const onSent = (h: string) => {
+      hash = h;
+      hashes.push(h);
+    };
     try {
       update({ phase: 'sweeping', detail: 'Checking' });
       const plan = await planChecked(directTarget(row), mode, feePaid.current[row.chainId]);
       const fee = BigInt(plan.fee);
       const receive = mode === 'burn' || mode === 'donate' ? undefined : BigInt(plan.receive);
       setBridge(row.chainId, DIRECT_BRIDGE_NAMES[plan.route]);
+      route = plan.route;
       update({ phase: 'sweeping', detail: 'Sending', fee });
-      const sent = await broadcast(plan, await signPlan(account, plan), (h) => { hash = h; });
+      const sent = await broadcast(plan, await signPlan(account, plan), onSent);
       if (sent.feePaidTx) {
         feePaid.current[row.chainId] = sent.feePaidTx;
         sentAny = true;
@@ -484,7 +525,7 @@ export function useSweep(account: LocalAccount) {
         }
         if (left > 0n) {
           const rest = await planChecked({ chainId: row.chainId, toChainId: row.chainId, from: address, recipient: address }, choice === 'exit-burn' ? 'burn' : 'donate');
-          const restSent = await broadcast(rest, await signPlan(account, rest));
+          const restSent = await broadcast(rest, await signPlan(account, rest), onSent);
           if (!restSent.ok) {
             update({ phase: 'failed', detail: 'Swapped out, but clearing the cents left failed' });
             return;
@@ -517,6 +558,11 @@ export function useSweep(account: LocalAccount) {
       update({ phase: 'done', receive, fee, detail: 'Balance reads 0 on-chain; delivery still pending' });
     } catch (error) {
       update({ phase: 'failed', detail: error instanceof Error ? error.message : 'Sweep failed' });
+    } finally {
+      // Every direct sweep is reported, done or failed: the API never sees them otherwise
+      if (last && (last.phase === 'done' || last.phase === 'failed')) {
+        report(row, last, { kind: 'direct', ...(toChainId !== undefined ? { toChainId } : {}), ...(route ? { route } : {}), mode, txHashes: hashes });
+      }
     }
   };
 
@@ -536,8 +582,16 @@ export function useSweep(account: LocalAccount) {
         { fromChainId: row.chainId, toChainId: target.toChainId, destination: getAddress(target.recipient) },
         { timeoutMs: 300_000, onStatusChange: (s) => setState(row.chainId, { phase: 'sweeping', detail: s.status, choice }) }
       );
+      const sponsored = (st: RowState) => report(row, st, {
+        kind: 'sponsored', toChainId,
+        ...(bridgeName(result.quote) ? { route: bridgeName(result.quote)! } : {}),
+        ...(result.txHash ? { txHashes: [result.txHash] } : {}),
+        ...(result.sweepId ? { sweepId: result.sweepId } : {}),
+      });
       if (!result.success) {
-        setState(row.chainId, { phase: 'failed', detail: result.error ?? 'Sweep failed', txHash: result.txHash, sent: !!(result.sweepId || result.txHash), choice });
+        const failed: RowState = { phase: 'failed', detail: result.error ?? 'Sweep failed', txHash: result.txHash, sent: !!(result.sweepId || result.txHash), choice };
+        setState(row.chainId, failed);
+        sponsored(failed);
         return;
       }
       // Trust the chain, not the API: the balance must read exactly 0 and the
@@ -554,9 +608,10 @@ export function useSweep(account: LocalAccount) {
         }
         const zero = onChain.balance === 0n;
         const revoked = onChain.code === '0x';
-        setState(row.chainId, {
+        const final: RowState = {
           phase: zero && revoked ? 'done' : 'failed',
           txHash: result.txHash,
+          sent: true,
           receive,
           toChainId,
           token,
@@ -564,7 +619,10 @@ export function useSweep(account: LocalAccount) {
           detail: zero && revoked
             ? 'Balance reads 0 on-chain, delegation revoked'
             : `Sent, but the chain shows ${zero ? '' : 'a balance left'}${!zero && !revoked ? ' and ' : ''}${revoked ? '' : 'the delegation still set'}`,
-        });
+        };
+        setState(row.chainId, final);
+        // The relayer recorded the sweep; what the chain showed afterwards it did not
+        if (final.phase === 'failed') sponsored(final);
       } catch {
         setState(row.chainId, { phase: 'done', txHash: result.txHash, receive, toChainId, token, choice, detail: 'Completed; the on-chain check could not run' });
       }
