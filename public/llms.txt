@@ -1,155 +1,31 @@
 # ZeroDust
 
-> Recover stranded native gas by emptying a chain's balance to exactly zero.
+> Move a wallet's entire native gas balance (ETH, BNB, POL and so on) off an EVM chain and leave exactly 0, to any address on the same chain or bridged to another chain.
 
-You cannot transfer 100% of a native gas token. Paying for the transfer consumes
-the token you are transferring, so a remainder is always left behind and becomes
-unrecoverable. ZeroDust removes that remainder: it moves the entire balance
-(ETH, BNB, POL, etc.) off a chain and leaves exactly zero, to any address on the
-same or a different chain, via a relayer that fronts the gas.
+A normal transfer cannot empty a native balance, because paying for the transfer uses the token being sent. On chains with EIP-7702 the wallet signs a sweep intent and two authorizations (one delegating to the ZeroDust contract, one revoking it), and a sponsor executes the sweep and pays the gas, reimbursed from the swept amount. The contract reverts unless the final balance is exactly 0, and the wallet is undelegated right after. Chains without EIP-7702 ("direct chains") are swept by the wallet itself with transactions the API plans but never signs. Keys never leave the signer: the API only receives signatures.
 
-Use it when someone cannot send their full balance, has small amounts scattered
-across many chains, or wants to close out, wind down or fully exit a chain.
+Supported chains, destinations and fees change; read them from the API (`GET https://api.zerodust.xyz/chains`, `GET /direct/chains`, `GET /destinations?fromChainId=`) instead of hardcoding them. Every quote shows the full fee before anything is signed. There is no testnet; use the SDK's `dryRun` option, which signs everything and submits nothing.
 
-## How it works
+The complete docs as one file: [llms-full.txt](https://zerodust.xyz/llms-full.txt)
 
-1. Sign an EIP-7702 authorization (delegates your EOA temporarily)
-2. Sign an EIP-712 sweep intent (specifies destination and fee limits)
-3. ZeroDust's relayer executes the sweep atomically
-4. Balance goes to exactly zero, funds arrive at your destination
-5. Delegation is automatically revoked after the sweep
+## Docs
 
-## Supported chains
+- [Overview](https://zerodust.xyz/docs): how a sweep works, supported chains, fees
+- [Getting started](https://zerodust.xyz/docs/getting-started): first sweep with the SDK, dry run first
+- [SDK](https://zerodust.xyz/docs/sdk): `@zerodust/sdk` install, configuration, exports
+- [Agent](https://zerodust.xyz/docs/sdk-agent): `ZeroDustAgent`, sweeps, dry runs, batches and the checks before signing
+- [API client](https://zerodust.xyz/docs/sdk-client): the `ZeroDust` class, one method per API call
+- [Errors](https://zerodust.xyz/docs/sdk-errors): `ZeroDustError` and error codes
+- [REST API](https://zerodust.xyz/docs/api): every public endpoint at `https://api.zerodust.xyz`, parameters, responses, rate limits
+- [Direct chains](https://zerodust.xyz/docs/direct-chains): sweeping chains without EIP-7702
 
-25 mainnet chains: Ethereum, Optimism, BNB Chain, Gnosis, Unichain, Polygon,
-Sonic, X Layer, Fraxtal, World Chain, Sei, Story, Soneium, Mantle, Superseed,
-Base, Plasma, Mode, Arbitrum, Celo, Ink, BOB, Berachain, Scroll, and Zora.
+## AI agents
 
-`GET https://api.zerodust.xyz/chains` is the authoritative list. Prefer it over
-this one, which is a snapshot.
+- [MCP server](https://zerodust.xyz/docs/mcp): hosted read-only at `https://api.zerodust.xyz/mcp`, or `npx @zerodust/mcp-server` locally to sweep with your own key
+- [Vercel AI SDK](https://zerodust.xyz/docs/ai-sdk): `@zerodust/ai-sdk` read-only tools
+- [LangChain](https://zerodust.xyz/docs/langchain): `@zerodust/langchain` read-only tools
 
-There are no testnet chains. `GET /chains?testnet=true` returns an empty list, so
-there is no testnet environment to integrate against - use the `dryRun` option
-described below instead.
+## Optional
 
-## Fee structure
-
-- Free tier: No service fee for sweeps under $1
-- Standard: 1% service fee (min $0.05, max $0.50)
-- Gas: Paid by relayer, reimbursed from swept amount
-
-## Integration packages
-
-- [@zerodust/sdk](https://www.npmjs.com/package/@zerodust/sdk): TypeScript SDK for wallets and apps
-- [@zerodust/mcp-server](https://www.npmjs.com/package/@zerodust/mcp-server): MCP server for Claude and AI agents
-- [@zerodust/langchain](https://www.npmjs.com/package/@zerodust/langchain): LangChain.js tools
-- [@zerodust/ai-sdk](https://www.npmjs.com/package/@zerodust/ai-sdk): Vercel AI SDK tools
-
-## API
-
-Base URL: https://api.zerodust.xyz
-
-### Endpoints
-
-- GET /chains - List supported chains
-- GET /balances/:address - Get balances across all chains for an address
-- GET /quote?fromChainId=&toChainId=&userAddress=&destination= - Get a sweep quote
-- POST /authorization - Create EIP-712 typed data for signing (body: { quoteId })
-- POST /sweep - Submit a signed sweep (body: { quoteId, signature, eip7702Authorization })
-- GET /sweep/:sweepId - Get sweep status
-- GET /sweeps/:address - List sweeps for an address
-
-### Authentication
-
-Optional API key via X-API-Key header for higher rate limits.
-
-## Documentation
-
-- [Docs](https://zerodust.xyz/docs)
-- [Getting Started](https://zerodust.xyz/docs/getting-started)
-- [SDK Reference](https://zerodust.xyz/docs/sdk)
-- [AI Integrations](https://zerodust.xyz/docs/integrations)
-- [API Reference](https://zerodust.xyz/docs/api)
-
-## SDK Quick Start
-
-```typescript
-import { ZeroDust } from '@zerodust/sdk';
-
-const zerodust = new ZeroDust({ environment: 'mainnet' });
-const balances = await zerodust.getBalances('0xYourAddress...');
-```
-
-## AI Agent Quick Start
-
-```typescript
-import { createAgentFromPrivateKey } from '@zerodust/sdk';
-
-const agent = createAgentFromPrivateKey('0xPrivateKey...', {
-  environment: 'mainnet',
-});
-
-const result = await agent.sweep({
-  fromChainId: 42161,
-  toChainId: 8453,
-  destination: '0xDestination...',
-});
-```
-
-## Trying it without moving funds
-
-Every sweep in the SDK and the MCP server accepts a dry run. It fetches a real
-quote, produces all three real signatures, then stops before submitting. Nothing
-is broadcast and no balance changes.
-
-```typescript
-const check = await agent.sweep(
-  { fromChainId: 42161, toChainId: 8453 },
-  { dryRun: true }
-);
-check.dryRun;   // true
-check.sweepId;  // undefined - nothing was submitted
-```
-
-## MCP Server
-
-Hosted, nothing to install. Point any MCP client at this URL:
-
-```
-https://api.zerodust.xyz/mcp
-```
-
-Read-only, because it holds no keys. Tools: `zerodust_get_chains`,
-`zerodust_get_balances`, `zerodust_get_quote`, `zerodust_get_sweep_status`,
-`zerodust_list_sweeps`, `zerodust_register_api_key`, `zerodust_info`.
-
-Local, can sweep, because the key stays on your machine:
-
-```json
-{
-  "mcpServers": {
-    "zerodust": {
-      "command": "npx",
-      "args": ["@zerodust/mcp-server"]
-    }
-  }
-}
-```
-
-Same tool names, plus `zerodust_sweep`, `zerodust_sweep_all` and
-`zerodust_get_agent_address`. Sweeping requires `ZERODUST_ALLOW_EXECUTE=true`
-and a signing key, which may be a signer module returning a viem LocalAccount
-(Turnkey, Privy, KMS), an encrypted V3 keystore, a key file, or an inline key.
-
-## Self-service credentials
-
-An agent can issue itself an API key with no human signup step:
-
-```bash
-curl -X POST https://api.zerodust.xyz/agent/register \
-  -H "Content-Type: application/json" \
-  -d '{"name": "my-agent", "agentId": "my-agent-1"}'
-# -> { "apiKey": "zd_...", "rateLimits": { "perMinute": 300, "daily": 1000 } }
-```
-
-The read endpoints work without a key; this only raises rate limits.
+- [Source code](https://github.com/andresdefi/zerodust): contract, SDK and MCP server
+- [Security](https://zerodust.xyz/security): how the site handles keys and how to verify the build
