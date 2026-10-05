@@ -94,16 +94,18 @@ test('a loaded key is forgotten after 15 minutes without activity', async ({ pag
   await expect(page.locator('.safety')).toContainText('forgotten after 15 minutes without activity');
 });
 
-test('says sponsored sweeps are paused before a key is entered, and nothing when they work', async ({ page }) => {
+test('while ZeroDust is paused: says so before a key is entered and takes no key; nothing when it works', async ({ page }) => {
   const key = generatePrivateKey();
   await mockNetwork(page, privateKeyToAccount(key).address, { paused: true });
   await page.goto('/');
-  await expect(page.getByRole('status').filter({ hasText: 'Sponsored sweeps are paused' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'ZeroDust is paused' })).toBeVisible();
+  await expect(page.locator('.keyfield input')).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Load wallet' })).toBeDisabled();
   await page.unrouteAll({ behavior: 'ignoreErrors' });
   await mockNetwork(page, privateKeyToAccount(key).address);
   await page.reload();
-  await expect(page.locator('.keyfield')).toBeVisible();
-  await expect(page.getByText('Sponsored sweeps are paused')).toHaveCount(0);
+  await expect(page.locator('.keyfield input')).toBeEnabled();
+  await expect(page.getByText('ZeroDust is paused')).toHaveCount(0);
 });
 
 test('rejects something that is not a key, without echoing it', async ({ page }) => {

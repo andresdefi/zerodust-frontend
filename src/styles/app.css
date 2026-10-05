@@ -103,6 +103,8 @@ a { color: inherit; }
 /* Key entry: the input stays empty, the dots show progress */
 .keyfield { position: relative; }
 .keyfield input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: text; }
+.keyfield.is-disabled { opacity: .55; }
+.keyfield.is-disabled input { cursor: not-allowed; }
 .keyfield .dots { flex: 1; letter-spacing: 0.08em; overflow: hidden; white-space: nowrap; color: var(--ink); }
 .keyfield .placeholder { color: var(--faint); letter-spacing: 0; }
 .field-error { margin-top: 10px; font-size: 13px; color: var(--danger); }

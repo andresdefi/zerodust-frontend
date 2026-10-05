@@ -280,7 +280,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     }
     if (path === '/status') {
       return json(route, opts.paused
-        ? { sponsoredSweeps: 'paused', directChains: 'available', message: 'Sponsored sweeps are paused: ZeroDust cannot sign right now. No funds are at risk and nothing needs doing; they resume automatically. Direct chains your wallet pays for itself still work, except zkSync Era, Abstract and Lens.' }
+        ? { sponsoredSweeps: 'paused', directChains: 'paused', message: 'ZeroDust is paused: it cannot sign sweeps right now. No funds are at risk and nothing needs doing; sweeps resume automatically. Please come back shortly.' }
         : { sponsoredSweeps: 'available', directChains: 'available', message: null });
     }
     if (path === '/reports' && route.request().method() === 'POST') {
