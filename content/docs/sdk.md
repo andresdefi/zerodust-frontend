@@ -1,6 +1,6 @@
 # SDK overview
 
-`@zerodust/sdk` is the TypeScript SDK for ZeroDust. The current version is 0.4.0 (MIT licensed, source at [github.com/andresdefi/zerodust](https://github.com/andresdefi/zerodust/tree/main/sdk)).
+`@zerodust/sdk` is the TypeScript SDK for ZeroDust. The current version is 0.5.4 (MIT licensed, source at [github.com/andresdefi/zerodust](https://github.com/andresdefi/zerodust/tree/main/sdk)).
 
 ## Install
 
@@ -77,6 +77,10 @@ Types:
 - `Environment`, `ZeroDustConfig`, `Chain`, `ChainsResponse`, `Destination`, `DestinationsResponse`, `ChainBalance`, `BalancesResponse`, `QuoteRequest`, `QuoteResponse`, `FeeBreakdown`, `SweepIntentFields`, `AuthorizationResponse`, `EIP712TypedData`, `EIP7702Authorization`, `SweepRequest`, `SweepResponse`, `SweepStatus`, `RevokeStatus`, `SweepStatusResponse`, `SweepSummary`, `ListSweepsOptions`, `SweepsListResponse`, `ZeroDustErrorCode`, `ApiErrorResponse`
 - Agent types: `ZeroDustAgentConfig`, `AgentSweepRequest`, `AgentBatchSweepRequest`, `AgentSweepResult`, `AgentBatchSweepResult`, `AgentSweepOptions`
 - Check types: `QuoteCheckContext`, `VerifiedSweep`, `SweepTypedData`, `SweepIntentMessage`, `SweepIntentParams`, `BridgeName`
+
+## Changes in 0.5
+
+0.5.4 requires the revoke authorization on `submitSweep`, as the API does, so every swept wallet ends as a plain account (`ZeroDustAgent` always signed it). 0.5.2 and 0.5.3 added token delivery for chains whose coin has no gas bridge (Mitosis: MITO on BNB Chain via Hyperlane; Endurance: ACE on BNB Chain, to the same wallet only), with `deliveredToken()` and `deliversOnlyToSender()` to tell users.
 
 ## Changes in 0.4.0
 

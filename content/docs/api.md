@@ -240,7 +240,7 @@ Body:
 | `quoteId` | Required |
 | `signature` | Required. EIP-712 signature of the `SweepIntent` (64 or 65 bytes, hex). |
 | `eip7702Authorization` | Required. `{ chainId, contractAddress, nonce, yParity, r, s }`, delegating to the ZeroDust contract on the source chain. |
-| `revokeAuthorization` | Optional. Same shape, delegating to `0x0000000000000000000000000000000000000000` on the same chain with nonce = delegation nonce + 1. Without it the wallet stays delegated after the sweep. |
+| `revokeAuthorization` | Required. Same shape, delegating to `0x0000000000000000000000000000000000000000` on the same chain with nonce = delegation nonce + 1, so the delegation is removed right after the sweep (its gas is in the quoted fee). A sweep without it is refused with `REVOKE_AUTHORIZATION_REQUIRED`. |
 
 ```json
 { "sweepId": "6f1c...", "status": "pending", "sweepType": "cross-chain", "isExisting": false, "version": 3 }
