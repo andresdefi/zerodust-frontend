@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FAILURE_LABEL, failureKind, minimumOf, plainReason, tooSmallText } from '../src/sweep/useSweep';
 import { formatAmountUp } from '../src/lib/format';
+import { SITE_VERSION, reportBody, reportText } from '../src/sweep/report';
 
 // Every chain says the same plain words, whatever the method behind it (owner, 2026-10-02)
 describe('plainReason', () => {
@@ -61,5 +62,42 @@ describe('failureKind: only a failure after something was sent needs checking', 
     expect(failureKind({ detail: 'Sent, but the chain still shows a balance', sent: true }, 18)).toBe('check');
     expect(failureKind({ detail: 'Gas.zip: Source: Chain Disabled', txHash: '0xab' }, 18)).toBe('check');
     expect(FAILURE_LABEL.check).toBe('Check needed');
+  });
+});
+
+describe('sweep reports', () => {
+  const base = { kind: 'direct' as const, address: '0x820653ccE8a755edbb52eC1bc5829D2a60CD5cc5', chainId: 143, toChainId: 8453, route: 'relay', mode: 'route' };
+
+  it('sends only fields the API accepts: valid hashes, short text, a failure kind only on failure', () => {
+    const body = reportBody({
+      ...base, outcome: 'failed', failureKind: 'check', detail: 'x'.repeat(600),
+      txHashes: [`0x${'ab'.repeat(32)}`, `0x${'ab'.repeat(32)}`, '0x1234'], sweepId: 'not-a-uuid',
+    });
+    expect(body).toMatchObject({ kind: 'direct', outcome: 'failed', failureKind: 'check', chainId: 143, toChainId: 8453, route: 'relay', siteVersion: SITE_VERSION });
+    expect(body.txHashes).toEqual([`0x${'ab'.repeat(32)}`]);
+    expect((body.detail as string).length).toBe(500);
+    expect(body).not.toHaveProperty('sweepId');
+    expect(reportBody({ ...base, outcome: 'done', failureKind: 'check' })).not.toHaveProperty('failureKind');
+    expect(reportBody({ ...base, outcome: 'done', toChainId: 143 })).not.toHaveProperty('toChainId');
+  });
+
+  it('the copied text has what we need to look into it', () => {
+    const text = reportText({
+      ...base, outcome: 'failed', detail: 'Sent, but the chain still shows a balance', txHashes: [`0x${'cd'.repeat(32)}`],
+      chainName: 'Monad', toChainName: 'Base', label: 'Check needed', reference: 'ZD-1A2B3C4D',
+      explorerUrl: 'https://monadvision.com/', at: new Date('2026-10-05T16:00:00Z'),
+    });
+    expect(text).toBe([
+      'ZeroDust sweep report',
+      'Reference: ZD-1A2B3C4D',
+      'Time: 2026-10-05T16:00:00.000Z',
+      `Site version: ${SITE_VERSION}`,
+      'Wallet: 0x820653ccE8a755edbb52eC1bc5829D2a60CD5cc5',
+      'Chain: Monad (143) to Base (8453)',
+      'Type: direct, route relay',
+      'Result: Check needed: Sent, but the chain still shows a balance',
+      'Transactions:',
+      `  https://monadvision.com/tx/0x${'cd'.repeat(32)}`,
+    ].join('\n'));
   });
 });

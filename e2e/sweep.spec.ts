@@ -151,7 +151,7 @@ test('sweeps sponsored chains to one destination, burning a chain with no route'
 test('sweeps a direct chain: plan checked and replayed in the page, signed here, sent to the chain', async ({ page }) => {
   const key = generatePrivateKey();
   const address = privateKeyToAccount(key).address;
-  const { swept, sent } = await mockNetwork(page, address, { direct: true });
+  const { swept, sent, reports } = await mockNetwork(page, address, { direct: true });
   const watch = await watchForKey(page, key);
 
   await page.goto('/');
@@ -181,6 +181,11 @@ test('sweeps a direct chain: plan checked and replayed in the page, signed here,
   expect(sent).toHaveLength(2);
   expect(sent.every((raw) => raw.startsWith('0xf8') || raw.startsWith('0xf9'))).toBe(true);
   expect(swept.has(43114)).toBe(true);
+  // A direct sweep is reported once, done, with both transactions (the API never sees it otherwise)
+  await expect.poll(() => reports.length).toBe(1);
+  expect(reports[0]).toMatchObject({ kind: 'direct', outcome: 'done', chainId: 43114, route: 'gaszip', mode: 'route' });
+  expect(reports[0]!.txHashes).toHaveLength(2);
+  expect(reports[0]).not.toHaveProperty('failureKind');
   await watch.checkPage();
   expect(watch.leaks).toEqual([]);
   expect(watch.cspViolations).toEqual([]);
@@ -286,7 +291,7 @@ test('a balance below every bridge minimum says how much to add, at load, at the
 for (const when of ['check', 'sweep'] as const) {
   test(`a sponsored chain too small at the ${when} names the minimum, not a failure`, async ({ page }) => {
     const key = generatePrivateKey();
-    await mockNetwork(page, privateKeyToAccount(key).address, { mitosis: true, tooSmall: when });
+    const { reports } = await mockNetwork(page, privateKeyToAccount(key).address, { mitosis: true, tooSmall: when });
     await page.goto('/');
     await page.locator('.keyfield input').focus();
     await page.keyboard.type(key, { delay: 1 });
@@ -307,6 +312,12 @@ for (const when of ['check', 'sweep'] as const) {
     await expect(mitosis).toContainText(text, { timeout: 60_000 });
     await expect(mitosis.locator('.warn-text', { hasText: 'Too small' })).toBeVisible();
     await expect(mitosis).not.toContainText('Check needed');
+    // Reported with a reference to quote, and the copy holds it, never the key
+    await expect(mitosis).toContainText('Ref ZD-1A2B3C01');
+    await expect(page.getByText('Copy the details and send them to')).toBeVisible();
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({ kind: 'sponsored', outcome: 'failed', failureKind: 'too-small', chainId: 124816, toChainId: 56 });
+    expect(JSON.stringify(reports)).not.toContain(key.slice(2));
   });
 }
 

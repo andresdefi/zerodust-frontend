@@ -21,6 +21,7 @@ To quote and run a sweep, the API (api.zerodust.xyz) receives your wallet addres
 | Quotes: wallet address, chains, destination, amounts, fees | To run the sweep you sign | Deleted after 7 days, unless a sweep used the quote |
 | Sweeps: wallet address, destination, chains, amounts, transaction hashes, status | The record of each sweep, to deliver it, answer questions and keep accounts | Kept |
 | Your signatures for a sweep | To execute it | Deleted 7 days after the sweep ends (once its delegation is revoked) |
+| Sweep reports: wallet address, chains, route, transaction hashes, the result and its message, the site version | Sent by the page when a direct-chain sweep ends or a sweep fails, so we can look into it from the reference shown on the page. Never your key | Deleted after 400 days |
 | Daily counts of quotes per chain pair | Capacity and usage, no addresses | Kept |
 | Delivery accuracy per bridge route: amount quoted vs delivered, the chains and the bridge | To keep the amounts we show at or below what arrives. No addresses, no transaction hashes | Deleted after 400 days |
 
@@ -43,4 +44,4 @@ You can ask what data ZeroDust holds about your wallet address, and ask for it t
 
 We will update this page when what we collect changes, and change the date below.
 
-Last updated: 2 October 2026.
+Last updated: 5 October 2026.
