@@ -83,7 +83,7 @@ Do not sign this typed data as received. Build your own with `verifySweepQuote()
 | `quoteId` | From `getQuote()` |
 | `signature` | EIP-712 signature of the `SweepIntent` |
 | `eip7702Authorization` | `EIP7702Authorization` delegating to the ZeroDust contract on the source chain |
-| `revokeAuthorization` | Optional `EIP7702Authorization` delegating to address 0 with nonce + 1. Without it the wallet stays delegated after the sweep. |
+| `revokeAuthorization` | Required `EIP7702Authorization` delegating to address 0 on the same chain with nonce + 1, so the delegation is removed right after the sweep. The client (0.5.4+) and the API refuse a sweep without it. |
 
 `EIP7702Authorization` is `{ chainId, contractAddress, nonce, yParity, r, s }`.
 
