@@ -9,6 +9,17 @@ export function formatAmount(value: bigint, decimals: number, digits = 6): strin
   return value > 0n && whole === '0' ? `< 0.${'0'.repeat(digits - 1)}1` : whole!;
 }
 
+/**
+ * An amount someone must reach (a minimum, a top-up), rounded UP to
+ * `significant` digits so reaching the shown figure is always enough
+ */
+export function formatAmountUp(value: bigint, decimals: number, significant = 4): string {
+  if (value <= 0n) return '0';
+  const drop = BigInt(Math.max(0, value.toString().length - significant));
+  const step = 10n ** drop;
+  return formatUnits(((value + step - 1n) / step) * step, decimals);
+}
+
 /** USD value of an amount, or null when the token has no price */
 export function usdValue(amount: bigint, decimals: number, price: number | undefined): number | null {
   if (!price) return null;
