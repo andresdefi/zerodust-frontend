@@ -296,8 +296,8 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
             {!m.recipientValid && <p id="recipient-help" className="field-error" role="alert">Not a valid address: 0x and 40 hex characters.</p>}
             {m.recipientValid && !m.toSelf && (
               <div id="recipient-help" className="addr-warn" role="alert">
-                <b>This is not the loaded wallet.</b> Check it character by character. A sweep to the wrong address cannot be undone.
-                <div className="addr-chunks">{chunk(m.recipient)}</div>
+                <b>This is not the loaded wallet.</b> Check that it starts and ends like the address you meant. A sweep to the wrong address cannot be undone.
+                <AddressCheck address={m.recipient} />
               </div>
             )}
           </div>
@@ -338,9 +338,17 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
   );
 }
 
-/** 0x 4B1c 9a7E ... for reading an address character by character */
-function chunk(address: string): string {
-  const body = address.replace(/^0x/i, '');
-  return `0x ${body.match(/.{1,4}/g)?.join(' ') ?? ''}`;
+/**
+ * The address as one unbroken string, its first and last characters picked out: what people
+ * compare against the address they meant (owner, 2026-10-06: a spaced copy read as an error)
+ */
+function AddressCheck({ address }: { address: string }) {
+  const head = address.slice(0, 6);
+  const tail = address.slice(-4);
+  const middle = address.slice(6, -4);
+  return (
+    <div className="addr-check" aria-label={`Address ${address}`}>
+      <b>{head}</b>{middle}<b>{tail}</b>
+    </div>
+  );
 }
-

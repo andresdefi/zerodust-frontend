@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { connectMetaMask, requestPermission, sweepWithPermission, type Eip1193Provider, type MetaMaskSession } from '../src/sweep/metamask';
+import { connectMetaMask, requestPermissions, sweepBatchWithPermissions, type Eip1193Provider, type MetaMaskSession } from '../src/sweep/metamask';
 
 const ROUTER = '0x589CB1Fc24F8Cf6e41755Ea518e7815423e83f70';
 const USER = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
@@ -46,18 +46,25 @@ describe('connectMetaMask', () => {
   });
 });
 
-describe('requestPermission', () => {
-  it('asks for a one-time allowance with the router as redeemer and payee, an expiry, and no adjustment', async () => {
+describe('requestPermissions', () => {
+  it('asks for every chain in one request: a one-time allowance, the router as redeemer and payee, an expiry, no adjustment', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-06T12:00:00Z'));
     const now = Math.floor(Date.now() / 1000);
-    const { provider, calls } = fakeProvider({ wallet_requestExecutionPermissions: [{ context: '0xabcd', delegationManager: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3' }] });
+    const { provider, calls } = fakeProvider({
+      wallet_requestExecutionPermissions: [{ chainId: '0x2105', context: '0xabcd' }, { chainId: '0xa4b1', context: '0xef01' }],
+    });
 
-    const granted = await requestPermission(provider, { chainId: 8453, router: ROUTER.toLowerCase() as `0x${string}`, amount: 1000n, chainName: 'Base' });
+    const contexts = await requestPermissions(provider, ROUTER.toLowerCase() as `0x${string}`, [
+      { chainId: 8453, amount: 1000n, chainName: 'Base' },
+      { chainId: 42161, amount: 2000n, chainName: 'Arbitrum' },
+    ]);
 
-    expect(granted.context).toBe('0xabcd');
-    const [request] = calls[0]!.params as Array<Record<string, unknown>>;
-    expect(request).toEqual({
+    expect(calls).toHaveLength(1);
+    expect([...contexts]).toEqual([[8453, '0xabcd'], [42161, '0xef01']]);
+    const requests = calls[0]!.params as Array<Record<string, unknown>>;
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toEqual({
       chainId: '0x2105',
       permission: {
         type: 'native-token-allowance',
@@ -71,64 +78,102 @@ describe('requestPermission', () => {
         { type: 'payee', data: { addresses: [ROUTER] } },
       ],
     });
+    expect((requests[1]!.permission as { data: { allowanceAmount: string } }).data.allowanceAmount).toBe('0x7d0');
   });
 
-  it('refuses an answer without a context', async () => {
-    const { provider } = fakeProvider({ wallet_requestExecutionPermissions: [{}] });
-    await expect(requestPermission(provider, { chainId: 8453, router: ROUTER, amount: 1n, chainName: 'Base' })).rejects.toThrow('did not return a permission');
+  it('maps answers without a chain id by order, and refuses an answer with no permission at all', async () => {
+    const byOrder = fakeProvider({ wallet_requestExecutionPermissions: [{ context: '0x01' }, { context: '0x02' }] });
+    const contexts = await requestPermissions(byOrder.provider, ROUTER, [{ chainId: 10, amount: 1n, chainName: 'OP' }, { chainId: 56, amount: 1n, chainName: 'BNB' }]);
+    expect([...contexts]).toEqual([[10, '0x01'], [56, '0x02']]);
+    const none = fakeProvider({ wallet_requestExecutionPermissions: [{}] });
+    await expect(requestPermissions(none.provider, ROUTER, [{ chainId: 8453, amount: 1n, chainName: 'Base' }])).rejects.toThrow('did not return a permission');
   });
 });
 
-describe('sweepWithPermission', () => {
-  const quote = { quoteId: 'q-1', userBalance: '1000', estimatedReceive: '900', permission: { router: ROUTER, delegationManager: '0xdb9B', domainVersion: 'permission-1' } };
+describe('sweepBatchWithPermissions', () => {
+  const quoteFor = (chainId: number) => ({ quoteId: `q-${chainId}`, userBalance: '1000', estimatedReceive: '900', permission: { router: ROUTER, delegationManager: '0xdb9B', domainVersion: 'permission-2' } });
 
-  /** The API as the page sees it: two quotes, the typed data, the sweep and its status */
-  function stubApi(verifyingContract: string, statuses: string[]) {
-    const requests: Array<{ url: string; body?: unknown }> = [];
+  /** The API as the page sees it: a quote per chain, the batch typed data, the sweeps and their status */
+  function stubApi(opts: { verifyingContract?: string; sweepError?: (attempt: number) => { status: number; code: string } | null; status?: string } = {}) {
+    const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    let sweepCalls = 0;
     vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
-      requests.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-      const json = (body: unknown) => ({ ok: true, json: async () => body });
-      if (url.includes('/quote?')) return json(quote);
-      if (url.endsWith('/authorization')) return json({ typedData: { domain: { name: 'ZeroDust', version: 'permission-1', chainId: 8453, verifyingContract }, types: {}, primaryType: 'SweepIntent', message: {} } });
-      if (url.endsWith('/sweep')) return json({ sweepId: 's-1' });
-      return json({ status: statuses.shift() ?? 'completed', txHash: '0xfeed' });
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      requests.push({ url, body });
+      const json = (b: unknown, status = 200) => ({ ok: status < 400, status, json: async () => b });
+      if (url.includes('/quote?')) return json(quoteFor(Number(new URL(url).searchParams.get('fromChainId'))));
+      if (url.endsWith('/authorization/batch')) {
+        return json({ typedData: { domain: { name: 'ZeroDust', version: 'permission-2', verifyingContract: opts.verifyingContract ?? ROUTER }, types: {}, primaryType: 'SweepBatch', message: { sweeps: body.quoteIds.map(() => ({})) } } });
+      }
+      if (url.endsWith('/sweep')) {
+        const err = opts.sweepError?.(Math.floor(sweepCalls++ / 3));
+        if (err) return json({ error: 'Quote expired', code: err.code }, err.status);
+        return json({ sweepId: `s-${body.quoteId}` });
+      }
+      return json({ status: opts.status ?? 'completed', txHash: '0xfeed' });
     });
     return requests;
   }
 
-  const session = (provider: Eip1193Provider): MetaMaskSession => ({ provider, address: USER, permissionChains: new Set([8453]) });
+  const session = (provider: Eip1193Provider): MetaMaskSession => ({ provider, address: USER, permissionChains: new Set([8453, 42161, 10]) });
+  const item = (chainId: number, balance = 1000n) => ({ chainId, chainName: `chain ${chainId}`, toChainId: 8453, destination: DEST as `0x${string}`, readBalance: async () => balance });
+  const granted = (ids: number[]) => ids.map((id) => ({ chainId: `0x${id.toString(16)}`, context: `0xc0${id.toString(16)}` }));
 
-  it('switches, grants, quotes again after the grant, signs the router-domain intent and submits the context', async () => {
-    const requests = stubApi(ROUTER, ['completed']);
-    const { provider, calls } = fakeProvider({
-      wallet_switchEthereumChain: null,
-      wallet_requestExecutionPermissions: [{ context: '0xc0ffee' }],
-      eth_signTypedData_v4: '0x5151',
-    });
-    const steps: string[] = [];
+  it('three chains: one permission request, quotes, ONE signature, three sweeps carrying the whole batch', async () => {
+    const requests = stubApi();
+    const { provider, calls } = fakeProvider({ wallet_requestExecutionPermissions: granted([8453, 42161, 10]), eth_signTypedData_v4: '0x5151' });
 
-    const result = await sweepWithPermission(session(provider), { chainId: 8453, chainName: 'Base', toChainId: 8453, destination: DEST, readBalance: async () => 1000n }, (s) => steps.push(s));
+    const results = await sweepBatchWithPermissions(session(provider), ROUTER, [item(8453), item(42161), item(10)], () => {});
 
-    expect(calls.map((c) => c.method)).toEqual(['wallet_switchEthereumChain', 'wallet_requestExecutionPermissions', 'eth_signTypedData_v4']);
-    expect(requests.filter((r) => r.url.includes('/quote?'))).toHaveLength(2);
-    expect(requests.find((r) => r.url.endsWith('/sweep'))!.body).toEqual({ quoteId: 'q-1', signature: '0x5151', permissionContext: '0xc0ffee' });
-    expect(result).toMatchObject({ sweepId: 's-1', txHash: '0xfeed', status: 'completed' });
-    expect(steps).toContain('Sign in MetaMask');
+    expect(calls.map((c) => c.method)).toEqual(['wallet_requestExecutionPermissions', 'eth_signTypedData_v4']);
+    expect(requests.filter((r) => r.url.includes('/quote?'))).toHaveLength(3);
+    expect(requests.find((r) => r.url.endsWith('/authorization/batch'))!.body).toEqual({ quoteIds: ['q-8453', 'q-42161', 'q-10'] });
+    const sweeps = requests.filter((r) => r.url.endsWith('/sweep'));
+    expect(sweeps.map((s) => s.body)).toEqual([8453, 42161, 10].map((id) => ({
+      quoteId: `q-${id}`, signature: '0x5151', permissionContext: `0xc0${id.toString(16)}`, batchQuoteIds: ['q-8453', 'q-42161', 'q-10'],
+    })));
+    expect([...results.values()].every((r) => r.status === 'completed' && !r.error)).toBe(true);
   });
 
-  it('stops before asking for a signature when the typed data is not for the router', async () => {
-    stubApi('0x000000000000000000000000000000000000dEaD', []);
-    const { provider, calls } = fakeProvider({ wallet_switchEthereumChain: null, wallet_requestExecutionPermissions: [{ context: '0xc0ffee' }] });
-    await expect(sweepWithPermission(session(provider), { chainId: 8453, chainName: 'Base', toChainId: 8453, destination: DEST, readBalance: async () => 1000n }, () => {}))
-      .rejects.toThrow('not for the ZeroDust router');
+  it('skips an empty chain and a chain MetaMask did not grant, and sweeps the rest', async () => {
+    stubApi();
+    const { provider } = fakeProvider({ wallet_requestExecutionPermissions: granted([8453]), eth_signTypedData_v4: '0x5151' });
+    const results = await sweepBatchWithPermissions(session(provider), ROUTER, [item(8453), item(42161), item(10, 0n)], () => {});
+    expect(results.get(10)!.error).toBe('Nothing to sweep: the balance is 0');
+    expect(results.get(42161)!.error).toBe('MetaMask did not grant the permission for this chain');
+    expect(results.get(8453)!.status).toBe('completed');
+  });
+
+  it('re-quotes and asks for the signature once more when every quote expired while it was read', async () => {
+    const requests = stubApi({ sweepError: (attempt) => (attempt === 0 ? { status: 400, code: 'QUOTE_EXPIRED' } : null) });
+    const { provider, calls } = fakeProvider({ wallet_requestExecutionPermissions: granted([8453, 42161, 10]), eth_signTypedData_v4: '0x5151' });
+    const results = await sweepBatchWithPermissions(session(provider), ROUTER, [item(8453), item(42161), item(10)], () => {});
+    expect(calls.filter((c) => c.method === 'eth_signTypedData_v4')).toHaveLength(2);
+    expect(calls.filter((c) => c.method === 'wallet_requestExecutionPermissions')).toHaveLength(1);
+    expect(requests.filter((r) => r.url.includes('/quote?'))).toHaveLength(6);
+    expect([...results.values()].every((r) => r.status === 'completed')).toBe(true);
+  });
+
+  it('stops before asking for a signature when the batch is not for the ZeroDust router', async () => {
+    stubApi({ verifyingContract: '0x000000000000000000000000000000000000dEaD' });
+    const { provider, calls } = fakeProvider({ wallet_requestExecutionPermissions: granted([8453]) });
+    const results = await sweepBatchWithPermissions(session(provider), ROUTER, [item(8453)], () => {});
+    expect(results.get(8453)!.error).toBe('Stopped before signing: the batch is not for the ZeroDust router');
     expect(calls.map((c) => c.method)).not.toContain('eth_signTypedData_v4');
   });
 
-  it('asks for nothing on an empty wallet', async () => {
-    stubApi(ROUTER, []);
-    const { provider, calls } = fakeProvider({ wallet_switchEthereumChain: null });
-    await expect(sweepWithPermission(session(provider), { chainId: 8453, chainName: 'Base', toChainId: 8453, destination: DEST, readBalance: async () => 0n }, () => {}))
-      .rejects.toThrow('the balance is 0');
-    expect(calls.map((c) => c.method)).toEqual(['wallet_switchEthereumChain']);
+  it('a refused permission fails every chain without asking anything else', async () => {
+    stubApi();
+    const { provider, calls } = fakeProvider({ wallet_requestExecutionPermissions: new Error('User rejected the request.') });
+    const results = await sweepBatchWithPermissions(session(provider), ROUTER, [item(8453), item(10)], () => {});
+    expect([...results.values()].map((r) => r.error)).toEqual(['User rejected the request.', 'User rejected the request.']);
+    expect(calls.map((c) => c.method)).toEqual(['wallet_requestExecutionPermissions']);
+  });
+
+  it('hands a bridging sweep back without waiting for the delivery (the page follows it)', async () => {
+    stubApi({ status: 'bridging' });
+    const { provider } = fakeProvider({ wallet_requestExecutionPermissions: granted([8453]), eth_signTypedData_v4: '0x5151' });
+    const results = await sweepBatchWithPermissions(session(provider), ROUTER, [item(8453)], () => {});
+    expect(results.get(8453)).toMatchObject({ status: 'bridging', sweepId: 's-q-8453' });
   });
 });

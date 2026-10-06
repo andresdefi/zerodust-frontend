@@ -9,7 +9,7 @@ import { broadcast, planChecked, settledBalance, signPlan } from '../direct/run'
 import { API_URL } from './constants';
 import { formatAmountUp } from '../lib/format';
 import { sendReport, type SweepReport } from './report';
-import { permissionQuote, sweepWithPermission, type MetaMaskSession } from './metamask';
+import { permissionQuote, sweepBatchWithPermissions, sweepStatus, type MetaMaskSession } from './metamask';
 
 // Mirrors the local sweeper (local-sweeper/src/App.tsx), which is proven with
 // real funds: ZeroDust's sponsored (EIP-7702) chains through the SDK, and
@@ -142,6 +142,10 @@ export const NEEDS_KEY = 'MetaMask cannot sweep this chain yet. Load the wallet 
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Seconds since `start` (ms); module-level so the hook body stays pure */
+const secondsSince = (start: number) => Math.round((Date.now() - start) / 1000);
+const nowMs = () => Date.now();
+
 export function useSweep(wallet: Wallet) {
   const account = wallet.kind === 'key' ? wallet.account : null;
   const session = wallet.kind === 'metamask' ? wallet.session : null;
@@ -185,6 +189,8 @@ export function useSweep(wallet: Wallet) {
   const [swept, setSwept] = useState(false);
   // Direct chains: a fee transfer that landed before its sweep failed is not charged again
   const feePaid = useRef<Record<number, string>>({});
+  // MetaMask: the permission router the API quotes (the same address on every chain)
+  const router = useRef<Address | null>(null);
 
   const setState = (chainId: number, state: RowState) => setStates((prev) => ({ ...prev, [chainId]: state }));
 
@@ -482,6 +488,7 @@ export function useSweep(wallet: Wallet) {
         // A permission quote: nothing is signed until the sweep
         try {
           const quote = await permissionQuote({ fromChainId: row.chainId, toChainId: target.toChainId, user: address, destination: getAddress(target.recipient) });
+          router.current = quote.permission.router;
           setBridge(row.chainId, quote.bridge?.displayName);
           setState(row.chainId, isRouted(choice) && !isExit(choice)
             ? { phase: 'ready', choice, receive: BigInt(quote.estimatedReceive), toChainId: target.toChainId, token: rowToken(row.chainId, target.toChainId) }
@@ -573,8 +580,11 @@ export function useSweep(wallet: Wallet) {
         update({ phase: 'done', receive, fee, detail: 'Balance reads 0 on-chain' });
         return;
       }
-      update({ phase: 'sweeping', receive, fee, detail: 'bridging' });
+      const bridgeStarted = nowMs();
+      const bridgeName = DIRECT_BRIDGE_NAMES[plan.route] ?? 'The bridge';
+      update({ phase: 'sweeping', receive, fee, detail: bridgingText(bridgeName, destOf(toChainId!)?.name ?? 'the destination', 0) });
       for (let i = 0; i < 90; i++) {
+        if (i > 0) update({ phase: 'sweeping', receive, fee, detail: bridgingText(bridgeName, destOf(toChainId!)?.name ?? 'the destination', secondsSince(bridgeStarted)) });
         const s = await deliveryStatus(plan, hash!, toChainId).catch(() => ({ state: 'pending' as const }));
         if (s.state === 'delivered') {
           update({ phase: 'done', receive, fee, detail: 'Balance reads 0 on-chain, delivered' });
@@ -598,77 +608,108 @@ export function useSweep(wallet: Wallet) {
   };
 
   /**
-   * A chain through a MetaMask permission: grant, sign, submit, then trust the chain. Done when
-   * the balance reads exactly 0 on-chain; the account stays MetaMask's smart account (MetaMask's
-   * own delegation, not ZeroDust's), so there is no revoke to check.
+   * Every MetaMask chain at once: one permission request, one signature (metamask.ts), then
+   * each chain on its own: done when its balance reads exactly 0 on-chain (the account stays
+   * MetaMask's smart account: MetaMask's own delegation, not ZeroDust's, so no revoke to check).
+   * A cross-chain sweep is then followed until the bridge delivers.
    */
-  const sweepMetaMask = async (row: Row) => {
-    const choice = choices[row.chainId];
-    const target = targetFor(row);
-    const toChainId = target.toChainId;
-    const token = rowToken(row.chainId, toChainId);
-    let result: Awaited<ReturnType<typeof sweepWithPermission>> | undefined;
-    const sponsored = (st: RowState) => report(row, st, {
-      kind: 'sponsored', toChainId, mode: 'permission',
-      ...(result?.quote.bridge?.name ? { route: result.quote.bridge.name } : {}),
-      ...(result?.txHash ? { txHashes: [result.txHash] } : {}),
-      ...(result?.sweepId ? { sweepId: result.sweepId } : {}),
-    });
-    try {
-      result = await sweepWithPermission(
-        session!,
-        {
+  const sweepMetaMaskAll = async (targets: Row[]) => {
+    const meta = new Map(targets.map((row) => [row.chainId, { row, choice: choices[row.chainId], target: targetFor(row) }]));
+    const step = (chainId: number, detail: string) => {
+      const m = meta.get(chainId)!;
+      if (detail !== 'failed') setState(chainId, { phase: 'sweeping', detail, choice: m.choice });
+    };
+    let routerAddress = router.current;
+    if (!routerAddress && targets[0]) {
+      const t0 = meta.get(targets[0].chainId)!;
+      routerAddress = (await permissionQuote({ fromChainId: t0.row.chainId, toChainId: t0.target.toChainId, user: address, destination: getAddress(t0.target.recipient) })).permission.router;
+    }
+    const results = await sweepBatchWithPermissions(
+      session!,
+      routerAddress!,
+      targets.map((row) => {
+        const m = meta.get(row.chainId)!;
+        return {
           chainId: row.chainId,
           chainName: row.name,
-          toChainId,
-          destination: getAddress(target.recipient),
+          toChainId: m.target.toChainId,
+          destination: getAddress(m.target.recipient),
           readBalance: async () => (await readState(row.chainId, address)).balance,
-        },
-        (step) => setState(row.chainId, { phase: 'sweeping', detail: step, choice })
-      );
-    } catch (error) {
-      const failed: RowState = { phase: 'failed', detail: error instanceof Error ? error.message : 'Sweep failed', choice };
-      setState(row.chainId, failed);
-      sponsored(failed);
-      return;
-    }
-    setBridge(row.chainId, result.quote.bridge?.displayName);
-    if (result.status === 'failed') {
-      const failed: RowState = { phase: 'failed', detail: result.error ?? 'Sweep failed', txHash: result.txHash, sent: true, choice };
-      setState(row.chainId, failed);
-      sponsored(failed);
-      return;
-    }
-    const receive = !choice || choice === 'elsewhere' ? BigInt(result.quote.estimatedReceive) : undefined;
-    setState(row.chainId, { phase: 'sweeping', detail: 'Checking on-chain', txHash: result.txHash, choice });
-    try {
-      let balance = (await readState(row.chainId, address)).balance;
-      for (let i = 0; i < 24 && balance !== 0n; i++) {
-        await wait(5000);
-        balance = (await readState(row.chainId, address)).balance;
+        };
+      }),
+      step
+    );
+
+    await Promise.all(targets.map(async (row) => {
+      const { choice, target } = meta.get(row.chainId)!;
+      const toChainId = target.toChainId;
+      const token = rowToken(row.chainId, toChainId);
+      const result = results.get(row.chainId) ?? { error: 'Not swept' };
+      const sponsored = (st: RowState) => report(row, st, {
+        kind: 'sponsored', toChainId, mode: 'permission',
+        ...(result.quote?.bridge?.name ? { route: result.quote.bridge.name } : {}),
+        ...(result.txHash ? { txHashes: [result.txHash] } : {}),
+        ...(result.sweepId ? { sweepId: result.sweepId } : {}),
+      });
+      setBridge(row.chainId, result.quote?.bridge?.displayName);
+      if (result.error || !result.sweepId) {
+        const failed: RowState = { phase: 'failed', detail: result.error ?? 'Sweep failed', txHash: result.txHash, sent: !!result.sweepId, choice };
+        setState(row.chainId, failed);
+        sponsored(failed);
+        return;
       }
-      const final: RowState = {
-        phase: balance === 0n ? 'done' : 'failed',
-        txHash: result.txHash, sent: true, receive, toChainId, token, choice,
-        detail: balance === 0n
-          ? result.status === 'completed' ? 'Balance reads 0 on-chain' : 'Balance reads 0 on-chain; delivery still pending'
-          : 'Sent, but the chain still shows a balance',
-      };
-      setState(row.chainId, final);
-      if (final.phase === 'failed') sponsored(final);
-    } catch {
-      setState(row.chainId, { phase: 'done', txHash: result.txHash, receive, toChainId, token, choice, detail: 'Completed; the on-chain check could not run' });
-    }
+      const receive = result.quote && (!choice || choice === 'elsewhere') ? BigInt(result.quote.estimatedReceive) : undefined;
+      setState(row.chainId, { phase: 'sweeping', detail: 'Checking on-chain', txHash: result.txHash, choice });
+      try {
+        let balance = (await readState(row.chainId, address)).balance;
+        for (let i = 0; i < 24 && balance !== 0n; i++) {
+          await wait(5000);
+          balance = (await readState(row.chainId, address)).balance;
+        }
+        if (balance !== 0n) {
+          const failed: RowState = { phase: 'failed', detail: 'Sent, but the chain still shows a balance', txHash: result.txHash, sent: true, choice };
+          setState(row.chainId, failed);
+          sponsored(failed);
+          return;
+        }
+        // Cross-chain: the wallet already reads 0; say so while the bridge delivers
+        let status = result.status;
+        const started = nowMs();
+        const bridge = result.quote?.bridge?.displayName ?? 'The bridge';
+        for (let i = 0; status === 'bridging' && i < 200; i++) {
+          const secs = secondsSince(started);
+          setState(row.chainId, { phase: 'sweeping', detail: bridgingText(bridge, m(toChainId), secs), txHash: result.txHash, choice });
+          await wait(5000);
+          status = (await sweepStatus(result.sweepId).catch(() => ({ status }))).status;
+        }
+        setState(row.chainId, {
+          phase: status === 'failed' ? 'failed' : 'done',
+          txHash: result.txHash, sent: true, receive, toChainId, token, choice,
+          detail: status === 'failed' ? 'The balance is 0, but the bridge reports the delivery failed or refunded'
+            : status === 'completed' || toChainId === row.chainId ? 'Balance reads 0 on-chain' + (toChainId !== row.chainId ? ', delivered' : '')
+            : 'Balance reads 0 on-chain; delivery still pending',
+        });
+      } catch {
+        setState(row.chainId, { phase: 'done', txHash: result.txHash, receive, toChainId, token, choice, detail: 'Completed; the on-chain check could not run' });
+      }
+    }));
   };
+
+  /** The chain a row delivers to, by name */
+  const m = (chainId: number) => destOf(chainId)?.name ?? 'the destination';
 
   const sweep = async () => {
     setBusy(true);
     setSwept(true);
     const targets = readyRows;
     for (const row of targets) setState(row.chainId, { ...states[row.chainId], phase: 'sweeping', detail: 'Queued' });
-    // MetaMask asks about one chain at a time
-    await inPool(targets, session ? 1 : PARALLEL_CHAINS, async (row) => {
-      if (session) return sweepMetaMask(row);
+    // MetaMask: one permission request and one signature for every chain
+    if (session) {
+      await sweepMetaMaskAll(targets);
+      setBusy(false);
+      return;
+    }
+    await inPool(targets, PARALLEL_CHAINS, async (row) => {
       if (row.direct) return sweepDirect(row);
       const choice = choices[row.chainId];
       const target = targetFor(row);
@@ -728,13 +769,19 @@ export function useSweep(wallet: Wallet) {
     // No automatic reload: results and transaction links stay until the owner refreshes
   };
 
+  /**
+   * Read every chain again and start over from what is left: a chain swept to 0 drops off (with
+   * nothing left, the page says so), and whatever holds a balance now starts selected, like on
+   * load (owner, 2026-10-06: a refreshed list kept the swept chains at 0)
+   */
   const reload = async () => {
     setBusy(true);
     setSwept(false);
-    const next = await refresh(new Set(Object.keys(states).map(Number)));
-    // Chains that were not listed before (funded since the wallet was loaded) start selected, like on load
-    const known = new Set(rows.map((r) => r.chainId));
-    setSelected((prev) => new Set([...prev, ...next.filter((r) => r.canSweep && !known.has(r.chainId)).map((r) => r.chainId)]));
+    const next = await refresh();
+    setStates({});
+    setBridgeOf({});
+    setChoices((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => next.some((r) => r.chainId === Number(id)))));
+    setSelected(new Set(next.filter((r) => r.canSweep).map((r) => r.chainId)));
     setBusy(false);
   };
 
@@ -755,6 +802,15 @@ export function useSweep(wallet: Wallet) {
 }
 
 export type SweepModel = ReturnType<typeof useSweep>;
+
+/**
+ * What a row says while a bridge delivers: the wallet already reads 0, who is delivering, and for
+ * how long (a Gas.zip delivery once took 4 minutes and 8 retries on its side, 2026-10-06)
+ */
+export function bridgingText(bridge: string, to: string, seconds: number): string {
+  const waited = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return `Wallet reads 0. ${bridge} is delivering to ${to} (${waited}; usually under a minute, sometimes a few)`;
+}
 
 /**
  * True when every selected chain that could be swept is the destination chain and the funds would
