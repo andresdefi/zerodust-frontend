@@ -49,7 +49,8 @@ export function KeyEntry({ onAccount, onMetaMask }: {
 
   // MetaMask is the main way in (owner, 2026-10-06); the key is the fallback for chains MetaMask
   // cannot sweep. The offline file has no wallet extension, so it is key-only.
-  const [keyMode, setKeyMode] = useState(OFFLINE);
+  // Back from the idle timeout: open on the key, where the "forgotten" notice is
+  const [keyMode, setKeyMode] = useState(OFFLINE || forgotIdle);
   const [connecting, setConnecting] = useState(false);
   const [mmError, setMmError] = useState<string | null>(null);
   const connect = async () => {
