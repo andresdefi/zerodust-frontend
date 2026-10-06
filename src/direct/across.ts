@@ -115,6 +115,11 @@ export const ZEROX_ALLOWANCE_HOLDER = '0x0000000000001fF3684f28c67538d4D072C2273
 export const LIFI_DIAMOND = '0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 /**
+ * Contracts Across's messages call emitData(bytes) on, to log the swap (every one of 128 live
+ * routes, 2026-10-06). A message may call no other contract outside the swap, unwrap and drains.
+ */
+const EMIT_DATA_TARGETS = ['0xBF75133b48b0a42AB9374027902E83C5E2949034', '0x25b15Fc38d6A2C13FEDdD9cb51f184F7Cf0D4C11'];
+/**
  * 0x's Settler registry (same address everywhere): ownerOf(2) is the current
  * taker-submitted Settler and prev(2) the one before. An exec operator must
  * be one of the two on the destination chain.
@@ -428,7 +433,9 @@ export function verifyAcrossMessage(message: Hex, x: AcrossMessageExpect, fail: 
       settler = operator;
       buyToken = slippage.buyToken.toLowerCase();
       swapAt = at;
-    } else if (sel !== SEL.emitData) {
+    } else if (sel === SEL.emitData) {
+      if (!EMIT_DATA_TARGETS.some((t) => eq(t, call.target))) fail(`a destination call logs to ${call.target}, not Across's logger`);
+    } else {
       fail(`a destination call (${sel}) is not one the handler route uses`);
     }
   }
