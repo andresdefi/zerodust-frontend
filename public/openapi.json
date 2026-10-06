@@ -1,35 +1,171 @@
 {
-  "openapi": "3.1.0",
+  "openapi": "3.0.3",
   "info": {
     "title": "ZeroDust API",
-    "description": "Sweep native gas tokens to exactly zero across 25+ EVM chains. ZeroDust sweeps 100% of native gas tokens (ETH, BNB, POL, etc.) from any supported EVM chain, leaving exactly zero balance.",
+    "description": "Move a wallet's entire native gas balance off an EVM chain and leave exactly 0, to any address on the same chain or bridged to another chain. Sign with the wallet's key (EIP-7702) or through MetaMask Advanced Permissions (ERC-7715, signer=permission). Supported chains change: read GET /chains and GET /direct/chains. Docs: https://zerodust.xyz/docs/api",
     "version": "1.0.0",
     "contact": {
       "name": "ZeroDust",
       "url": "https://zerodust.xyz"
     }
   },
-  "servers": [
-    {
-      "url": "https://api.zerodust.xyz",
-      "description": "Production (mainnet)"
-    }
-  ],
-  "security": [
-    {},
-    {
-      "apiKey": []
-    }
-  ],
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key"
+      },
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {}
+  },
   "paths": {
-    "/chains": {
+    "/health": {
       "get": {
-        "operationId": "getChains",
-        "summary": "List supported chains",
-        "description": "Returns all supported EVM chains with their configuration including chain ID, native token, minimum balance for sweeps, and contract addresses.",
+        "summary": "Health check",
+        "tags": [
+          "health"
+        ],
         "responses": {
           "200": {
-            "description": "List of supported chains",
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/status": {
+      "get": {
+        "summary": "Which sweeps are available right now",
+        "tags": [
+          "health"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sponsoredSweeps": {
+                      "type": "string",
+                      "enum": [
+                        "available",
+                        "paused"
+                      ]
+                    },
+                    "directChains": {
+                      "type": "string",
+                      "enum": [
+                        "available",
+                        "paused"
+                      ]
+                    },
+                    "message": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "summary": "Readiness check (includes database)",
+        "tags": [
+          "health"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "database": {
+                      "type": "string"
+                    },
+                    "timestamp": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "database": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chains": {
+      "get": {
+        "summary": "Get list of supported chains",
+        "tags": [
+          "chains"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "in": "query",
+            "name": "testnet",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
@@ -38,11 +174,357 @@
                     "chains": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/Chain"
+                        "type": "object",
+                        "properties": {
+                          "chainId": {
+                            "type": "number"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "nativeToken": {
+                            "type": "string"
+                          },
+                          "nativeTokenDecimals": {
+                            "type": "number"
+                          },
+                          "minBalance": {
+                            "type": "string"
+                          },
+                          "contractAddress": {
+                            "type": "string"
+                          },
+                          "explorerUrl": {
+                            "type": "string"
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "crossChain": {
+                            "type": "object",
+                            "description": "Whether any bridge currently accepts this chain as a cross-chain source. Checked every 10 minutes; null until the first check.",
+                            "properties": {
+                              "available": {
+                                "type": [
+                                  "null",
+                                  "boolean"
+                                ]
+                              },
+                              "bridges": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "checkedAt": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              }
+                            }
+                          },
+                          "simulation": {
+                            "type": "object",
+                            "description": "Whether this chain's RPC can simulate an EIP-7702 sweep (hourly canary): mode authorizationList (preferred) or stateOverride (RPC ignores authorizations but follows a delegation-designator code override). Sweeps from a chain with reliable=false are refused. null until the first check.",
+                            "properties": {
+                              "reliable": {
+                                "type": [
+                                  "null",
+                                  "boolean"
+                                ]
+                              },
+                              "mode": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "checkedAt": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              }
+                            }
+                          }
+                        }
                       }
                     }
-                  },
-                  "required": ["chains"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bridges/timing": {
+      "get": {
+        "summary": "Typical bridge delivery times, from real deliveries (last 14 days)",
+        "tags": [
+          "chains"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "routes": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "typicalSeconds": {
+                            "type": "number"
+                          },
+                          "p90Seconds": {
+                            "type": "number"
+                          },
+                          "samples": {
+                            "type": "number"
+                          },
+                          "slowLately": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "pairs": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "typicalSeconds": {
+                            "type": "number"
+                          },
+                          "samples": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/destinations": {
+      "get": {
+        "summary": "Chains a cross-chain sweep from fromChainId can deliver native gas to",
+        "tags": [
+          "chains"
+        ],
+        "description": "Any chain a routing bridge serves from the source, not only ZeroDust chains. Lists what bridges advertise; /quote confirms a route live.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "number"
+            },
+            "in": "query",
+            "name": "fromChainId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "fromChainId": {
+                      "type": "number"
+                    },
+                    "destinations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chainId": {
+                            "type": "number"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "nativeSymbol": {
+                            "type": "string"
+                          },
+                          "nativeDecimals": {
+                            "type": "number"
+                          },
+                          "bridges": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "zerodustChain": {
+                            "type": "boolean"
+                          },
+                          "deliversToken": {
+                            "type": "object",
+                            "description": "Token delivery: the chain's token arrives as an ERC-20 on the destination, not native gas",
+                            "properties": {
+                              "symbol": {
+                                "type": "string"
+                              },
+                              "address": {
+                                "type": "string"
+                              },
+                              "decimals": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chains/{chainId}": {
+      "get": {
+        "summary": "Get chain details by ID",
+        "tags": [
+          "chains"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "number"
+            },
+            "in": "path",
+            "name": "chainId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "chainId": {
+                      "type": "number"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "nativeToken": {
+                      "type": "string"
+                    },
+                    "nativeTokenDecimals": {
+                      "type": "number"
+                    },
+                    "minBalance": {
+                      "type": "string"
+                    },
+                    "contractAddress": {
+                      "type": "string"
+                    },
+                    "explorerUrl": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "crossChain": {
+                      "type": "object",
+                      "description": "Whether any bridge currently accepts this chain as a cross-chain source. Checked every 10 minutes; null until the first check.",
+                      "properties": {
+                        "available": {
+                          "type": [
+                            "null",
+                            "boolean"
+                          ]
+                        },
+                        "bridges": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "checkedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        }
+                      }
+                    },
+                    "simulation": {
+                      "type": "object",
+                      "description": "Whether this chain's RPC can simulate an EIP-7702 sweep (hourly canary): mode authorizationList (preferred) or stateOverride (RPC ignores authorizations but follows a delegation-designator code override). Sweeps from a chain with reliable=false are refused. null until the first check.",
+                      "properties": {
+                        "reliable": {
+                          "type": [
+                            "null",
+                            "boolean"
+                          ]
+                        },
+                        "mode": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "checkedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
@@ -52,38 +534,238 @@
     },
     "/balances/{address}": {
       "get": {
-        "operationId": "getBalances",
-        "summary": "Get balances across all chains",
-        "description": "Returns native token balances across all supported chains for the given address, including whether each balance is large enough to sweep.",
+        "summary": "Get balances for an address across all supported chains",
+        "tags": [
+          "balances"
+        ],
         "parameters": [
           {
-            "name": "address",
-            "in": "path",
-            "required": true,
-            "description": "Ethereum address (0x...)",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "in": "query",
+            "name": "testnet",
+            "required": false
+          },
+          {
             "schema": {
               "type": "string",
               "pattern": "^0x[a-fA-F0-9]{40}$"
-            }
+            },
+            "in": "path",
+            "name": "address",
+            "required": true
           }
         ],
         "responses": {
           "200": {
-            "description": "Balances for the address",
+            "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BalancesResponse"
+                  "type": "object",
+                  "properties": {
+                    "address": {
+                      "type": "string"
+                    },
+                    "chains": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chainId": {
+                            "type": "number"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "nativeToken": {
+                            "type": "string"
+                          },
+                          "balance": {
+                            "type": "string"
+                          },
+                          "balanceFormatted": {
+                            "type": "string"
+                          },
+                          "canSweep": {
+                            "type": "boolean"
+                          },
+                          "minBalance": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/balances/{address}/{chainId}": {
+      "get": {
+        "summary": "Get balance for an address on a specific chain",
+        "tags": [
+          "balances"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{40}$"
+            },
+            "in": "path",
+            "name": "address",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "number"
+            },
+            "in": "path",
+            "name": "chainId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "chainId": {
+                      "type": "number"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "nativeToken": {
+                      "type": "string"
+                    },
+                    "balance": {
+                      "type": "string"
+                    },
+                    "balanceFormatted": {
+                      "type": "string"
+                    },
+                    "canSweep": {
+                      "type": "boolean"
+                    },
+                    "minBalance": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
           },
-          "400": {
-            "description": "Invalid address",
+          "404": {
+            "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/prices": {
+      "get": {
+        "summary": "Get all token prices",
+        "tags": [
+          "prices"
+        ],
+        "description": "Returns USD prices for all supported native tokens (cached 10 min)",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "prices": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "number"
+                      }
+                    },
+                    "cachedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "ttlSeconds": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/prices/{symbol}": {
+      "get": {
+        "summary": "Get price for a specific token",
+        "tags": [
+          "prices"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "symbol",
+            "required": true,
+            "description": "Token symbol (e.g., ETH, BNB, POL)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "symbol": {
+                      "type": "string"
+                    },
+                    "priceUsd": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
@@ -93,66 +775,287 @@
     },
     "/quote": {
       "get": {
-        "operationId": "getQuote",
-        "summary": "Get a sweep quote",
-        "description": "Returns a quote for sweeping native tokens from one chain to another. The quote includes estimated receive amount, fees, and a deadline. Quotes are valid for 60 seconds.",
+        "summary": "Get a quote for sweeping native balance",
+        "tags": [
+          "quote"
+        ],
+        "description": "Returns quote with granular fee structure",
         "parameters": [
           {
+            "schema": {
+              "type": "number"
+            },
+            "in": "query",
             "name": "fromChainId",
-            "in": "query",
-            "required": true,
-            "description": "Source chain ID",
-            "schema": {
-              "type": "integer"
-            }
+            "required": true
           },
           {
+            "schema": {
+              "type": "number"
+            },
+            "in": "query",
             "name": "toChainId",
-            "in": "query",
-            "required": true,
-            "description": "Destination chain ID",
-            "schema": {
-              "type": "integer"
-            }
+            "required": true
           },
           {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{40}$"
+            },
+            "in": "query",
             "name": "userAddress",
-            "in": "query",
-            "required": true,
-            "description": "User's Ethereum address",
-            "schema": {
-              "type": "string",
-              "pattern": "^0x[a-fA-F0-9]{40}$"
-            }
+            "required": true
           },
           {
-            "name": "destination",
-            "in": "query",
-            "required": true,
-            "description": "Destination Ethereum address",
             "schema": {
               "type": "string",
               "pattern": "^0x[a-fA-F0-9]{40}$"
-            }
+            },
+            "in": "query",
+            "name": "destination",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{40}$"
+            },
+            "in": "query",
+            "name": "callTarget",
+            "required": false,
+            "description": "Bridge contract address for cross-chain"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]*$"
+            },
+            "in": "query",
+            "name": "callData",
+            "required": false,
+            "description": "Encoded bridge call data for cross-chain"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "key",
+                "permission"
+              ]
+            },
+            "in": "query",
+            "name": "signer",
+            "required": false,
+            "description": "key (default): EIP-7702, signed with the wallet's key. permission: a MetaMask Advanced Permission (ERC-7715) redeemed by ZeroDustPermissionRouter (cross-chain through Relay and Across only)"
           }
         ],
         "responses": {
           "200": {
-            "description": "Sweep quote",
+            "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/QuoteResponse"
+                  "type": "object",
+                  "properties": {
+                    "quoteId": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "number"
+                    },
+                    "userBalance": {
+                      "type": "string"
+                    },
+                    "estimatedReceive": {
+                      "type": "string"
+                    },
+                    "mode": {
+                      "type": "number",
+                      "description": "0 = transfer, 1 = call"
+                    },
+                    "fees": {
+                      "type": "object",
+                      "properties": {
+                        "overheadGasUnits": {
+                          "type": "string"
+                        },
+                        "protocolFeeGasUnits": {
+                          "type": "string"
+                        },
+                        "extraFeeWei": {
+                          "type": "string"
+                        },
+                        "reimbGasPriceCapWei": {
+                          "type": "string"
+                        },
+                        "maxTotalFeeWei": {
+                          "type": "string"
+                        },
+                        "revokeGasUnits": {
+                          "type": "string",
+                          "description": "Gas for auto-revoke tx"
+                        }
+                      }
+                    },
+                    "autoRevoke": {
+                      "type": "boolean",
+                      "description": "Whether auto-revoke is included"
+                    },
+                    "signer": {
+                      "type": "string",
+                      "description": "key or permission, as requested"
+                    },
+                    "permission": {
+                      "type": "object",
+                      "description": "signer=permission only: grant a one-time native-token-allowance to the router (as delegate, redeemer and payee) and sign the intent with the router as verifyingContract",
+                      "properties": {
+                        "router": {
+                          "type": "string"
+                        },
+                        "delegationManager": {
+                          "type": "string"
+                        },
+                        "domainVersion": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "receiveToken": {
+                      "type": "object",
+                      "description": "Token delivery only: estimatedReceive/minReceive are in this ERC-20 on the destination, not native gas",
+                      "properties": {
+                        "symbol": {
+                          "type": "string"
+                        },
+                        "address": {
+                          "type": "string"
+                        },
+                        "decimals": {
+                          "type": "number"
+                        }
+                      }
+                    },
+                    "bridge": {
+                      "type": "object",
+                      "description": "Cross-chain only: the bridge chosen for this sweep",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "displayName": {
+                          "type": "string"
+                        },
+                        "inputAmount": {
+                          "type": "string",
+                          "description": "Exact amount routed to the bridge (source wei)"
+                        },
+                        "expectedOutput": {
+                          "type": "string",
+                          "description": "What the bridge expects to deliver (destination wei)"
+                        }
+                      }
+                    },
+                    "intent": {
+                      "type": "object",
+                      "description": "Fields to include in EIP-712 signature",
+                      "properties": {
+                        "mode": {
+                          "type": "number"
+                        },
+                        "destination": {
+                          "type": "string"
+                        },
+                        "destinationChainId": {
+                          "type": "string"
+                        },
+                        "callTarget": {
+                          "type": "string"
+                        },
+                        "routeHash": {
+                          "type": "string"
+                        },
+                        "callData": {
+                          "type": "string",
+                          "description": "Bridge calldata; keccak256(callData) == routeHash. Lets the client check the route before signing"
+                        },
+                        "minReceive": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "deadline": {
+                      "type": "number"
+                    },
+                    "nonce": {
+                      "type": "number",
+                      "description": "Contract nonce for sweep intent"
+                    },
+                    "authNonce": {
+                      "type": "number",
+                      "description": "Transaction count for EIP-7702 authorization (signer=key only)"
+                    },
+                    "validForSeconds": {
+                      "type": "number"
+                    }
+                  }
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "minimumBalanceWei": {
+                      "type": "string",
+                      "description": "AMOUNT_TOO_LOW: the smallest balance a bridge would take (estimate)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
@@ -162,11 +1065,12 @@
     },
     "/authorization": {
       "post": {
-        "operationId": "createAuthorization",
-        "summary": "Create EIP-712 typed data for signing",
-        "description": "Returns the EIP-712 typed data that the user must sign to authorize the sweep, plus the contract address for EIP-7702 authorization.",
+        "summary": "Create EIP-712 typed data for SweepIntent signing",
+        "tags": [
+          "sweep"
+        ],
+        "description": "Returns typed data for signing a sweep intent. Uses user's EOA as verifyingContract (EIP-7702).",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -174,42 +1078,184 @@
                 "properties": {
                   "quoteId": {
                     "type": "string",
-                    "format": "uuid",
-                    "description": "Quote ID from getQuote"
+                    "format": "uuid"
                   }
                 },
-                "required": ["quoteId"]
+                "required": [
+                  "quoteId"
+                ]
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
-            "description": "Authorization data",
+            "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AuthorizationResponse"
+                  "type": "object",
+                  "properties": {
+                    "sweepType": {
+                      "type": "string",
+                      "enum": [
+                        "same-chain",
+                        "cross-chain"
+                      ]
+                    },
+                    "typedData": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "contractAddress": {
+                      "type": "string",
+                      "description": "Contract address for EIP-7702 delegation (the permission router for signer=permission quotes)"
+                    },
+                    "version": {
+                      "type": "number"
+                    }
+                  }
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Quote not found",
+            "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/authorization/batch": {
+      "post": {
+        "summary": "Typed data for one signature over several chains (permission quotes)",
+        "tags": [
+          "sweep"
+        ],
+        "description": "Returns the EIP-712 SweepBatch for signer=permission quotes of one wallet, one per chain, in the order given. Sign it once (no chain id in the domain), then POST /sweep for each quote with the same signature and batchQuoteIds in this order.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "quoteIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 1,
+                    "maxItems": 64
+                  }
+                },
+                "required": [
+                  "quoteIds"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "typedData": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "router": {
+                      "type": "string"
+                    },
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "quoteId": {
+                            "type": "string"
+                          },
+                          "chainId": {
+                            "type": "number"
+                          },
+                          "index": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
@@ -219,36 +1265,234 @@
     },
     "/sweep": {
       "post": {
-        "operationId": "submitSweep",
-        "summary": "Submit a signed sweep",
-        "description": "Submits the signed sweep intent and EIP-7702 authorization. The relayer will execute the sweep atomically, transferring all native tokens from the source chain to the destination.",
+        "summary": "Submit signed authorization to execute sweep",
+        "tags": [
+          "sweep"
+        ],
+        "description": "Submit EIP-712 SweepIntent signature and EIP-7702 authorization (or, for a signer=permission quote, the MetaMask permission context). Idempotent - returns existing sweep if quoteId already submitted.",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SweepRequest"
+                "type": "object",
+                "properties": {
+                  "quoteId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "signature": {
+                    "type": "string",
+                    "pattern": "^0x[a-fA-F0-9]{128,130}$"
+                  },
+                  "eip7702Authorization": {
+                    "type": "object",
+                    "properties": {
+                      "chainId": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "contractAddress": {
+                        "type": "string",
+                        "pattern": "^0x[a-fA-F0-9]{40}$"
+                      },
+                      "nonce": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "yParity": {
+                        "type": "integer",
+                        "enum": [
+                          0,
+                          1
+                        ]
+                      },
+                      "r": {
+                        "type": "string",
+                        "pattern": "^0x[a-fA-F0-9]{64}$"
+                      },
+                      "s": {
+                        "type": "string",
+                        "pattern": "^0x[a-fA-F0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "chainId",
+                      "contractAddress",
+                      "nonce",
+                      "yParity",
+                      "r",
+                      "s"
+                    ]
+                  },
+                  "revokeAuthorization": {
+                    "type": "object",
+                    "description": "Required: EIP-7702 authorization revoking the delegation (address(0), same chain, nonce + 1). Its gas is in the quoted fee; a sweep without it is refused (REVOKE_AUTHORIZATION_REQUIRED)",
+                    "properties": {
+                      "chainId": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "contractAddress": {
+                        "type": "string",
+                        "pattern": "^0x[a-fA-F0-9]{40}$"
+                      },
+                      "nonce": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "yParity": {
+                        "type": "integer",
+                        "enum": [
+                          0,
+                          1
+                        ]
+                      },
+                      "r": {
+                        "type": "string",
+                        "pattern": "^0x[a-fA-F0-9]{64}$"
+                      },
+                      "s": {
+                        "type": "string",
+                        "pattern": "^0x[a-fA-F0-9]{64}$"
+                      }
+                    },
+                    "required": [
+                      "chainId",
+                      "contractAddress",
+                      "nonce",
+                      "yParity",
+                      "r",
+                      "s"
+                    ]
+                  },
+                  "callData": {
+                    "type": "string",
+                    "pattern": "^0x[a-fA-F0-9]*$",
+                    "description": "Bridge calldata for MODE_CALL"
+                  },
+                  "permissionContext": {
+                    "type": "string",
+                    "pattern": "^0x[a-fA-F0-9]+$",
+                    "maxLength": 16386,
+                    "description": "signer=permission quotes only (instead of the EIP-7702 authorizations): the context MetaMask returned for the native-token-allowance granted to the router"
+                  },
+                  "batchQuoteIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "minItems": 1,
+                    "maxItems": 64,
+                    "description": "signer=permission quotes only: every quote the signature covers, in the order of POST /authorization/batch (default: this quote alone)"
+                  }
+                },
+                "required": [
+                  "quoteId",
+                  "signature"
+                ]
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
-            "description": "Sweep submitted",
+            "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SweepResponse"
+                  "type": "object",
+                  "properties": {
+                    "sweepId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "sweepType": {
+                      "type": "string",
+                      "enum": [
+                        "same-chain",
+                        "cross-chain"
+                      ]
+                    },
+                    "isExisting": {
+                      "type": "boolean"
+                    },
+                    "version": {
+                      "type": "number"
+                    }
+                  }
                 }
               }
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
@@ -258,38 +1502,121 @@
     },
     "/sweep/{sweepId}": {
       "get": {
-        "operationId": "getSweepStatus",
         "summary": "Get sweep status",
-        "description": "Returns the current status of a sweep including transaction hash when completed.",
+        "tags": [
+          "sweep"
+        ],
         "parameters": [
           {
-            "name": "sweepId",
-            "in": "path",
-            "required": true,
-            "description": "Sweep ID",
             "schema": {
               "type": "string",
               "format": "uuid"
-            }
+            },
+            "in": "path",
+            "name": "sweepId",
+            "required": true
           }
         ],
         "responses": {
           "200": {
-            "description": "Sweep status",
+            "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SweepStatusResponse"
+                  "type": "object",
+                  "properties": {
+                    "sweepId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "sweepType": {
+                      "type": "string",
+                      "enum": [
+                        "same-chain",
+                        "cross-chain"
+                      ]
+                    },
+                    "mode": {
+                      "type": "number"
+                    },
+                    "txHash": {
+                      "type": "string"
+                    },
+                    "destinationTxHash": {
+                      "type": "string"
+                    },
+                    "amountSent": {
+                      "type": "string"
+                    },
+                    "destination": {
+                      "type": "string"
+                    },
+                    "fromChainId": {
+                      "type": "integer"
+                    },
+                    "toChainId": {
+                      "type": "integer"
+                    },
+                    "errorMessage": {
+                      "type": "string"
+                    },
+                    "bridgeTrackingUrl": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "number"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    },
+                    "revokeStatus": {
+                      "type": "string"
+                    },
+                    "revokeTxHash": {
+                      "type": "string"
+                    },
+                    "revokeError": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "Sweep not found",
+            "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
@@ -299,69 +1626,1744 @@
     },
     "/sweeps/{address}": {
       "get": {
-        "operationId": "listSweeps",
-        "summary": "List sweeps for an address",
-        "description": "Returns a paginated list of sweeps for the given address.",
+        "summary": "List sweeps for a user address",
+        "tags": [
+          "sweep"
+        ],
         "parameters": [
           {
-            "name": "address",
-            "in": "path",
-            "required": true,
-            "description": "Ethereum address",
-            "schema": {
-              "type": "string",
-              "pattern": "^0x[a-fA-F0-9]{40}$"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "description": "Max results (default: 20, max: 100)",
             "schema": {
               "type": "integer",
               "default": 20,
-              "maximum": 100
-            }
+              "maximum": 100,
+              "minimum": 1
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
           },
           {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "description": "Pagination offset",
             "schema": {
               "type": "integer",
-              "default": 0
-            }
+              "default": 0,
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "offset",
+            "required": false
           },
           {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "description": "Filter by sweep status",
             "schema": {
               "type": "string",
-              "enum": ["pending", "processing", "completed", "failed"]
-            }
+              "enum": [
+                "pending",
+                "simulating",
+                "executing",
+                "broadcasted",
+                "bridging",
+                "completed",
+                "failed"
+              ]
+            },
+            "in": "query",
+            "name": "status",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{40}$"
+            },
+            "in": "path",
+            "name": "address",
+            "required": true
           }
         ],
         "responses": {
           "200": {
-            "description": "List of sweeps",
+            "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SweepsListResponse"
+                  "type": "object",
+                  "properties": {
+                    "sweeps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sweepId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "sweepType": {
+                            "type": "string",
+                            "enum": [
+                              "same-chain",
+                              "cross-chain"
+                            ]
+                          },
+                          "mode": {
+                            "type": "number"
+                          },
+                          "fromChainId": {
+                            "type": "integer"
+                          },
+                          "toChainId": {
+                            "type": "integer"
+                          },
+                          "amountSent": {
+                            "type": "string"
+                          },
+                          "txHash": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "number"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid address",
+            "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reports": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "outcome",
+                  "address",
+                  "chainId"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "direct",
+                      "sponsored"
+                    ]
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "done",
+                      "failed"
+                    ]
+                  },
+                  "failureKind": {
+                    "type": "string",
+                    "enum": [
+                      "too-small",
+                      "no-route",
+                      "stopped",
+                      "try-again",
+                      "check"
+                    ]
+                  },
+                  "address": {
+                    "type": "string",
+                    "pattern": "^0x[0-9a-fA-F]{40}$"
+                  },
+                  "chainId": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "toChainId": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  },
+                  "route": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]{1,32}$"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "pattern": "^[a-z-]{1,16}$"
+                  },
+                  "txHashes": {
+                    "type": "array",
+                    "maxItems": 4,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^0x[0-9a-fA-F]{64}$"
+                    }
+                  },
+                  "sweepId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                  },
+                  "detail": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "siteVersion": {
+                    "type": "string",
+                    "pattern": "^[0-9a-zA-Z.+-]{1,40}$"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reference": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/register": {
+      "post": {
+        "tags": [
+          "agent"
+        ],
+        "description": "Register a new AI agent and receive an API key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Human-readable name for the agent",
+                    "minLength": 3,
+                    "maxLength": 100
+                  },
+                  "agentId": {
+                    "type": "string",
+                    "description": "Unique identifier for the agent (e.g., \"openclaw-agent-1\")",
+                    "maxLength": 255
+                  },
+                  "contactEmail": {
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 254,
+                    "description": "Contact email for support"
+                  },
+                  "webhookUrl": {
+                    "type": "string",
+                    "format": "uri",
+                    "maxLength": 2048,
+                    "description": "Webhook URL for sweep status notifications"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "description": "Additional metadata",
+                    "maxProperties": 20
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "apiKey": {
+                      "type": "string",
+                      "description": "Full API key (SAVE THIS - only shown once!)"
+                    },
+                    "keyPrefix": {
+                      "type": "string",
+                      "description": "Key prefix for identification"
+                    },
+                    "keyId": {
+                      "type": "string",
+                      "description": "Key UUID"
+                    },
+                    "keyType": {
+                      "type": "string",
+                      "description": "Key type (determines rate limits)"
+                    },
+                    "rateLimits": {
+                      "type": "object",
+                      "properties": {
+                        "perMinute": {
+                          "type": "number"
+                        },
+                        "daily": {
+                          "type": "number"
+                        }
+                      }
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/me": {
+      "get": {
+        "tags": [
+          "agent"
+        ],
+        "description": "Get the current API key's limits and today's usage (UTC day)",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "keyId": {
+                      "type": "string"
+                    },
+                    "keyType": {
+                      "type": "string"
+                    },
+                    "agentId": {
+                      "type": "string"
+                    },
+                    "rateLimits": {
+                      "type": "object",
+                      "properties": {
+                        "perMinute": {
+                          "type": "number"
+                        },
+                        "daily": {
+                          "type": "number"
+                        },
+                        "dailyUsed": {
+                          "type": "number",
+                          "description": "Quote, authorization and sweep requests counted today (UTC); reads are not counted"
+                        },
+                        "dailyRemaining": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/sweep": {
+      "post": {
+        "tags": [
+          "agent"
+        ],
+        "description": "Get quote and authorization data for a sweep (GET /quote + POST /authorization in one call)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fromChainId",
+                  "toChainId",
+                  "userAddress"
+                ],
+                "properties": {
+                  "fromChainId": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "toChainId": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "userAddress": {
+                    "type": "string",
+                    "pattern": "^0x[a-fA-F0-9]{40}$",
+                    "description": "The wallet being swept"
+                  },
+                  "destination": {
+                    "type": "string",
+                    "pattern": "^0x[a-fA-F0-9]{40}$",
+                    "description": "Where the funds go (default: userAddress)"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "quote": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "The GET /quote response, unchanged"
+                    },
+                    "sweepType": {
+                      "type": "string",
+                      "enum": [
+                        "same-chain",
+                        "cross-chain"
+                      ]
+                    },
+                    "typedData": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "EIP-712 SweepIntent, exactly as POST /authorization returns it for this quote"
+                    },
+                    "contractAddress": {
+                      "type": "string",
+                      "description": "Contract the EIP-7702 delegation must name"
+                    },
+                    "version": {
+                      "type": "number"
+                    },
+                    "eip7702": {
+                      "type": "object",
+                      "description": "The EIP-7702 delegation to sign (revoke: same chain, address(0), nonce + 1)",
+                      "properties": {
+                        "contractAddress": {
+                          "type": "string"
+                        },
+                        "chainId": {
+                          "type": "number"
+                        },
+                        "nonce": {
+                          "type": "number"
+                        }
+                      }
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "description": "Quote deadline (ISO 8601)"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/batch-sweep": {
+      "post": {
+        "tags": [
+          "agent"
+        ],
+        "description": "Get quotes and authorization data for sweeping one wallet on several chains",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "sweeps",
+                  "userAddress"
+                ],
+                "properties": {
+                  "sweeps": {
+                    "type": "array",
+                    "description": "List of chains to sweep from",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "fromChainId"
+                      ],
+                      "properties": {
+                        "fromChainId": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "Source chain ID"
+                        },
+                        "toChainId": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "Destination chain ID (default: consolidateToChainId, else fromChainId)"
+                        }
+                      }
+                    }
+                  },
+                  "userAddress": {
+                    "type": "string",
+                    "pattern": "^0x[a-fA-F0-9]{40}$",
+                    "description": "The wallet being swept on every chain"
+                  },
+                  "destination": {
+                    "type": "string",
+                    "pattern": "^0x[a-fA-F0-9]{40}$",
+                    "description": "Destination address for all sweeps (default: userAddress)"
+                  },
+                  "consolidateToChainId": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Default destination chain for all sweeps (optional)"
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "fromChainId": {
+                            "type": "number"
+                          },
+                          "toChainId": {
+                            "type": "number"
+                          },
+                          "success": {
+                            "type": "boolean"
+                          },
+                          "quote": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "The GET /quote response, unchanged"
+                          },
+                          "sweepType": {
+                            "type": "string",
+                            "enum": [
+                              "same-chain",
+                              "cross-chain"
+                            ]
+                          },
+                          "typedData": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "EIP-712 SweepIntent, exactly as POST /authorization returns it for this quote"
+                          },
+                          "contractAddress": {
+                            "type": "string",
+                            "description": "Contract the EIP-7702 delegation must name"
+                          },
+                          "version": {
+                            "type": "number"
+                          },
+                          "eip7702": {
+                            "type": "object",
+                            "description": "The EIP-7702 delegation to sign (revoke: same chain, address(0), nonce + 1)",
+                            "properties": {
+                              "contractAddress": {
+                                "type": "string"
+                              },
+                              "chainId": {
+                                "type": "number"
+                              },
+                              "nonce": {
+                                "type": "number"
+                              }
+                            }
+                          },
+                          "expiresAt": {
+                            "type": "string",
+                            "description": "Quote deadline (ISO 8601)"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "successful": {
+                          "type": "number"
+                        },
+                        "failed": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/key": {
+      "delete": {
+        "tags": [
+          "agent"
+        ],
+        "description": "Revoke your API key (cannot be undone)",
+        "security": [
+          {
+            "apiKey": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/agent-card.json": {
+      "get": {
+        "summary": "A2A Agent Card",
+        "tags": [
+          "erc8004"
+        ],
+        "description": "A2A Protocol agent card for agent-to-agent communication (standard path)",
+        "responses": {
+          "200": {
+            "description": "A2A agent card",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "description": "A2A agent card"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/agent.json": {
+      "get": {
+        "summary": "A2A Agent Card (Legacy)",
+        "tags": [
+          "erc8004"
+        ],
+        "description": "Legacy path, redirects to /.well-known/agent-card.json",
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/erc8004/agent.json": {
+      "get": {
+        "summary": "ERC-8004 Agent Registration",
+        "tags": [
+          "erc8004"
+        ],
+        "description": "Returns the ERC-8004 agent registration metadata for ZeroDust. This is the file linked from the on-chain IdentityRegistry.",
+        "responses": {
+          "200": {
+            "description": "ERC-8004 agent registration metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "description": "ERC-8004 agent registration metadata"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/erc8004": {
+      "get": {
+        "summary": "ERC-8004 Agent Info Page",
+        "tags": [
+          "erc8004"
+        ],
+        "description": "Human-readable information about ZeroDust's ERC-8004 registration.",
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/mcp": {
+      "get": {
+        "summary": "MCP Server Info",
+        "tags": [
+          "mcp"
+        ],
+        "description": "Health check and server info endpoint. Returns MCP server capabilities and available tools.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "MCP JSON-RPC Endpoint",
+        "tags": [
+          "mcp"
+        ],
+        "description": "Model Context Protocol endpoint for AI model tool calls",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": [
+                      "string",
+                      "number"
+                    ]
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "jsonrpc",
+                  "method"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp/tools": {
+      "get": {
+        "summary": "List MCP Tools",
+        "tags": [
+          "mcp"
+        ],
+        "description": "Returns list of available MCP tools",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp/telemetry": {
+      "get": {
+        "summary": "Agent adoption counters",
+        "tags": [
+          "mcp"
+        ],
+        "description": "MCP client connections by client name, tools/list vs tools/call, and quote-to-sweep conversion.",
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/direct/chains": {
+      "get": {
+        "summary": "Chains swept directly by the wallet (no EIP-7702), with USD prices",
+        "tags": [
+          "chains"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "chains": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chainId": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "token": {
+                            "type": "string"
+                          },
+                          "decimals": {
+                            "type": "integer"
+                          },
+                          "explorerUrl": {
+                            "type": "string"
+                          },
+                          "rpcUrl": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string"
+                          },
+                          "paymaster": {
+                            "type": "string"
+                          },
+                          "txGapBlocks": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "prices": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/direct/balances/{address}": {
+      "get": {
+        "summary": "Native balances on every direct chain",
+        "tags": [
+          "balances"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{40}$"
+            },
+            "in": "path",
+            "name": "address",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "chainId": {
+                        "type": "integer"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "token": {
+                        "type": "string"
+                      },
+                      "decimals": {
+                        "type": "integer"
+                      },
+                      "explorerUrl": {
+                        "type": "string"
+                      },
+                      "balance": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/direct/route": {
+      "get": {
+        "summary": "Whether a bridge can take a direct chain's balance to a destination now (quotes only)",
+        "tags": [
+          "quote"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "in": "query",
+            "name": "chainId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "in": "query",
+            "name": "toChainId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{40}$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{40}$"
+            },
+            "in": "query",
+            "name": "recipient",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {
+                      "type": [
+                        "null",
+                        "boolean"
+                      ]
+                    },
+                    "exit": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "minimumBalanceWei": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "minimumBalanceWei": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/direct/prepare": {
+      "get": {
+        "summary": "Unsigned transactions that take a direct chain to exactly 0 (route, burn or donate)",
+        "tags": [
+          "quote"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "in": "query",
+            "name": "chainId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "in": "query",
+            "name": "toChainId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{40}$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{40}$"
+            },
+            "in": "query",
+            "name": "recipient",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "route",
+                "burn",
+                "donate"
+              ]
+            },
+            "in": "query",
+            "name": "mode",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{64}$"
+            },
+            "in": "query",
+            "name": "feePaidTx",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "chainId": {
+                      "type": "integer"
+                    },
+                    "route": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "txs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          },
+                          "data": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          },
+                          "gas": {
+                            "type": "string"
+                          },
+                          "gasPrice": {
+                            "type": "string"
+                          },
+                          "nonce": {
+                            "type": "integer"
+                          },
+                          "paymaster": {
+                            "type": "string"
+                          },
+                          "paymasterInput": {
+                            "type": "string"
+                          },
+                          "gasPerPubdata": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "receive": {
+                      "type": "string"
+                    },
+                    "fee": {
+                      "type": "string"
+                    },
+                    "gasFee": {
+                      "type": "string"
+                    },
+                    "balance": {
+                      "type": "string"
+                    },
+                    "leftoverMax": {
+                      "type": "string"
+                    },
+                    "tool": {
+                      "type": "string"
+                    },
+                    "quoted": {
+                      "type": "string"
+                    },
+                    "txGapBlocks": {
+                      "type": "integer"
+                    },
+                    "expiresAt": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "minimumBalanceWei": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "minimumBalanceWei": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "minimumBalanceWei": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "minimumBalanceWei": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/direct/exit": {
+      "get": {
+        "summary": "Swap-then-bridge plan for a direct chain with no direct route (LI.FI)",
+        "tags": [
+          "quote"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "in": "query",
+            "name": "chainId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "in": "query",
+            "name": "toChainId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{40}$"
+            },
+            "in": "query",
+            "name": "from",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{40}$"
+            },
+            "in": "query",
+            "name": "recipient",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{64}$"
+            },
+            "in": "query",
+            "name": "feePaidTx",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "chainId": {
+                      "type": "integer"
+                    },
+                    "route": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "txs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          },
+                          "data": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          },
+                          "gas": {
+                            "type": "string"
+                          },
+                          "gasPrice": {
+                            "type": "string"
+                          },
+                          "nonce": {
+                            "type": "integer"
+                          },
+                          "paymaster": {
+                            "type": "string"
+                          },
+                          "paymasterInput": {
+                            "type": "string"
+                          },
+                          "gasPerPubdata": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "receive": {
+                      "type": "string"
+                    },
+                    "fee": {
+                      "type": "string"
+                    },
+                    "gasFee": {
+                      "type": "string"
+                    },
+                    "balance": {
+                      "type": "string"
+                    },
+                    "leftoverMax": {
+                      "type": "string"
+                    },
+                    "tool": {
+                      "type": "string"
+                    },
+                    "quoted": {
+                      "type": "string"
+                    },
+                    "txGapBlocks": {
+                      "type": "integer"
+                    },
+                    "expiresAt": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "minimumBalanceWei": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "minimumBalanceWei": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "minimumBalanceWei": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "minimumBalanceWei": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/direct/status": {
+      "get": {
+        "summary": "Delivery status of a direct sweep from its bridge",
+        "tags": [
+          "sweep"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "gaszip",
+                "relay",
+                "across",
+                "lifi",
+                "transfer",
+                "burn",
+                "donate"
+              ]
+            },
+            "in": "query",
+            "name": "route",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{64}$"
+            },
+            "in": "query",
+            "name": "hash",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^0x[a-fA-F0-9]{64}$"
+            },
+            "in": "query",
+            "name": "requestId",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,77}$"
+            },
+            "in": "query",
+            "name": "quoted",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "in": "query",
+            "name": "fromChainId",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "in": "query",
+            "name": "toChainId",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string"
+                    },
+                    "destTx": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "minimumBalanceWei": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
@@ -370,387 +3372,48 @@
       }
     }
   },
-  "components": {
-    "securitySchemes": {
-      "apiKey": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "X-API-Key",
-        "description": "Optional API key for higher rate limits"
-      }
-    },
-    "schemas": {
-      "Chain": {
-        "type": "object",
-        "properties": {
-          "chainId": {
-            "type": "integer",
-            "description": "EVM chain ID",
-            "example": 8453
-          },
-          "name": {
-            "type": "string",
-            "description": "Human-readable chain name",
-            "example": "Base"
-          },
-          "nativeToken": {
-            "type": "string",
-            "description": "Native token symbol",
-            "example": "ETH"
-          },
-          "nativeTokenDecimals": {
-            "type": "integer",
-            "description": "Native token decimals",
-            "example": 18
-          },
-          "minBalance": {
-            "type": "string",
-            "description": "Minimum balance required to sweep (in wei)",
-            "example": "10000000000000"
-          },
-          "contractAddress": {
-            "type": "string",
-            "description": "ZeroDust contract address on this chain",
-            "example": "0x3732398281d0606aCB7EC1D490dFB0591BE4c4f2"
-          },
-          "explorerUrl": {
-            "type": "string",
-            "description": "Block explorer URL",
-            "example": "https://basescan.org"
-          },
-          "enabled": {
-            "type": "boolean",
-            "description": "Whether the chain is currently active"
-          }
-        },
-        "required": ["chainId", "name", "nativeToken", "nativeTokenDecimals", "minBalance", "contractAddress", "explorerUrl", "enabled"]
-      },
-      "ChainBalance": {
-        "type": "object",
-        "properties": {
-          "chainId": {
-            "type": "integer",
-            "example": 42161
-          },
-          "name": {
-            "type": "string",
-            "example": "Arbitrum"
-          },
-          "nativeToken": {
-            "type": "string",
-            "example": "ETH"
-          },
-          "balance": {
-            "type": "string",
-            "description": "Balance in wei",
-            "example": "800000000000000"
-          },
-          "balanceFormatted": {
-            "type": "string",
-            "description": "Human-readable balance",
-            "example": "0.0008"
-          },
-          "canSweep": {
-            "type": "boolean",
-            "description": "Whether the balance is above the minimum for sweeping"
-          },
-          "minBalance": {
-            "type": "string",
-            "description": "Minimum balance required to sweep (in wei)"
-          }
-        },
-        "required": ["chainId", "name", "nativeToken", "balance", "balanceFormatted", "canSweep", "minBalance"]
-      },
-      "BalancesResponse": {
-        "type": "object",
-        "properties": {
-          "address": {
-            "type": "string"
-          },
-          "chains": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ChainBalance"
-            }
-          }
-        },
-        "required": ["address", "chains"]
-      },
-      "QuoteFees": {
-        "type": "object",
-        "properties": {
-          "overheadGasUnits": {
-            "type": "string"
-          },
-          "protocolFeeGasUnits": {
-            "type": "string"
-          },
-          "extraFeeWei": {
-            "type": "string"
-          },
-          "reimbGasPriceCapWei": {
-            "type": "string"
-          },
-          "maxTotalFeeWei": {
-            "type": "string",
-            "description": "Maximum total fee in wei"
-          },
-          "revokeGasUnits": {
-            "type": "string"
-          }
-        },
-        "required": ["overheadGasUnits", "protocolFeeGasUnits", "extraFeeWei", "reimbGasPriceCapWei", "maxTotalFeeWei", "revokeGasUnits"]
-      },
-      "SweepIntent": {
-        "type": "object",
-        "properties": {
-          "mode": {
-            "type": "integer"
-          },
-          "destination": {
-            "type": "string"
-          },
-          "destinationChainId": {
-            "type": "string"
-          },
-          "callTarget": {
-            "type": "string"
-          },
-          "routeHash": {
-            "type": "string"
-          },
-          "minReceive": {
-            "type": "string"
-          }
-        },
-        "required": ["mode", "destination", "destinationChainId", "callTarget", "routeHash", "minReceive"]
-      },
-      "QuoteResponse": {
-        "type": "object",
-        "properties": {
-          "quoteId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "version": {
-            "type": "integer"
-          },
-          "userBalance": {
-            "type": "string",
-            "description": "User's current balance in wei"
-          },
-          "estimatedReceive": {
-            "type": "string",
-            "description": "Estimated amount to receive in wei"
-          },
-          "mode": {
-            "type": "integer"
-          },
-          "fees": {
-            "$ref": "#/components/schemas/QuoteFees"
-          },
-          "autoRevoke": {
-            "type": "boolean",
-            "description": "Whether EIP-7702 delegation is automatically revoked"
-          },
-          "intent": {
-            "$ref": "#/components/schemas/SweepIntent"
-          },
-          "deadline": {
-            "type": "integer",
-            "description": "Unix timestamp deadline"
-          },
-          "nonce": {
-            "type": "integer"
-          },
-          "authNonce": {
-            "type": "integer"
-          },
-          "validForSeconds": {
-            "type": "integer",
-            "description": "Seconds until the quote expires"
-          }
-        },
-        "required": ["quoteId", "version", "userBalance", "estimatedReceive", "mode", "fees", "autoRevoke", "intent", "deadline", "nonce", "authNonce", "validForSeconds"]
-      },
-      "AuthorizationResponse": {
-        "type": "object",
-        "properties": {
-          "sweepType": {
-            "type": "string",
-            "enum": ["same-chain", "cross-chain"]
-          },
-          "typedData": {
-            "type": "object",
-            "description": "EIP-712 typed data to sign"
-          },
-          "contractAddress": {
-            "type": "string",
-            "description": "Contract address for EIP-7702 authorization"
-          },
-          "version": {
-            "type": "integer"
-          }
-        },
-        "required": ["sweepType", "typedData", "contractAddress", "version"]
-      },
-      "EIP7702Authorization": {
-        "type": "object",
-        "properties": {
-          "chainId": {
-            "type": "integer"
-          },
-          "contractAddress": {
-            "type": "string"
-          },
-          "nonce": {
-            "type": "integer"
-          },
-          "yParity": {
-            "type": "integer",
-            "enum": [0, 1]
-          },
-          "r": {
-            "type": "string"
-          },
-          "s": {
-            "type": "string"
-          }
-        },
-        "required": ["chainId", "contractAddress", "nonce", "yParity", "r", "s"]
-      },
-      "SweepRequest": {
-        "type": "object",
-        "properties": {
-          "quoteId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "signature": {
-            "type": "string",
-            "description": "EIP-712 signature"
-          },
-          "eip7702Authorization": {
-            "$ref": "#/components/schemas/EIP7702Authorization"
-          },
-          "revokeAuthorization": {
-            "$ref": "#/components/schemas/EIP7702Authorization",
-            "description": "Optional revoke authorization"
-          }
-        },
-        "required": ["quoteId", "signature", "eip7702Authorization"]
-      },
-      "SweepResponse": {
-        "type": "object",
-        "properties": {
-          "sweepId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "type": "string",
-            "enum": ["pending", "processing", "completed", "failed"]
-          },
-          "sweepType": {
-            "type": "string",
-            "enum": ["same-chain", "cross-chain"]
-          },
-          "isExisting": {
-            "type": "boolean"
-          },
-          "version": {
-            "type": "integer"
-          }
-        },
-        "required": ["sweepId", "status", "sweepType", "isExisting", "version"]
-      },
-      "SweepStatusResponse": {
-        "type": "object",
-        "properties": {
-          "sweepId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "type": "string",
-            "enum": ["pending", "processing", "completed", "failed"]
-          },
-          "sweepType": {
-            "type": "string",
-            "enum": ["same-chain", "cross-chain"]
-          },
-          "mode": {
-            "type": "integer"
-          },
-          "txHash": {
-            "type": "string",
-            "description": "Transaction hash (when completed)"
-          },
-          "destination": {
-            "type": "string"
-          },
-          "fromChainId": {
-            "type": "integer"
-          },
-          "toChainId": {
-            "type": "integer"
-          },
-          "amountSent": {
-            "type": "string",
-            "description": "Amount sent in wei"
-          },
-          "bridgeTrackingUrl": {
-            "type": "string",
-            "description": "URL to track cross-chain bridge (if applicable)"
-          },
-          "version": {
-            "type": "integer"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "revokeStatus": {
-            "type": "string",
-            "description": "Status of EIP-7702 delegation revocation"
-          }
-        },
-        "required": ["sweepId", "status", "sweepType", "mode", "fromChainId", "toChainId", "version", "createdAt", "updatedAt"]
-      },
-      "SweepsListResponse": {
-        "type": "object",
-        "properties": {
-          "sweeps": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SweepStatusResponse"
-            }
-          },
-          "total": {
-            "type": "integer"
-          }
-        },
-        "required": ["sweeps", "total"]
-      },
-      "Error": {
-        "type": "object",
-        "properties": {
-          "error": {
-            "type": "string",
-            "description": "Human-readable error message"
-          },
-          "code": {
-            "type": "string",
-            "description": "Machine-readable error code",
-            "enum": ["BALANCE_TOO_LOW", "QUOTE_EXPIRED", "INVALID_ADDRESS", "CHAIN_NOT_SUPPORTED", "INVALID_SIGNATURE", "QUOTE_NOT_FOUND", "SERVICE_UNAVAILABLE"]
-          }
-        },
-        "required": ["error", "code"]
-      }
+  "servers": [
+    {
+      "url": "https://api.zerodust.xyz",
+      "description": "Production (mainnet)"
     }
-  }
+  ],
+  "tags": [
+    {
+      "name": "chains",
+      "description": "Chain information"
+    },
+    {
+      "name": "balances",
+      "description": "Balance queries"
+    },
+    {
+      "name": "prices",
+      "description": "Token prices"
+    },
+    {
+      "name": "quote",
+      "description": "Quote generation"
+    },
+    {
+      "name": "sweep",
+      "description": "Sweep execution"
+    },
+    {
+      "name": "health",
+      "description": "Health checks"
+    },
+    {
+      "name": "agent",
+      "description": "AI agent registration and management"
+    },
+    {
+      "name": "erc8004",
+      "description": "ERC-8004 agent registry integration"
+    },
+    {
+      "name": "mcp",
+      "description": "Model Context Protocol for AI tool calls"
+    }
+  ]
 }

@@ -42,3 +42,19 @@ test('the offline file matches its published hash and runs from disk under its o
   expect(await page.locator('img.ci').first().getAttribute('src')).toMatch(/^data:image\/svg\+xml/);
   expect(csp).toEqual([]);
 });
+
+test('How it works: MetaMask on the site, the key on the offline page', async ({ page }) => {
+  await mockNetwork(page, privateKeyToAccount(generatePrivateKey()).address);
+  await page.goto('/');
+  await page.getByText('How it works').click();
+  await expect(page.getByText('Connect MetaMask', { exact: true }).first()).toBeVisible();
+  await page.getByText('What MetaMask shows').click();
+  for (const step of ['Switch to smart account', 'Grant, then Confirm', 'One signature']) {
+    await expect(page.getByText(step, { exact: true })).toBeVisible();
+  }
+
+  await page.goto(`file://${process.cwd()}/dist/download/zerodust-offline.html`);
+  await page.getByText('How it works').click();
+  await expect(page.getByText('Load the wallet', { exact: true })).toBeVisible();
+  await expect(page.getByText('What MetaMask shows')).toHaveCount(0);
+});

@@ -6,24 +6,27 @@ The planning endpoints are quote-only. They return unsigned transactions and nev
 
 ## Chains
 
-As of 2 October 2026, `GET /direct/chains` lists 14 chains:
+As of 6 October 2026, `GET /direct/chains` lists 17 chains:
 
-| Chain | ID | Token |
-|---|---|---|
-| Flare | 14 | FLR |
-| Cronos | 25 | CRO |
-| Rootstock | 30 | RBTC |
-| XDC | 50 | XDC |
-| Fuse | 122 | FUSE |
-| Monad | 143 | MON |
-| Flow EVM | 747 | FLOW |
-| HyperEVM | 999 | HYPE |
-| Metis | 1088 | METIS |
-| Gravity | 1625 | G |
-| Immutable zkEVM | 13371 | IMX |
-| Etherlink | 42793 | XTZ |
-| Avalanche | 43114 | AVAX |
-| Ethereal | 5064014 | USDe |
+| Chain | ID | Token | `kind` |
+|---|---|---|---|
+| Flare | 14 | FLR | `evm` |
+| Cronos | 25 | CRO | `evm` |
+| Rootstock | 30 | RBTC | `evm` |
+| XDC | 50 | XDC | `evm` |
+| Fuse | 122 | FUSE | `evm` |
+| Monad | 143 | MON | `gaslimit` |
+| Lens | 232 | GHO | `zk` |
+| zkSync Era | 324 | ETH | `zk` |
+| Flow EVM | 747 | FLOW | `evm` |
+| HyperEVM | 999 | HYPE | `evm` |
+| Metis | 1088 | METIS | `evm` |
+| Gravity | 1625 | G | `arbitrum` |
+| Abstract | 2741 | ETH | `zk` |
+| Immutable zkEVM | 13371 | IMX | `evm` |
+| Etherlink | 42793 | XTZ | `etherlink` |
+| Avalanche | 43114 | AVAX | `evm` |
+| Ethereal | 5064014 | USDe | `arbitrum` |
 
 Read the list from the API rather than hardcoding it. Chains that charge an L1 data fee cannot be swept to exactly 0 this way and are not listed.
 
@@ -34,6 +37,10 @@ A legacy transaction costs exactly `gas x gasPrice` on these chains, so `value =
 - The planner finds the smallest gas limit `eth_call` accepts for the call, by bisection.
 - Gas price: the chain's `eth_gasPrice` plus 10%. Gravity charges the base fee whatever the transaction says, so it is only planned while the base fee is at its floor. Etherlink adds its inclusion fee as gas and is only planned while its base fee is 1 gwei. Otherwise the planner answers `TRY_LATER`.
 - A same-chain sweep must go to a plain address (no contract code), because only then is the transfer's gas fixed.
+
+### ZK-stack chains
+
+Chains with `kind: "zk"` (zkSync Era, Abstract, Lens) are swept with two EIP-712 (type 113) transactions that name a ZeroDust paymaster, which pays all the gas. With a paymaster set, the wallet only spends each transaction's `value`, so a plan is exact when the two values add up to the balance: the first pays the service fee and both transactions' gas to the paymaster, the second sends the rest to the bridge or the recipient. If an earlier fee transaction went through and its sweep did not, the plan is the sweep alone. No gas estimate is involved. The paymaster is `0x986e4Bb55AEEE6a8c80c28Ca787b13E216fD25B8` on all three chains; refuse a plan that names another. When you check such a plan, require `sum(value) == balance`.
 
 ### Gas-limit chains
 

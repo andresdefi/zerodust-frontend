@@ -13,13 +13,33 @@ export function LeftPanel() {
       </div>
       <details className="fold">
         <summary><span>How it works</span><span className="gist">4 steps, nothing sent until you confirm</span></summary>
-        <ol>
-          <li><span><b>Load the wallet</b>The key stays in this tab. Only signatures leave it.</span></li>
-          <li><span><b>Choose where it goes</b>One chain and one address, your own by default.</span></li>
-          <li><span><b>Check</b>Real quotes, signed and simulated. Nothing is sent.</span></li>
-          <li><span><b>Sweep</b>Done when each balance reads 0 on-chain and the funds arrive.</span></li>
-        </ol>
+        {/* The offline page is key-only: MetaMask needs a hosted origin */}
+        {OFFLINE ? (
+          <ol>
+            <li><span><b>Load the wallet</b>The key stays in this tab. Only signatures leave it.</span></li>
+            <li><span><b>Choose where it goes</b>One chain and one address, your own by default.</span></li>
+            <li><span><b>Check</b>Real quotes, signed and simulated. Nothing is sent.</span></li>
+            <li><span><b>Sweep</b>Done when each balance reads 0 on-chain and the funds arrive.</span></li>
+          </ol>
+        ) : (
+          <ol>
+            <li><span><b>Connect MetaMask</b>Your key stays in MetaMask. For chains MetaMask does not cover, load the wallet with its key; it stays in this tab.</span></li>
+            <li><span><b>Choose where it goes</b>One chain and one address, your own by default. A chain's menu can send it to another address on that chain.</span></li>
+            <li><span><b>Check</b>Real quotes for every chain, with the bridge and its usual time. Nothing is signed or sent.</span></li>
+            <li><span><b>Sweep</b>Approve in MetaMask. Done when each balance reads 0 on-chain and the funds arrive.</span></li>
+          </ol>
+        )}
       </details>
+      {!OFFLINE && (
+        <details className="fold">
+          <summary><span>What MetaMask shows</span><span className="gist">Approve each chain, then sign once</span></summary>
+          <ol>
+            <li><span><b>Switch to smart account</b>The first time on a chain only. MetaMask's own upgrade, a little gas from that chain's balance.</span></li>
+            <li><span><b>Grant, then Confirm</b>Per chain: a one-time permission for that chain's balance. Only ZeroDust's router can use it, for 10 minutes.</span></li>
+            <li><span><b>One signature</b>Covers every chain at once: where each one goes and the most it can cost.</span></li>
+          </ol>
+        </details>
+      )}
     </aside>
   );
 }

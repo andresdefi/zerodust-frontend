@@ -15,8 +15,8 @@ Limits are per client IP and per minute unless noted. With an [API key](#api-key
 
 | Group | Limit | Routes |
 |---|---|---|
-| Reads | 200 | `/chains`, `/chains/:chainId`, `/destinations`, `/balances/*`, `/prices`, `/prices/:symbol`, `GET /sweep/:sweepId`, `/sweeps/:address`, `/direct/chains`, `/direct/balances/:address`, `/direct/status` |
-| Quotes | 60 | `/quote`, `POST /authorization`, `/direct/route`, `/direct/prepare`, `/direct/exit` |
+| Reads | 200 | `/chains`, `/chains/:chainId`, `/bridges/timing`, `/destinations`, `/balances/*`, `/prices`, `/prices/:symbol`, `GET /sweep/:sweepId`, `/sweeps/:address`, `/direct/chains`, `/direct/balances/:address`, `/direct/status` |
+| Quotes | 60 | `/quote`, `POST /authorization`, `POST /authorization/batch`, `/direct/route`, `/direct/prepare`, `/direct/exit` |
 | Sweep submission | 60, and 60 per wallet address | `POST /sweep` |
 | Key registration | 5 per hour | `POST /agent/register` |
 | Everything else | 100 | |
@@ -50,6 +50,23 @@ Errors are JSON with an `error` message and, in most cases, a machine-readable `
 5. `GET /sweep/:sweepId`: poll until `completed` or `failed`.
 
 Check the quote before signing it. The SDK's `ZeroDustAgent` and `verifySweepQuote()` do this; see [Agent](/docs/sdk-agent).
+
+### With MetaMask
+
+A wallet that supports ERC-7715 Advanced Permissions (MetaMask 13.23 or later) can sweep without exposing its key, through the ZeroDust permission router `0x369A97dd256F7eb37fF7116C4EcBd50318eBb286` (same address on every chain it is deployed on). Several chains take one permission request and one signature:
+
+1. `wallet_requestExecutionPermissions` (in the wallet): per chain, a `native-token-allowance` of the balance, `isAdjustmentAllowed: false`, with the rules `expiry` (the site uses 10 minutes), `redeemer` = router and `payee` = router, and `to` = router. Keep each chain's returned `context`. The first grant on a chain also upgrades the account to MetaMask's smart account, which spends a little of that chain's balance, so quote after granting.
+2. `GET /quote?signer=permission` per chain.
+3. `POST /authorization/batch` with the quote IDs: the EIP-712 `SweepBatch` for all of them.
+4. Sign it once (`eth_signTypedData_v4`). The domain has no chain id, so no network switch is needed.
+5. `POST /sweep` per quote, each with the same `signature`, that chain's `permissionContext`, and `batchQuoteIds` in the order of step 3.
+6. `GET /sweep/:sweepId` until `completed` or `failed`.
+
+The SDK does not support this flow yet. Differences from the key flow:
+
+- No EIP-7702 authorizations from you and no revoke (`autoRevoke: false`, `revokeGasUnits: "0"`): the account stays MetaMask's smart account.
+- Cross-chain only through Relay, Across or Hyperlane, which take the refund address and recipient explicitly. A pair only Gas.zip serves answers `PERMISSION_ROUTE_UNAVAILABLE`; the key flow can still sweep it.
+- Quotes live 55 seconds. If they expire while the wallet is signing, quote again and sign a new batch.
 
 ## Chains
 
@@ -89,6 +106,27 @@ Response:
 ### GET /chains/:chainId
 
 One chain, same fields as above. 404 `{ "error": "Chain not found" }` for an unknown ID.
+
+### GET /bridges/timing
+
+How long each bridge usually takes to deliver, from real ZeroDust deliveries in the last 14 days. A bridge or pair with fewer than 3 deliveries is left out, so the lists can be empty. Cached for 5 minutes.
+
+```json
+{
+  "routes": {
+    "relay": { "typicalSeconds": 18, "p90Seconds": 41, "samples": 23, "slowLately": false }
+  },
+  "pairs": {
+    "relay:42161": { "typicalSeconds": 16, "samples": 9 }
+  }
+}
+```
+
+| Field | Notes |
+|---|---|
+| `routes` | Per bridge (`gaszip`, `relay`, `across`, `lifi`): median and 90th percentile seconds from the source transaction to delivery, and the number of deliveries |
+| `slowLately` | The last 24 hours' median is above twice the usual median and at least 60 seconds more |
+| `pairs` | Per bridge and source chain, keyed `bridge:chainId` |
 
 ### GET /destinations
 
@@ -156,6 +194,7 @@ Prices a sweep and stores the quote. Nothing is signed or sent.
 | `toChainId` | Required. Equal to `fromChainId` for a same-chain sweep, or any chain from `/destinations`. |
 | `userAddress` | Required. The wallet to empty. |
 | `destination` | Required. Where the funds go. |
+| `signer` | `key` (default): EIP-7702, signed with the wallet's key. `permission`: through MetaMask and the permission router ([With MetaMask](#with-metamask)). |
 
 ZeroDust always chooses the route. For a cross-chain sweep it asks Gas.zip, Relay and Across and keeps the highest expected output. Passing `callTarget` or `callData` is refused with `CUSTOM_ROUTE_UNSUPPORTED`.
 
@@ -169,12 +208,14 @@ Response:
 | `estimatedReceive` | The least that arrives. Same-chain: exactly `userBalance - fees.maxTotalFeeWei` (the actual fee can only be lower). Cross-chain: the bridge's expected output less 3%, because bridges settle at their own price on delivery. |
 | `mode` | `0` transfer (same-chain), `1` bridge call (cross-chain) |
 | `fees` | See below |
-| `autoRevoke` | Always `true` |
+| `autoRevoke` | `true` with `signer=key`; `false` with `signer=permission` (no revoke) |
+| `signer` | `key` or `permission`, as requested |
+| `permission` | `signer=permission` only: `router` (the permission's delegate, redeemer and payee, and the typed data's `verifyingContract`), `delegationManager` (MetaMask's) and `domainVersion` (`permission-2`) |
 | `bridge` | Cross-chain only: `name`, `displayName`, `inputAmount` (wei sent to the bridge), `expectedOutput` (wei the bridge expects to deliver) |
 | `intent` | Fields that go into the signed `SweepIntent`: `mode`, `destination`, `destinationChainId` (string), `callTarget` (zero address for same-chain), `routeHash`, `minReceive`, and `callData` for cross-chain. `keccak256(callData) == routeHash`, so the route can be decoded and checked before signing. |
 | `deadline` | Unix seconds. The contract accepts at most 60 seconds ahead. |
 | `nonce` | The wallet's ZeroDust intent nonce |
-| `authNonce` | The wallet's transaction count, which the EIP-7702 delegation must use |
+| `authNonce` | The wallet's transaction count, which the EIP-7702 delegation must use (`signer=key` only) |
 | `validForSeconds` | `55` |
 
 `intent.minReceive` is the least the contract will accept: equal to `estimatedReceive` for a same-chain sweep; for a cross-chain sweep, the bridge's expected output less 0.5%, then 5%.
@@ -208,6 +249,8 @@ Errors (400 unless noted):
 | `CHAIN_CLOCK_LAG` | The chain's latest block is too far behind to leave time to sign |
 | `ADDRESS_TEMPORARILY_BLOCKED` | Two or more sweeps from this address failed for wallet-side reasons; try again later |
 | `CUSTOM_ROUTE_UNSUPPORTED` | `callTarget` or `callData` was passed |
+| `PERMISSION_UNAVAILABLE` | `signer=permission` on a chain without the router, or one MetaMask does not offer permissions on |
+| `PERMISSION_ROUTE_UNAVAILABLE` | `signer=permission`, and only a bridge unsafe for the router (Gas.zip) serves this pair |
 | `INTERNAL_ERROR` (500) | The quote could not be stored |
 
 ### POST /authorization
@@ -225,7 +268,25 @@ Body: `{ "quoteId": "<uuid>" }`
 
 Errors: 404 "Quote not found", 400 `QUOTE_EXPIRED`, 400 `CONTRACT_NOT_DEPLOYED`.
 
+For a `signer=permission` quote, `typedData` is a `SweepBatch` of that one chain and `contractAddress` is the router. Use `POST /authorization/batch` to cover several chains with one signature.
+
 The `SweepIntent` type is `mode uint8, user address, destination address, destinationChainId uint256, callTarget address, routeHash bytes32, minReceive uint256, maxTotalFeeWei uint256, overheadGasUnits uint256, protocolFeeGasUnits uint256, extraFeeWei uint256, reimbGasPriceCapWei uint256, deadline uint256, nonce uint256`. Build it from the verified quote and compare it with this response rather than signing the response as received.
+
+### POST /authorization/batch
+
+Returns one EIP-712 `SweepBatch` for several `signer=permission` quotes, one per chain.
+
+Body: `{ "quoteIds": ["<uuid>", ...] }`, 1 to 64 quotes, in the order you want signed.
+
+| Field | Notes |
+|---|---|
+| `typedData` | EIP-712 `SweepBatch(ChainSweep[] sweeps)`, `ChainSweep(uint256 chainId, SweepIntent intent)`. Domain: name `ZeroDust`, version `permission-2`, `verifyingContract` = the router, no `chainId`. |
+| `router` | The permission router |
+| `entries` | `{ quoteId, chainId, index }` per quote: its place in the batch |
+
+Errors (400): `INVALID_BATCH` (a quote missing or listed twice, not a `signer=permission` quote, another wallet, or the same chain twice), `QUOTE_EXPIRED` (quote again).
+
+Rebuild each `SweepIntent` from its verified quote and compare before signing, as for a single quote.
 
 ## Sweeps
 
@@ -239,8 +300,11 @@ Body:
 |---|---|
 | `quoteId` | Required |
 | `signature` | Required. EIP-712 signature of the `SweepIntent` (64 or 65 bytes, hex). |
-| `eip7702Authorization` | Required. `{ chainId, contractAddress, nonce, yParity, r, s }`, delegating to the ZeroDust contract on the source chain. |
-| `revokeAuthorization` | Required. Same shape, delegating to `0x0000000000000000000000000000000000000000` on the same chain with nonce = delegation nonce + 1, so the delegation is removed right after the sweep (its gas is in the quoted fee). A sweep without it is refused with `REVOKE_AUTHORIZATION_REQUIRED`. |
+| `eip7702Authorization` | Required with `signer=key`. `{ chainId, contractAddress, nonce, yParity, r, s }`, delegating to the ZeroDust contract on the source chain. |
+| `revokeAuthorization` | Required with `signer=key`. Same shape, delegating to `0x0000000000000000000000000000000000000000` on the same chain with nonce = delegation nonce + 1, so the delegation is removed right after the sweep (its gas is in the quoted fee). A sweep without it is refused with `REVOKE_AUTHORIZATION_REQUIRED`. |
+
+| `permissionContext` | Required with `signer=permission`, and only then: the `context` the wallet returned for this chain's permission. It must hold one delegation, from this wallet, to the router. |
+| `batchQuoteIds` | `signer=permission` only: every quote the signature covers, in the order of `POST /authorization/batch`. Defaults to this quote alone. |
 
 ```json
 { "sweepId": "6f1c...", "status": "pending", "sweepType": "cross-chain", "isExisting": false, "version": 3 }
@@ -253,7 +317,7 @@ Errors (400 unless noted):
 | Code | Meaning |
 |---|---|
 | `QUOTE_EXPIRED` | Past the quote's deadline |
-| `INVALID_SIGNATURE` | The `SweepIntent` signature does not verify for this wallet |
+| `INVALID_SIGNATURE` | The `SweepIntent` (or, with `signer=permission`, the `SweepBatch`) signature does not verify for this wallet |
 | `CHAIN_ID_MISMATCH` | The delegation is for another chain |
 | `CONTRACT_ADDRESS_MISMATCH` | The delegation targets another contract |
 | `EIP7702_INVALID_SIGNATURE` | The delegation was not signed by the wallet |
@@ -261,6 +325,11 @@ Errors (400 unless noted):
 | `REVOKE_CHAIN_ID_MISMATCH` | The revoke is for another chain |
 | `REVOKE_NONCE_MISMATCH` | The revoke nonce is not delegation nonce + 1 |
 | `REVOKE_INVALID_SIGNATURE` | The revoke was not signed by the wallet |
+| `EIP7702_AUTHORIZATION_REQUIRED`, `REVOKE_AUTHORIZATION_REQUIRED` | `signer=key` without the delegation or the revoke |
+| `PERMISSION_CONTEXT_REQUIRED` | `signer=permission` without `permissionContext` |
+| `INVALID_PERMISSION_CONTEXT` | The context is too large, not a MetaMask delegation chain, holds more than one delegation, or is not from this wallet to the router |
+| `PERMISSION_CONTEXT_UNEXPECTED` | `permissionContext` on a `signer=key` quote |
+| `INVALID_BATCH` | `batchQuoteIds` does not include this quote, fails the batch rules above, or was sent with a `signer=key` quote |
 | `ADDRESS_TEMPORARILY_BLOCKED`, `CHAIN_PAUSED` | As for `/quote` |
 | `RATE_LIMITED` (429) | More than 60 sweeps a minute from this address |
 | 404 | Quote not found |
