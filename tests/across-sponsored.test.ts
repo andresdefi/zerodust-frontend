@@ -87,7 +87,7 @@ describe('verifySponsoredAcross: live routes', () => {
   it.each(Object.keys(SAMPLES).filter((k) => !HYPEREVM(k)))('%s passes, paying only the address you set', (k) => {
     const { settler } = verifySponsoredAcross(SAMPLES[k]!, expect_(k));
     // Uniswap-shaped routes (BNB Chain, Polygon) have no Settler; 0x-shaped ones name one to confirm on-chain
-    if (k.endsWith('-56') || k.endsWith('-137')) expect(settler).toBeNull();
+    if (k.endsWith('-56') || k.endsWith('-137') || k === '10-8453') expect(settler).toBeNull();
     else expect(settler).toMatch(/^0x[0-9a-fA-F]{40}$/);
   });
 
@@ -143,5 +143,35 @@ describe('verifySponsoredAcross: tampered routes', () => {
   it('a deposit into another SpokePool or through another periphery', () => {
     expect(() => verifySponsoredAcross(withSwapData('8453-9745', (a) => { a.spokePool = EVIL; }), expect_('8453-9745'))).toThrow(/not Across's SpokePool/);
     expect(() => verifySponsoredAcross({ ...SAMPLES['8453-56']!, to: EVIL }, expect_('8453-56'))).toThrow(/not the Across periphery/);
+  });
+});
+
+describe('verifySponsoredAcross: hardening', () => {
+  it('a Universal Router swap that leaves part of the bridged WETH in the router', () => {
+    expect(() => verifySponsoredAcross(withUrSwap('8453-56', (x) => { x.amountIn -= 1n; }), expect_('8453-56'))).toThrow(/does not spend all of the bridged token/);
+  });
+
+  it('WETH drained into the Universal Router with no swap after it', () => {
+    const noSwap = withMessage('8453-137', (m) => { m.calls = m.calls.filter((c) => !c.callData.startsWith('0x24856bc3')); });
+    expect(() => verifySponsoredAcross(noSwap, expect_('8453-137'))).toThrow(/^Across route refused: /);
+  });
+
+  it('a swapAndBridge that deposits a token Across does not carry', () => {
+    const odd = withSwapData('8453-43114', (a) => { (a.depositData as { inputToken: string }).inputToken = EVIL; });
+    expect(() => verifySponsoredAcross(odd, expect_('8453-43114'))).toThrow(/not a token Across carries/);
+  });
+
+  it('a plain deposit (OP -> Base) passes, and is refused for another token, a smaller amount or another recipient', () => {
+    const k = '10-8453';
+    expect(verifySponsoredAcross(SAMPLES[k]!, expect_(k, { minNative: BigInt(SAMPLES[k]!.minOutputAmount) })).settler).toBeNull();
+    const plain = (edit: (args: unknown[]) => void) => {
+      const args = [...decodeFunctionData({ abi: PERIPHERY_ABI, data: SAMPLES[k]!.data }).args!] as unknown[];
+      edit(args);
+      return { to: SAMPLES[k]!.to, data: encodeFunctionData({ abi: PERIPHERY_ABI, functionName: 'depositNative', args: args as never }) };
+    };
+    expect(() => verifySponsoredAcross(plain((a) => { a[5] = `0x${EVIL.slice(2).toLowerCase().padStart(64, '0')}`; }), expect_(k))).toThrow(/another token than the native one/);
+    expect(() => verifySponsoredAcross(plain((a) => { a[6] = 1n; }), expect_(k))).toThrow(/less than the amount shown/);
+    expect(() => verifySponsoredAcross(SAMPLES[k]!, expect_(k, { recipient: EVIL }))).toThrow(/pays someone other than the address you set/);
+    expect(() => verifySponsoredAcross(plain((a) => { a[3] = EVIL; }), expect_(k))).toThrow(/not WETH on the source/);
   });
 });
