@@ -309,6 +309,30 @@ test('any chain can go to another address on that chain, set only from its menu'
   expect([...swept].sort()).toEqual([10, 8453].sort());
 });
 
+test('names how long the bridge usually takes, and warns when it has been slow lately', async ({ page }) => {
+  const key = generatePrivateKey();
+  await mockNetwork(page, privateKeyToAccount(key).address, {
+    timings: {
+      routes: { relay: { typicalSeconds: 18, p90Seconds: 40, samples: 12, slowLately: true } },
+      pairs: { 'relay:10': { typicalSeconds: 9, samples: 4 } },
+    },
+  });
+  await page.goto('/');
+  await useKey(page);
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.row')).toHaveCount(3);
+  await page.getByRole('checkbox', { name: 'Sweep Scroll' }).uncheck();
+  await page.getByRole('button', { name: 'Choose where it goes' }).click();
+  await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /Arbitrum/ }).click();
+  await page.getByRole('button', { name: 'Check sweep' }).click();
+  await expect(page.getByRole('button', { name: 'Sweep 2 chains' })).toBeVisible({ timeout: 20_000 });
+  // Optimism has its own measured time; Base falls back to Relay's
+  await expect(page.locator('.row', { hasText: 'Optimism' })).toContainText('Bridged by Relay, usually 9s. Slower than usual lately');
+  await expect(page.locator('.row', { hasText: 'Base' })).toContainText('Bridged by Relay, usually 18s');
+});
+
 test('a passing "unknown" route does not send a chain elsewhere', async ({ page }) => {
   const key = generatePrivateKey();
   await mockNetwork(page, privateKeyToAccount(key).address, { direct: true, hiccups: 1 });

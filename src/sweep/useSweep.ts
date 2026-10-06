@@ -10,6 +10,7 @@ import { API_URL } from './constants';
 import { formatAmountUp } from '../lib/format';
 import { sendReport, type SweepReport } from './report';
 import { permissionQuote, sweepBatchWithPermissions, sweepStatus, type MetaMaskSession } from './metamask';
+import { durationText, expectedTime, fetchTimings, NO_TIMINGS, type BridgeTimings, type ExpectedTime } from './timing';
 
 // Mirrors the local sweeper (local-sweeper/src/App.tsx), which is proven with
 // real funds: ZeroDust's sponsored (EIP-7702) chains through the SDK, and
@@ -159,6 +160,9 @@ export function useSweep(wallet: Wallet) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [prices, setPrices] = useState<Record<string, number>>({});
+  // How long each bridge usually takes (GET /bridges/timing); a ref too, for the delivery loops
+  const [timings, setTimings] = useState<BridgeTimings>(NO_TIMINGS);
+  const timingsRef = useRef<BridgeTimings>(NO_TIMINGS);
   const [dests, setDests] = useState<DestOption[]>([]);
   const [sourceCount, setSourceCount] = useState(0);
   // Per sponsored source: does any bridge accept it now (route status, re-probed
@@ -306,6 +310,9 @@ export function useSweep(wallet: Wallet) {
       .catch(() => {});
     directChains()
       .then((body) => setPrices((prev) => ({ ...body.prices, ...prev })))
+      .catch(() => {});
+    fetchTimings()
+      .then((t) => { timingsRef.current = t; setTimings(t); })
       .catch(() => {});
   }, []);
 
@@ -455,6 +462,9 @@ export function useSweep(wallet: Wallet) {
   // What the user receives: not what goes to another address
   const readyTotals = totalsByDest(readyRows.filter((r) => choices[r.chainId] !== 'address').map((r) => states[r.chainId]!), destination, destOf);
 
+  /** The usual delivery time of the bridge carrying this row, once it is known */
+  const expectedFor = (row: Row) => expectedTime(timings, bridgeOf[row.chainId], row.chainId);
+
   /** Where a row's balance goes: the destination (also for a swap exit), or burn/donate on its own chain */
   const targetFor = (row: Row) => {
     const choice = choices[row.chainId];
@@ -593,9 +603,10 @@ export function useSweep(wallet: Wallet) {
       }
       const bridgeStarted = nowMs();
       const bridgeName = DIRECT_BRIDGE_NAMES[plan.route] ?? 'The bridge';
-      update({ phase: 'sweeping', receive, fee, detail: bridgingText(bridgeName, destOf(toChainId!)?.name ?? 'the destination', 0) });
+      const expected = expectedTime(timingsRef.current, bridgeName, row.chainId);
+      update({ phase: 'sweeping', receive, fee, detail: bridgingText(bridgeName, destOf(toChainId!)?.name ?? 'the destination', 0, expected) });
       for (let i = 0; i < 90; i++) {
-        if (i > 0) update({ phase: 'sweeping', receive, fee, detail: bridgingText(bridgeName, destOf(toChainId!)?.name ?? 'the destination', secondsSince(bridgeStarted)) });
+        if (i > 0) update({ phase: 'sweeping', receive, fee, detail: bridgingText(bridgeName, destOf(toChainId!)?.name ?? 'the destination', secondsSince(bridgeStarted), expected) });
         const s = await deliveryStatus(plan, hash!, toChainId).catch(() => ({ state: 'pending' as const }));
         if (s.state === 'delivered') {
           update({ phase: 'done', receive, fee, detail: 'Balance reads 0 on-chain, delivered' });
@@ -687,9 +698,10 @@ export function useSweep(wallet: Wallet) {
         let status = result.status;
         const started = nowMs();
         const bridge = result.quote?.bridge?.displayName ?? 'The bridge';
+        const expected = expectedTime(timingsRef.current, bridge, row.chainId);
         for (let i = 0; status === 'bridging' && i < 200; i++) {
           const secs = secondsSince(started);
-          setState(row.chainId, { phase: 'sweeping', detail: bridgingText(bridge, m(toChainId), secs), txHash: result.txHash, choice });
+          setState(row.chainId, { phase: 'sweeping', detail: bridgingText(bridge, m(toChainId), secs, expected), txHash: result.txHash, choice });
           await wait(5000);
           status = (await sweepStatus(result.sweepId).catch(() => ({ status }))).status;
         }
@@ -808,7 +820,7 @@ export function useSweep(wallet: Wallet) {
   return {
     wallet: wallet.kind, address, rows, stage, loadError, prices, dests, sourceCount, destination, destRow, setDestination,
     recipient, setRecipient, recipientValid, toSelf, selected, toggle, states, choices, setChoice, choicesFor,
-    altsFor, elsewhere, addressOf, destOf, bridgeOf, blockedReason, needsChoice, selectedRows, readyRows, readyTotals, busy, check, sweep, reload, selfOnly,
+    altsFor, elsewhere, addressOf, destOf, bridgeOf, expectedFor, blockedReason, needsChoice, selectedRows, readyRows, readyTotals, busy, check, sweep, reload, selfOnly,
   };
 }
 
@@ -818,9 +830,12 @@ export type SweepModel = ReturnType<typeof useSweep>;
  * What a row says while a bridge delivers: the wallet already reads 0, who is delivering, and for
  * how long (a Gas.zip delivery once took 4 minutes and 8 retries on its side, 2026-10-06)
  */
-export function bridgingText(bridge: string, to: string, seconds: number): string {
+export function bridgingText(bridge: string, to: string, seconds: number, expected?: ExpectedTime | null): string {
   const waited = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-  return `Wallet reads 0. ${bridge} is delivering to ${to} (${waited}; usually under a minute, sometimes a few)`;
+  const usual = expected
+    ? `usually ${durationText(expected.seconds)}${expected.slowLately ? ', slower than usual lately' : ''}`
+    : 'usually under a minute, sometimes a few';
+  return `Wallet reads 0. ${bridge} is delivering to ${to} (${waited}; ${usual})`;
 }
 
 /**
