@@ -289,9 +289,13 @@ export function verifyAcrossMessage(message: Hex, x: AcrossMessageExpect, fail: 
   let urSwap = false;
   let urFunded = false;
   let lifiSwap = false;
-  let nativeDrain = false;
-  let bridgedDrain = false;
-  for (const call of instructions.calls) {
+  // Order matters: Across's handler drains only leftover bridged token at the end, so native gas
+  // paid out before the swap or the unwrap would stay in the handler. Positions of each step:
+  let swapAt = -1;
+  let unwrapAt = -1;
+  let nativeDrainAt = -1;
+  let bridgedDrainAt = -1;
+  for (const [at, call] of instructions.calls.entries()) {
     if (call.value !== 0n) fail('a destination call carries value');
     const sel = call.callData.slice(0, 10).toLowerCase();
 
@@ -350,6 +354,7 @@ export function verifyAcrossMessage(message: Hex, x: AcrossMessageExpect, fail: 
       // What the router keeps after a swap anyone can take: it must spend all it was given
       if (amountIn !== x.bridgedAmount) fail('the swap does not spend all of the bridged token');
       urSwap = true;
+      swapAt = at;
       continue;
     }
 
@@ -371,6 +376,7 @@ export function verifyAcrossMessage(message: Hex, x: AcrossMessageExpect, fail: 
       const out = swaps[swaps.length - 1]!.receivingAssetId;
       buyToken = eq(out, ZERO_ADDRESS) ? NATIVE_SENTINEL : out.toLowerCase();
       lifiSwap = true;
+      swapAt = at;
       continue;
     }
 
@@ -389,13 +395,14 @@ export function verifyAcrossMessage(message: Hex, x: AcrossMessageExpect, fail: 
           urFunded = true;
         } else {
           if (!eq(destination, x.recipient)) fail('a drain pays someone other than the address you set');
-          if (isZero(token)) nativeDrain = true;
-          if (eq(token, x.bridged)) bridgedDrain = true;
+          if (isZero(token)) nativeDrainAt = at;
+          if (eq(token, x.bridged)) bridgedDrainAt = at;
         }
       } else if (sel === SEL.callWithBalance) {
         const [target, inner, value] = args as [string, Hex, bigint];
         if (value !== 0n || !inner.toLowerCase().startsWith(SEL.withdraw)) fail('a handler call does more than unwrap');
         unwrapped.add(target.toLowerCase());
+        unwrapAt = at;
       } else {
         fail(`a handler call (${sel}) is not a drain or an unwrap`);
       }
@@ -420,6 +427,7 @@ export function verifyAcrossMessage(message: Hex, x: AcrossMessageExpect, fail: 
       if (slippage.minAmountOut < x.minNative) fail('the swap may deliver less than the amount shown');
       settler = operator;
       buyToken = slippage.buyToken.toLowerCase();
+      swapAt = at;
     } else if (sel !== SEL.emitData) {
       fail(`a destination call (${sel}) is not one the handler route uses`);
     }
@@ -432,14 +440,16 @@ export function verifyAcrossMessage(message: Hex, x: AcrossMessageExpect, fail: 
     buyToken = x.bridged.toLowerCase();
   }
   if (!buyToken) return fail('no swap to the native token');
-  if (noFallback && !bridgedDrain) fail('without a fallback, the bridged token must be drained to the address you set');
+  if (noFallback && bridgedDrainAt <= swapAt) fail('without a fallback, the bridged token must be drained to the address you set after the swap');
   if (urSwap !== urFunded) fail('the Universal Router is funded without a swap, or swaps without funding');
   // The swap must buy the genuine wrapped native token (or native), and that is what gets unwrapped
   if (buyToken !== NATIVE_SENTINEL) {
     if (!wrapped || !eq(buyToken, wrapped)) fail('the swap buys another token than the native one');
     if (!unwrapped.has(buyToken)) fail('the swap output is not unwrapped to the native token');
   }
-  if (!nativeDrain) fail('nothing sends the native token to the address you set');
+  if (nativeDrainAt < 0) fail('nothing sends the native token to the address you set');
+  if (unwrapAt >= 0 && unwrapAt < swapAt) fail('the unwrap runs before the swap');
+  if (nativeDrainAt < Math.max(swapAt, unwrapAt)) fail('the native token is paid out before the swap or the unwrap');
   return { settler };
 }
 
