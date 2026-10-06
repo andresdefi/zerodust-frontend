@@ -294,3 +294,22 @@ describe('verifySponsoredAcross: no fallback, no swap (Polygon -> Base: POL to W
     expect(() => verifySponsoredAcross(SAMPLES[k]!, expect_(k, { minNative: 10n ** 30n }))).toThrow(/less than the amount shown/);
   });
 });
+
+describe('verifySponsoredAcross: steps must run swap, unwrap, then pay out', () => {
+  const isUnwrap = (c: Call) => c.callData.startsWith('0xc41e8295');
+  const isNativeDrain = (c: Call) => c.callData.startsWith('0xef8738d3') && /^0{64}$/.test(c.callData.slice(10, 74));
+  const isSwap = (c: Call) => ['0x2213bc0b', '0x24856bc3', '0x4666fc80'].includes(c.callData.slice(0, 10));
+  const moveBefore = (m: Instructions, which: (c: Call) => boolean, before: (c: Call) => boolean) => {
+    const i = m.calls.findIndex(which);
+    const [call] = m.calls.splice(i, 1);
+    m.calls.splice(m.calls.findIndex(before), 0, call!);
+  };
+
+  it.each(['8453-56', '8453-43114', '42161-56-lifi'])('%s: native paid out before the unwrap is refused', (k) => {
+    expect(() => verifySponsoredAcross(withMessage(k, (m) => moveBefore(m, isNativeDrain, isUnwrap)), expect_(k))).toThrow(/paid out before the swap or the unwrap/);
+  });
+
+  it.each(['8453-56', '8453-43114'])('%s: unwrap before the swap is refused', (k) => {
+    expect(() => verifySponsoredAcross(withMessage(k, (m) => moveBefore(m, isUnwrap, isSwap)), expect_(k))).toThrow(/unwrap runs before the swap|paid out before/);
+  });
+});
