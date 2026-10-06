@@ -4,13 +4,13 @@ These terms apply when you use ZeroDust: this website, the offline page, the API
 
 ## What ZeroDust does
 
-ZeroDust moves the native gas token left in a wallet on one or more chains to one destination you choose, and leaves each chain at a balance of exactly 0. On chains with a sponsor, your wallet delegates once to the ZeroDust contract (EIP-7702), the sponsor pays the gas and is repaid from the balance, and the delegation is revoked afterwards. On chains without a sponsor, your wallet sends exact transactions itself, which this website prepares and checks.
+ZeroDust moves the native gas token left in a wallet on one or more chains to one destination you choose, and leaves each chain at a balance of exactly 0. On chains with a sponsor, your wallet delegates once to the ZeroDust contract (EIP-7702), the sponsor pays the gas and is repaid from the balance, and the delegation is revoked afterwards. With MetaMask, your wallet instead grants ZeroDust's router a one-time permission per chain (ERC-7715) and signs one message for every chain; the sponsor pays the gas through the router and is repaid the same way. The smart-account upgrade MetaMask runs the first time on a chain is MetaMask's, and stays. On chains without a sponsor, your wallet sends exact transactions itself, which this website prepares and checks.
 
 ## You keep control
 
 - ZeroDust never holds your funds. They move from your wallet to the destination in the sweep itself.
-- Your private key stays on your device. We never ask for it anywhere else (not by email, chat or support), and you should never give it to anyone.
-- You are responsible for the key you use, for the destination chain and address you choose, and for checking them before you confirm.
+- With MetaMask, your key stays in MetaMask. When you load a wallet with its key instead, the key stays on your device. We never ask for it anywhere else (not by email, chat or support), and you should never give it to anyone.
+- You are responsible for the wallet and key you use, for what you approve in MetaMask, for the destination chain and address you choose, and for checking them before you confirm.
 
 ## Before you sweep
 
@@ -37,4 +37,4 @@ ZeroDust is provided as it is, without promises that it will always be available
 
 These terms may be updated; the version on this page applies from the date below. Questions: reach out on X, [@andresdefi](https://x.com/andresdefi).
 
-Last updated: 1 October 2026.
+Last updated: 6 October 2026.

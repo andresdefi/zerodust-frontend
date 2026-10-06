@@ -2,21 +2,21 @@
 
 > Move a wallet's entire native gas balance (ETH, BNB, POL and so on) off an EVM chain and leave exactly 0, to any address on the same chain or bridged to another chain.
 
-A normal transfer cannot empty a native balance, because paying for the transfer uses the token being sent. On chains with EIP-7702 the wallet signs a sweep intent and two authorizations (one delegating to the ZeroDust contract, one revoking it), and a sponsor executes the sweep and pays the gas, reimbursed from the swept amount. The contract reverts unless the final balance is exactly 0, and the wallet is undelegated right after. Chains without EIP-7702 ("direct chains") are swept by the wallet itself with transactions the API plans but never signs. Keys never leave the signer: the API only receives signatures.
+A normal transfer cannot empty a native balance, because paying for the transfer uses the token being sent. On chains with EIP-7702 the wallet signs a sweep intent and two authorizations (one delegating to the ZeroDust contract, one revoking it), and a sponsor executes the sweep and pays the gas, reimbursed from the swept amount. The contract reverts unless the final balance is exactly 0, and the wallet is undelegated right after. Without exposing the key, a wallet with MetaMask Advanced Permissions (ERC-7715) can instead grant ZeroDust's permission router a one-time allowance per chain and sign one `SweepBatch` for every chain (`GET /quote?signer=permission`, `POST /authorization/batch`, `POST /sweep` with `permissionContext` and `batchQuoteIds`); this is the website's main flow, on 16 chains, and not in the SDK yet. Chains without EIP-7702 ("direct chains") are swept by the wallet itself with transactions the API plans but never signs. Keys never leave the signer: the API only receives signatures.
 
-Supported chains, destinations and fees change; read them from the API (`GET https://api.zerodust.xyz/chains`, `GET /direct/chains`, `GET /destinations?fromChainId=`) instead of hardcoding them. Every quote shows the full fee before anything is signed. There is no testnet; use the SDK's `dryRun` option, which signs everything and submits nothing.
+Supported chains, destinations and fees change; read them from the API (`GET https://api.zerodust.xyz/chains`, `GET /direct/chains`, `GET /destinations?fromChainId=`) instead of hardcoding them. `GET /bridges/timing` says how long each bridge usually takes. Every quote shows the full fee before anything is signed. There is no testnet; use the SDK's `dryRun` option, which signs everything and submits nothing.
 
 The complete docs as one file: [llms-full.txt](https://zerodust.xyz/llms-full.txt)
 
 ## Docs
 
-- [Overview](https://zerodust.xyz/docs): how a sweep works, supported chains, fees
+- [Overview](https://zerodust.xyz/docs): how a sweep works (with the key or with MetaMask), supported chains, fees
 - [Getting started](https://zerodust.xyz/docs/getting-started): first sweep with the SDK, dry run first
 - [SDK](https://zerodust.xyz/docs/sdk): `@zerodust/sdk` install, configuration, exports
 - [Agent](https://zerodust.xyz/docs/sdk-agent): `ZeroDustAgent`, sweeps, dry runs, batches and the checks before signing
 - [API client](https://zerodust.xyz/docs/sdk-client): the `ZeroDust` class, one method per API call
 - [Errors](https://zerodust.xyz/docs/sdk-errors): `ZeroDustError` and error codes
-- [REST API](https://zerodust.xyz/docs/api): every public endpoint at `https://api.zerodust.xyz`, parameters, responses, rate limits
+- [REST API](https://zerodust.xyz/docs/api): every public endpoint at `https://api.zerodust.xyz`, the key and MetaMask sweep flows, parameters, responses, rate limits
 - [Direct chains](https://zerodust.xyz/docs/direct-chains): sweeping chains without EIP-7702
 
 ## AI agents

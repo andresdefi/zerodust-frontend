@@ -4,6 +4,10 @@ ZeroDust moves the entire native gas balance (ETH, BNB, POL and so on) off an EV
 
 ## How it works
 
+There are two ways to sign a sweep on a sponsored chain: with the wallet's key (EIP-7702, below), or through MetaMask without the key ([with MetaMask](#with-metamask)). Either way a ZeroDust sponsor executes the sweep and pays the gas, reimbursed from the swept balance, and the transaction reverts unless the wallet ends at exactly 0.
+
+### With the key
+
 On chains with EIP-7702, the wallet signs three things and a ZeroDust sponsor executes the sweep and pays the gas up front:
 
 1. An EIP-712 `SweepIntent`: destination, destination chain, route, minimum amount received, fee limits, deadline and nonce.
@@ -12,7 +16,23 @@ On chains with EIP-7702, the wallet signs three things and a ZeroDust sponsor ex
 
 The contract runs as the wallet, checks the signed intent, takes the fee reserve, sends the rest to the destination (directly or through a bridge) and requires the final balance to be exactly 0. If it is not 0, the transaction reverts.
 
-What this means for an integration:
+### With MetaMask
+
+The website's main flow. MetaMask's Advanced Permissions (ERC-7715, MetaMask 13.23 or later) let the wallet grant a narrow permission instead of handing over a key:
+
+1. **One permission request for every chain.** The page asks `wallet_requestExecutionPermissions` for a one-time `native-token-allowance` per chain, equal to that chain's balance, valid 10 minutes. The ZeroDust permission router `0x369A97dd256F7eb37fF7116C4EcBd50318eBb286` is the delegate, the only redeemer and the only payee.
+2. **What MetaMask shows**, chain by chain: the first time on a chain, "switch to smart account" (MetaMask's own EIP-7702 upgrade, a little gas paid from that chain's balance); then Grant and Confirm for the permission.
+3. **One signature for every chain.** An EIP-712 `SweepBatch` holding one `SweepIntent` per chain, with no chain id in the domain, so MetaMask signs it without switching networks.
+4. **The sponsor sweeps each chain** through the router: it redeems the permission through MetaMask's DelegationManager (`0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3`), requires the wallet to end at exactly 0, then pays out exactly as the ZeroDust contract does.
+
+How it differs from the key flow:
+
+- No revoke. The wallet keeps MetaMask's smart-account delegation, which is MetaMask's normal state. The allowance is used up by the sweep and expires anyway.
+- Cross-chain only through bridges that take the refund address and recipient as explicit parameters (Relay, Across, Hyperlane). The router is the bridge's caller, so Gas.zip, which refunds to its caller, is never used here.
+- The router is on 16 chains: Ethereum, OP Mainnet, BNB Chain, Gnosis, Unichain, Polygon, Sonic, Robinhood Chain, Mantle, Arc, Base, Arbitrum, Celo, Linea, Berachain and Katana. Other chains need the key.
+- The SDK does not support this flow yet. The [REST API](/docs/api#with-metamask) does.
+
+### What this means for an integration
 
 - The API never receives a private key. Keys sign locally and only signatures are sent.
 - The SDK treats the API as untrusted. `ZeroDustAgent` builds the typed data itself, delegates only to the ZeroDust contract, and checks the destination, route, fees and deadline of every quote before it signs anything. See [Agent](/docs/sdk-agent).
@@ -22,7 +42,7 @@ What this means for an integration:
 
 | Option | Use it for |
 |---|---|
-| Website, [zerodust.xyz](https://zerodust.xyz) | Sweeping a wallet without writing code |
+| Website, [zerodust.xyz](https://zerodust.xyz) | Sweeping a wallet without writing code, with MetaMask or the wallet's key |
 | [TypeScript SDK](/docs/sdk), `@zerodust/sdk` | Apps, scripts and agents that hold their own key |
 | [MCP server](/docs/mcp), `@zerodust/mcp-server` | AI clients that speak the Model Context Protocol; a read-only hosted server needs no install |
 | [Vercel AI SDK tools](/docs/ai-sdk), `@zerodust/ai-sdk` | Read-only tools for `generateText` and `streamText` |
@@ -31,11 +51,12 @@ What this means for an integration:
 
 ## Supported chains
 
-As of 2 October 2026 the live API lists:
+As of 6 October 2026 the live API lists:
 
-- 46 EIP-7702 chains, swept by the sponsor (`GET /chains`). Each entry's `crossChain.available` says whether a bridge currently accepts it as a cross-chain source.
-- 14 direct chains, swept by the wallet itself (`GET /direct/chains`).
-- Cross-chain destinations are not limited to ZeroDust chains: any EVM chain a bridge delivers native gas to qualifies. From Base there are 109 (`GET /destinations?fromChainId=8453`).
+- 48 EIP-7702 chains, swept by the sponsor (`GET /chains`). Each entry's `crossChain.available` says whether a bridge currently accepts it as a cross-chain source.
+- 17 direct chains, swept by the wallet itself (`GET /direct/chains`).
+- 16 of the EIP-7702 chains can also be swept with MetaMask, without the key.
+- Cross-chain destinations are not limited to ZeroDust chains: any EVM chain a bridge delivers native gas to qualifies. From Base there are 107 (`GET /destinations?fromChainId=8453`).
 
 These numbers change. Read them from the API rather than hardcoding them.
 
@@ -48,7 +69,7 @@ The service fee depends on the USD value of the balance being swept:
 | Under $1 | 5% of the balance, no minimum |
 | $1 and above | 1% of the balance, at least $0.05 and at most $0.50 |
 
-On top of the service fee the sweep pays its gas (including the revoke transaction and, on rollups, the L1 data fee) and, for cross-chain sweeps, the bridge's fee. Every quote shows the total before anything is signed. The [REST API](/docs/api) page explains the fee fields of a quote.
+On top of the service fee the sweep pays its gas (including the revoke transaction with the key, the permission redemption with MetaMask, and on rollups the L1 data fee) and, for cross-chain sweeps, the bridge's fee. Every quote shows the total before anything is signed. The [REST API](/docs/api) page explains the fee fields of a quote.
 
 ## Pages
 
