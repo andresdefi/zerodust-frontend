@@ -218,6 +218,8 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
   let mitosisQuotes = 0;
   /** POST /reports bodies, in order */
   const reports: Array<Record<string, unknown>> = [];
+  /** GET /quote requests, in order */
+  const quoted: Array<{ from: number; to: number; destination: string }> = [];
 
   await page.route(`${API}/**`, async (route) => {
     const url = new URL(route.request().url());
@@ -300,6 +302,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
         }, 400);
       }
       const to = Number(p.get('toChainId'));
+      quoted.push({ from, to, destination: p.get('destination')! });
       const q = from === MITOSIS ? mitosisQuote(p.get('destination')!) : from === ENDURANCE ? enduranceQuote(p.get('destination')!) : quote(from, to, p.get('destination')!);
       quotes.set(q.quoteId, { ...q, from, to });
       return json(route, q);
@@ -381,5 +384,5 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     route.abort('blockedbyclient')
   );
 
-  return { swept, sent, reports };
+  return { swept, sent, reports, quoted };
 }
