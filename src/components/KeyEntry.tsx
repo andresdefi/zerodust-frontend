@@ -4,7 +4,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { ShieldIcon } from './icons';
 import { OFFLINE } from '../lib/env';
 import { isPaused, useServiceStatus } from '../sweep/status';
-import { connectMetaMask, findMetaMask, metamaskEnabled, type MetaMaskSession } from '../sweep/metamask';
+import { connectMetaMask, findMetaMask, type MetaMaskSession } from '../sweep/metamask';
 
 const KEY_PATTERN = /^(0x)?[0-9a-fA-F]{64}$/;
 
@@ -47,8 +47,9 @@ export function KeyEntry({ onAccount, onMetaMask }: {
     }
   });
 
-  // MetaMask: offered only with ?metamask while it is tested, never in the offline file
-  const [showMetaMask] = useState(() => !OFFLINE && metamaskEnabled());
+  // MetaMask is the main way in (owner, 2026-10-06); the key is the fallback for chains MetaMask
+  // cannot sweep. The offline file has no wallet extension, so it is key-only.
+  const [keyMode, setKeyMode] = useState(OFFLINE);
   const [connecting, setConnecting] = useState(false);
   const [mmError, setMmError] = useState<string | null>(null);
   const connect = async () => {
@@ -115,29 +116,49 @@ export function KeyEntry({ onAccount, onMetaMask }: {
 
   const block = (e: { preventDefault: () => void }) => e.preventDefault();
 
+  const pausedNotice = paused && (
+    <p className="status-notice" role="status">
+      {status?.message ?? 'ZeroDust is paused right now. Sweeps resume automatically; please come back shortly.'}
+    </p>
+  );
+
+  if (!keyMode) {
+    return (
+      <section className="card" aria-labelledby="load-title">
+        <div className="card-head">
+          <h2 id="load-title">Connect wallet</h2>
+        </div>
+        <div className="load">
+          {pausedNotice}
+          <p>Connect MetaMask to empty your wallet. You approve the chains in MetaMask and sign once; the key never leaves it.</p>
+          {mmError && <p className="field-error" role="alert">{mmError}</p>}
+          <div className="safety">
+            <div><ShieldIcon /><span>MetaMask grants ZeroDust a one-time permission per chain, for that chain's balance, valid 10 minutes.</span></div>
+            <div><ShieldIcon /><span>The funds can only go where your signature says: the address and chain you choose.</span></div>
+            <div><ShieldIcon /><span>MetaMask covers 16 chains today. For the others, load the wallet with its key instead.</span></div>
+          </div>
+          <div className="offline">
+            <span>No MetaMask, or a chain it does not cover?</span>
+            <button type="button" className="link-btn" onClick={() => setKeyMode(true)}>Use a private key</button>
+          </div>
+        </div>
+        <div className="actions">
+          <button type="button" className="btn btn-primary btn-block" onClick={connect} disabled={connecting || paused}>
+            {connecting ? 'Connecting…' : 'Connect MetaMask'}
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="card" aria-labelledby="load-title">
       <div className="card-head">
         <h2 id="load-title">Load wallet</h2>
+        {!OFFLINE && <button type="button" className="link-btn" onClick={() => { reset(); setKeyMode(false); }}>Use MetaMask</button>}
       </div>
       <div className="load">
-        {paused && (
-          <p className="status-notice" role="status">
-            {status?.message ?? 'ZeroDust is paused right now. Sweeps resume automatically; please come back shortly.'}
-          </p>
-        )}
-        {showMetaMask && (
-          <>
-            <div className="metamask">
-              <span><b>No key needed with MetaMask.</b> You approve each chain in MetaMask; the key never leaves it.</span>
-              <button type="button" className="btn btn-ghost" onClick={connect} disabled={connecting || paused}>
-                {connecting ? 'Connecting…' : 'Connect MetaMask'}
-              </button>
-            </div>
-            {mmError && <p className="field-error" role="alert">{mmError}</p>}
-            <p className="or" aria-hidden="true"><span>or use the key</span></p>
-          </>
-        )}
+        {pausedNotice}
         <p id="key-help">Type or paste the private key of the wallet you want to empty.</p>
         <label className={paused ? 'keyfield is-disabled' : 'keyfield'}>
           <span className="visually-hidden">Private key</span>

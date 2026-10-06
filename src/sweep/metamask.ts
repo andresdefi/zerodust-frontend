@@ -12,15 +12,6 @@
 import { getAddress, isAddress, toHex, type Address, type Hex } from 'viem';
 import { API_URL } from './constants';
 
-/** The page shows "Connect MetaMask" only with ?metamask in the URL while this is being tested */
-export function metamaskEnabled(): boolean {
-  try {
-    return new URLSearchParams(window.location.search).has('metamask');
-  } catch {
-    return false;
-  }
-}
-
 export interface Eip1193Provider {
   request(args: { method: string; params?: unknown[] | Record<string, unknown> }): Promise<unknown>;
   on?(event: string, listener: (...args: unknown[]) => void): void;
@@ -88,24 +79,23 @@ export async function switchChain(provider: Eip1193Provider, chainId: number): P
   await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: toHex(chainId) }] });
 }
 
-export interface GrantedPermission {
-  context: Hex;
-  delegationManager?: string;
-}
-
 /**
- * Asks MetaMask for a one-time allowance of `amount` to the router: the router alone can use it
- * (redeemer) and receive from it (payee), and it expires in `ttlSeconds`.
+ * Asks MetaMask, in ONE request, for a one-time allowance per chain to the router: the router
+ * alone can use it (redeemer) and receive from it (payee), and it expires in `ttlSeconds`.
+ * MetaMask shows each chain in turn (Grant, Confirm, and the smart-account upgrade the first
+ * time on a chain), without network switching. Returns each chain's permission context.
  */
-export async function requestPermission(
+export async function requestPermissions(
   provider: Eip1193Provider,
-  p: { chainId: number; router: Address; amount: bigint; chainName: string; ttlSeconds?: number }
-): Promise<GrantedPermission> {
+  router: Address,
+  items: Array<{ chainId: number; amount: bigint; chainName: string }>,
+  ttlSeconds = 600
+): Promise<Map<number, Hex>> {
   const now = Math.floor(Date.now() / 1000);
-  const router = getAddress(p.router);
+  const to = getAddress(router);
   const result = (await provider.request({
     method: 'wallet_requestExecutionPermissions',
-    params: [{
+    params: items.map((p) => ({
       chainId: toHex(p.chainId),
       permission: {
         type: 'native-token-allowance',
@@ -116,17 +106,23 @@ export async function requestPermission(
         },
         isAdjustmentAllowed: false,
       },
-      to: router,
+      to,
       rules: [
-        { type: 'expiry', data: { timestamp: now + (p.ttlSeconds ?? 600) } },
-        { type: 'redeemer', data: { addresses: [router] } },
-        { type: 'payee', data: { addresses: [router] } },
+        { type: 'expiry', data: { timestamp: now + ttlSeconds } },
+        { type: 'redeemer', data: { addresses: [to] } },
+        { type: 'payee', data: { addresses: [to] } },
       ],
-    }],
-  })) as Array<{ context?: string; delegationManager?: string }> | null;
-  const context = result?.[0]?.context;
-  if (!context || !/^0x[0-9a-fA-F]+$/.test(context)) throw new Error('MetaMask did not return a permission.');
-  return { context: context as Hex, delegationManager: result![0]!.delegationManager };
+    })),
+  })) as Array<{ chainId?: string; context?: string }> | null;
+  const contexts = new Map<number, Hex>();
+  for (const [i, r] of (result ?? []).entries()) {
+    if (!r?.context || !/^0x[0-9a-fA-F]+$/.test(r.context)) continue;
+    // Each answer names its chain; fall back to the request's order
+    const chainId = r.chainId ? Number(BigInt(r.chainId)) : items[i]?.chainId;
+    if (chainId !== undefined) contexts.set(chainId, r.context as Hex);
+  }
+  if (contexts.size === 0) throw new Error('MetaMask did not return a permission.');
+  return contexts;
 }
 
 // ============ ZeroDust API ============
@@ -167,58 +163,139 @@ export function permissionQuote(p: { fromChainId: number; toChainId: number; use
 
 export type SweepStatus = 'pending' | 'simulating' | 'executing' | 'broadcasted' | 'bridging' | 'completed' | 'failed';
 
+type TypedData = { domain: Record<string, unknown>; types: Record<string, unknown>; primaryType: string; message: Record<string, unknown> };
+
+export interface BatchItem {
+  chainId: number;
+  chainName: string;
+  toChainId: number;
+  destination: Address;
+  readBalance: () => Promise<bigint>;
+}
+
+export interface BatchResult {
+  /** A failure before or at submission (nothing left the wallet) */
+  error?: string;
+  quote?: PermissionQuote;
+  sweepId?: string;
+  txHash?: string;
+  status?: SweepStatus;
+}
+
 /**
- * One chain, end to end: grant the permission, quote at the balance left after MetaMask's
- * upgrade, sign the intent, submit, and follow the sweep until the relayer is done with it.
- * Throws with what went wrong; `onStep` names the step for the page.
+ * Every chain at once, through MetaMask:
+ *   1. one permission request for every chain (the allowance is each balance now);
+ *   2. a quote per chain at the balance left after MetaMask's upgrade;
+ *   3. ONE signature over the SweepBatch (no chain id in the domain: no network switch);
+ *   4. a sweep per chain, followed until the relayer is done with it.
+ * Quotes live ~55 s: if they expire while the batch is being read, the page quotes again
+ * and asks for the signature once more. A chain that fails a step is reported and the rest go on.
  */
-export async function sweepWithPermission(
+export async function sweepBatchWithPermissions(
   session: MetaMaskSession,
-  p: { chainId: number; chainName: string; toChainId: number; destination: Address; readBalance: () => Promise<bigint> },
-  onStep: (step: string) => void
-): Promise<{ sweepId: string; txHash?: string; quote: PermissionQuote; status: SweepStatus; error?: string }> {
+  router: Address,
+  items: BatchItem[],
+  onStep: (chainId: number, step: string) => void
+): Promise<Map<number, BatchResult>> {
   const { provider, address } = session;
-  onStep('Switch network in MetaMask');
-  await switchChain(provider, p.chainId);
+  const results = new Map<number, BatchResult>();
+  const fail = (chainId: number, error: string) => {
+    results.set(chainId, { error });
+    onStep(chainId, 'failed');
+  };
 
-  // The allowance covers the balance now; MetaMask's upgrade (first time) spends a little of it
-  const before = await p.readBalance();
-  if (before === 0n) throw new Error('Nothing to sweep: the balance is 0');
-  const first = await permissionQuote({ fromChainId: p.chainId, toChainId: p.toChainId, user: address, destination: p.destination });
-
-  onStep('Approve in MetaMask');
-  const granted = await requestPermission(provider, { chainId: p.chainId, router: first.permission.router, amount: before, chainName: p.chainName });
-
-  // A fresh quote: the 55-second signing window starts now, and the balance may have dropped
-  onStep('Quoting');
-  const quote = await permissionQuote({ fromChainId: p.chainId, toChainId: p.toChainId, user: address, destination: p.destination });
-  const { typedData } = await api<{ typedData: { domain: Record<string, unknown>; types: Record<string, unknown>; primaryType: string; message: Record<string, unknown> } }>(
-    '/authorization',
-    { method: 'POST', body: JSON.stringify({ quoteId: quote.quoteId }) }
-  );
-  if (String(typedData.domain.verifyingContract).toLowerCase() !== first.permission.router.toLowerCase()) {
-    throw new Error('Stopped before signing: the intent is not for the ZeroDust router');
+  // 1. Balances, then one permission request for every chain that holds something
+  const balances = await Promise.all(items.map((it) => it.readBalance().catch(() => 0n)));
+  const funded = items.filter((it, i) => {
+    if (balances[i]! > 0n) return true;
+    fail(it.chainId, 'Nothing to sweep: the balance is 0');
+    return false;
+  });
+  if (funded.length === 0) return results;
+  for (const it of funded) onStep(it.chainId, 'Approve in MetaMask');
+  let contexts: Map<number, Hex>;
+  try {
+    contexts = await requestPermissions(provider, router, funded.map((it) => ({ chainId: it.chainId, amount: balances[items.indexOf(it)]!, chainName: it.chainName })));
+  } catch (error) {
+    for (const it of funded) fail(it.chainId, error instanceof Error ? error.message : 'MetaMask refused the permission');
+    return results;
   }
-
-  onStep('Sign in MetaMask');
-  const signature = (await provider.request({
-    method: 'eth_signTypedData_v4',
-    params: [address, JSON.stringify(typedData)],
-  })) as Hex;
-
-  onStep('Submitting');
-  const submitted = await api<{ sweepId: string }>('/sweep', {
-    method: 'POST',
-    body: JSON.stringify({ quoteId: quote.quoteId, signature, permissionContext: granted.context }),
+  const granted = funded.filter((it) => {
+    if (contexts.has(it.chainId)) return true;
+    fail(it.chainId, 'MetaMask did not grant the permission for this chain');
+    return false;
   });
 
-  // Follow it: the relayer sends within seconds; a bridge can take minutes
-  let last: { status: SweepStatus; txHash?: string; errorMessage?: string; error?: string } = { status: 'pending' };
-  for (let i = 0; i < 120; i++) {
-    last = await api<typeof last>(`/sweep/${submitted.sweepId}`).catch(() => last);
-    onStep(last.status === 'bridging' ? 'bridging' : last.status);
-    if (last.status === 'completed' || last.status === 'failed') break;
-    await new Promise((r) => setTimeout(r, 4000));
+  // 2-4. Quote, sign once, submit; once more if the quotes ran out while signing
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const quoted: Array<{ item: BatchItem; quote: PermissionQuote }> = [];
+    await Promise.all(granted.map(async (item) => {
+      onStep(item.chainId, 'Quoting');
+      try {
+        const quote = await permissionQuote({ fromChainId: item.chainId, toChainId: item.toChainId, user: address, destination: item.destination });
+        if (quote.permission.router.toLowerCase() !== router.toLowerCase()) throw new Error('The quote is not for the ZeroDust router');
+        quoted.push({ item, quote });
+      } catch (error) {
+        fail(item.chainId, error instanceof Error ? error.message : 'No quote');
+      }
+    }));
+    if (quoted.length === 0) return results;
+    quoted.sort((a, b) => granted.indexOf(a.item) - granted.indexOf(b.item));
+    const quoteIds = quoted.map((q) => q.quote.quoteId);
+
+    let signature: Hex;
+    try {
+      const { typedData } = await api<{ typedData: TypedData }>('/authorization/batch', { method: 'POST', body: JSON.stringify({ quoteIds }) });
+      const sweeps = (typedData.message.sweeps as unknown[] | undefined) ?? [];
+      if (String(typedData.domain.verifyingContract).toLowerCase() !== router.toLowerCase() || sweeps.length !== quoteIds.length) {
+        throw new Error('Stopped before signing: the batch is not for the ZeroDust router');
+      }
+      for (const { item } of quoted) onStep(item.chainId, 'Sign in MetaMask');
+      signature = (await provider.request({ method: 'eth_signTypedData_v4', params: [address, JSON.stringify(typedData)] })) as Hex;
+    } catch (error) {
+      for (const { item } of quoted) fail(item.chainId, error instanceof Error ? error.message : 'Signature refused');
+      return results;
+    }
+
+    const submitted = await Promise.all(quoted.map(async ({ item, quote }) => {
+      onStep(item.chainId, 'Submitting');
+      try {
+        const { sweepId } = await api<{ sweepId: string }>('/sweep', {
+          method: 'POST',
+          body: JSON.stringify({ quoteId: quote.quoteId, signature, permissionContext: contexts.get(item.chainId), batchQuoteIds: quoteIds }),
+        });
+        return { item, quote, sweepId };
+      } catch (error) {
+        return { item, quote, error };
+      }
+    }));
+    const expired = submitted.filter((s) => s.error instanceof ApiError && s.error.code === 'QUOTE_EXPIRED');
+    if (expired.length === submitted.length && attempt === 0) {
+      // Every quote ran out while the batch was read: quote again and ask once more
+      continue;
+    }
+
+    await Promise.all(submitted.map(async (s) => {
+      if (!('sweepId' in s) || !s.sweepId) {
+        fail(s.item.chainId, s.error instanceof Error ? s.error.message : 'Could not submit');
+        return;
+      }
+      // Follow it: the relayer sends within seconds; a bridge can take minutes
+      let last: { status: SweepStatus; txHash?: string; errorMessage?: string } = { status: 'pending' };
+      for (let i = 0; i < 150; i++) {
+        last = await api<typeof last>(`/sweep/${s.sweepId}`).catch(() => last);
+        onStep(s.item.chainId, last.status);
+        if (last.status === 'completed' || last.status === 'failed' || last.status === 'bridging') break;
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+      results.set(s.item.chainId, { quote: s.quote, sweepId: s.sweepId, txHash: last.txHash, status: last.status, ...(last.status === 'failed' ? { error: last.errorMessage ?? 'Sweep failed' } : {}) });
+    }));
+    return results;
   }
-  return { sweepId: submitted.sweepId, txHash: last.txHash, quote, status: last.status, error: last.errorMessage ?? last.error };
+  return results;
+}
+
+/** A sweep's status, for following a bridge after the source chain reads 0 */
+export function sweepStatus(sweepId: string): Promise<{ status: SweepStatus; txHash?: string; destinationTxHash?: string; bridgeTrackingUrl?: string; errorMessage?: string }> {
+  return api(`/sweep/${sweepId}`);
 }
