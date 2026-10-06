@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { allowedCallTargets, ZERO_ROUTE_HASH } from '@zerodust/sdk';
 import { keccak256, type Hex } from 'viem';
-import { connectMetaMask, requestPermissions, sweepBatchWithPermissions, verifyPermissionQuote, type ChainReads, type Eip1193Provider, type MetaMaskSession, type PermissionQuote } from '../src/sweep/metamask';
+import { bindOwnRelayDeposit, connectMetaMask, requestPermissions, sweepBatchWithPermissions, verifyPermissionQuote, type ChainReads, type Eip1193Provider, type MetaMaskSession, type PermissionQuote } from '../src/sweep/metamask';
 
 const ROUTER = '0x589CB1Fc24F8Cf6e41755Ea518e7815423e83f70';
 const USER = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
@@ -330,5 +330,71 @@ describe('verifyPermissionQuote: Across routes (plain ETH deposits to wallets on
 
   it.each(['8453-56', '8453-43114', '137-8453-nofallback'])('%s (a swap route) stops before signing', async (k) => {
     await expect(verifyPermissionQuote(acrossQuote(k), want(k), readsWith(async () => '0x'))).rejects.toThrow(/^Stopped before signing/);
+  });
+});
+
+describe('bindOwnRelayDeposit: the Relay deposit comes from Relay, to this page', () => {
+  const OWNER = '0x820653ccE8a755edbb52eC1bc5829D2a60CD5cc5' as const;
+  const RELAY = JSON.parse(readFileSync(new URL('./fixtures/relay-deposits-2026-10-06.json', import.meta.url), 'utf8')) as Record<string, { to: string; data: Hex; value: string; requestId: string; recipient: string; currencyOut: { address: string; chainId: number }; amountOut: string }>;
+  const s = RELAY['8453-42161']!;
+  const quote = {
+    quoteId: '33333333-3333-4333-8333-333333333333', estimatedReceive: '1', bridge: { name: 'relay', displayName: 'Relay', inputAmount: s.value },
+    intent: { mode: 1, destination: OWNER.toLowerCase(), destinationChainId: '42161', callTarget: '0x4cd00e387622c35bddb9b4c962c136462338bc31', routeHash: '0x00', callData: '0xfeed', minReceive: '1' },
+  } as unknown as PermissionQuote;
+  const want = { user: OWNER, fromChainId: 8453, toChainId: 42161, destination: OWNER };
+
+  type Answer = {
+    steps: Array<{ kind: string; requestId: string; items: Array<{ data: { to: string; data: string; value: string; chainId: number } }> }>;
+    details: { recipient: string; currencyOut: { amount: string; currency: { address: string; chainId: number } } };
+  };
+  /** Relay's answer for this page's request, as captured, with edits */
+  function stub(edit: (answer: Answer) => void = () => {}, bindCallData?: string) {
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      requests.push({ url, body });
+      const json = (b: unknown, status = 200) => ({ ok: status < 400, status, json: async () => b });
+      if (url === 'https://api.relay.link/quote') {
+        const answer: Answer = {
+          steps: [{ kind: 'transaction', requestId: s.requestId, items: [{ data: { to: s.to, data: s.data, value: s.value, chainId: 8453 } }] }],
+          details: { recipient: s.recipient, currencyOut: { amount: s.amountOut, currency: s.currencyOut } },
+        };
+        edit(answer);
+        return json(answer);
+      }
+      if (url.endsWith('/relay-route')) return json({ quoteId: quote.quoteId, intent: { ...quote.intent, callTarget: body.callTarget, callData: bindCallData ?? body.callData, routeHash: keccak256(body.callData) } });
+      return json({}, 404);
+    });
+    return requests;
+  }
+
+  it("asks Relay for exactly the routed amount, to the address set, refunds to the wallet, and binds Relay's deposit", async () => {
+    const requests = stub();
+    const bound = await bindOwnRelayDeposit(quote, want);
+    expect(requests[0]).toEqual({ url: 'https://api.relay.link/quote', body: {
+      user: OWNER, recipient: OWNER, refundTo: OWNER, originChainId: 8453, destinationChainId: 42161,
+      originCurrency: '0x0000000000000000000000000000000000000000', destinationCurrency: '0x0000000000000000000000000000000000000000', amount: s.value, tradeType: 'EXACT_INPUT',
+    } });
+    expect(requests[1]!.url).toBe(`https://api.zerodust.xyz/quote/${quote.quoteId}/relay-route`);
+    expect(requests[1]!.body).toEqual({ callTarget: s.to, callData: s.data, requestId: s.requestId });
+    expect(bound.intent.callData).toBe(s.data);
+  });
+
+  it('stops when Relay would pay someone else, deliver a token, or less than shown', async () => {
+    stub((a) => { a.details.recipient = '0x000000000000000000000000000000000000dEaD'; });
+    await expect(bindOwnRelayDeposit(quote, want)).rejects.toThrow('Relay would pay someone other than the address you set');
+    stub((a) => { a.details.currencyOut.currency = { address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', chainId: 42161 }; });
+    await expect(bindOwnRelayDeposit(quote, want)).rejects.toThrow('Relay would not deliver native gas');
+    stub();
+    await expect(bindOwnRelayDeposit({ ...quote, estimatedReceive: (BigInt(s.amountOut) + 1n).toString() } as PermissionQuote, want)).rejects.toThrow('less than the amount shown');
+  });
+
+  it("stops when Relay's deposit is for another amount or chain, or the API binds something else", async () => {
+    stub((a) => { a.steps[0]!.items[0]!.data.value = '1'; });
+    await expect(bindOwnRelayDeposit(quote, want)).rejects.toThrow("another amount");
+    stub((a) => { a.steps[0]!.items[0]!.data.chainId = 10; });
+    await expect(bindOwnRelayDeposit(quote, want)).rejects.toThrow('another chain');
+    stub(() => {}, '0xbad0');
+    await expect(bindOwnRelayDeposit(quote, want)).rejects.toThrow('the API did not bind the deposit Relay gave this page');
   });
 });

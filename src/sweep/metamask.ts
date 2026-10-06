@@ -176,6 +176,72 @@ export function assertPinnedContracts(quote: PermissionQuote): void {
   }
 }
 
+// ============ Relay: the deposit comes from Relay, to this page ============
+
+const RELAY_API = 'https://api.relay.link';
+const NATIVE = '0x0000000000000000000000000000000000000000';
+
+interface RelayQuoteAnswer {
+  requestId?: string;
+  message?: string;
+  steps?: Array<{ kind?: string; requestId?: string; items: Array<{ data: { to: string; data: string; value: string; chainId: number } }> }>;
+  details?: { recipient?: string; currencyOut?: { amount?: string; currency?: { address?: string; chainId?: number } } };
+}
+
+/**
+ * Relay keeps a request's recipient on its own servers; the deposit calldata only names an id. So
+ * for a Relay route the page asks Relay itself for the deposit (the recipient and refunds it sets,
+ * the exact amount the sweep routes), checks Relay's answer, and binds that deposit into the quote
+ * (POST /quote/:quoteId/relay-route). A compromised ZeroDust API cannot substitute its own request.
+ */
+export async function bindOwnRelayDeposit(
+  quote: PermissionQuote,
+  want: { user: Address; fromChainId: number; toChainId: number; destination: Address }
+): Promise<PermissionQuote> {
+  const stop = (why: string): never => { throw new Error(`Stopped before signing: ${why}`); };
+  const amount = quote.bridge?.inputAmount ?? stop('the Relay route has no amount to check');
+  const res = await fetch(`${RELAY_API}/quote`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    signal: AbortSignal.timeout(15_000),
+    body: JSON.stringify({
+      user: want.user,
+      recipient: want.destination,
+      refundTo: want.user,
+      originChainId: want.fromChainId,
+      destinationChainId: want.toChainId,
+      originCurrency: NATIVE,
+      destinationCurrency: NATIVE,
+      amount,
+      tradeType: 'EXACT_INPUT',
+    }),
+  }).catch(() => stop('Relay did not answer; try again'));
+  const answer = (await res.json().catch(() => ({}))) as RelayQuoteAnswer;
+  if (!res.ok || !Array.isArray(answer.steps)) stop(`Relay did not quote this sweep (${answer.message ?? res.status})`);
+
+  const steps = answer.steps!.filter((step) => step.items.length > 0);
+  if (steps.length !== 1 || steps[0]!.kind !== 'transaction' || steps[0]!.items.length !== 1) stop('Relay asked for more than one transaction');
+  const tx = steps[0]!.items[0]!.data;
+  const requestId = steps[0]!.requestId ?? answer.requestId ?? '';
+  if (tx.chainId !== want.fromChainId) stop('Relay\'s deposit is on another chain');
+  if (BigInt(tx.value) !== BigInt(amount)) stop('Relay\'s deposit is for another amount');
+  if (!/^0x[0-9a-fA-F]{64}$/.test(requestId)) stop('Relay\'s answer has no request id');
+  const recipient = answer.details?.recipient;
+  if (!recipient || recipient.toLowerCase() !== want.destination.toLowerCase()) stop('Relay would pay someone other than the address you set');
+  const out = answer.details?.currencyOut;
+  if (out?.currency?.address?.toLowerCase() !== NATIVE || out?.currency?.chainId !== want.toChainId) stop('Relay would not deliver native gas');
+  if (BigInt(out?.amount ?? '0') < BigInt(quote.estimatedReceive)) stop('Relay now quotes less than the amount shown; check again');
+
+  const bound = await api<{ intent: PermissionQuote['intent'] & { callData?: string } }>(`/quote/${quote.quoteId}/relay-route`, {
+    method: 'POST',
+    body: JSON.stringify({ callTarget: tx.to, callData: tx.data, requestId }),
+  });
+  if (bound.intent?.callData?.toLowerCase() !== tx.data.toLowerCase() || bound.intent.callTarget.toLowerCase() !== tx.to.toLowerCase()) {
+    stop('the API did not bind the deposit Relay gave this page');
+  }
+  return { ...quote, intent: { ...quote.intent, ...bound.intent } };
+}
+
 // ============ Checks before signing ============
 
 /** What the page reads from the chain itself to check a quote (never the API's word) */
@@ -395,7 +461,12 @@ export async function sweepBatchWithPermissions(
     await Promise.all(granted.map(async (item) => {
       onStep(item.chainId, 'Quoting');
       try {
-        const quote = await permissionQuote({ fromChainId: item.chainId, toChainId: item.toChainId, user: address, destination: item.destination });
+        let quote = await permissionQuote({ fromChainId: item.chainId, toChainId: item.toChainId, user: address, destination: item.destination });
+        // A Relay route: the page asks Relay for the deposit itself, so Relay pays the recipient asked for here
+        if (quote.bridge?.name === 'relay') {
+          onStep(item.chainId, 'Asking Relay');
+          quote = await bindOwnRelayDeposit(quote, { user: address, fromChainId: item.chainId, toChainId: item.toChainId, destination: item.destination });
+        }
         onStep(item.chainId, 'Checking');
         const intent = await verifyPermissionQuote(
           quote,
