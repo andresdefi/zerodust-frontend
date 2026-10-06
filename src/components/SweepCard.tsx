@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { isAddress } from 'viem';
 import type { ClipboardState } from './KeyEntry';
 import { ChainIcon } from './ChainIcon';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -11,7 +12,7 @@ import { serviceFeeUsd } from '../lib/fees';
 import { deliversOnlyToSender } from '@zerodust/sdk';
 import { isRouted, plainReason, rowToken, type Choice, type DestTotal, type Row, type SweepModel } from '../sweep/useSweep';
 
-const CHOICES: Record<Exclude<Choice, 'elsewhere'> | 'leave', { label: string; text: (amount: string, dest: string) => string; danger?: boolean; quiet?: boolean }> = {
+const CHOICES: Record<Exclude<Choice, 'elsewhere' | 'address'> | 'leave', { label: string; text: (amount: string, dest: string) => string; danger?: boolean; quiet?: boolean }> = {
   'exit-donate': { label: 'Swap out', text: (_a, d) => `Swap to a token a bridge takes, then send it to ${d}. The few cents of gas reserve left are donated to ZeroDust.` },
   'exit-burn': { label: 'Swap out, burn the cents left', text: () => 'Same, but the cents left are burned instead of donated.' },
   donate: { label: 'Donate all to ZeroDust', text: (a) => `${a} goes to ZeroDust. You receive nothing.` },
@@ -26,6 +27,7 @@ export const CHOICE_LABEL: Record<Choice, string> = {
   donate: 'Donate all to ZeroDust',
   burn: 'Burn all, not received',
   elsewhere: 'Goes to another chain',
+  address: 'Goes to another address on this chain',
 };
 
 /** "0.0013 ETH on Base, 0.000015 ETH on Optimism" */
@@ -49,6 +51,14 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [menuFor, setMenuFor] = useState<number | null>(null);
+  // The "Send to an address on this chain" form: which row it is open on, and its draft
+  const [addressFormFor, setAddressFormFor] = useState<number | null>(null);
+  const [addressDraft, setAddressDraft] = useState('');
+  const openMenu = (chainId: number) => {
+    setMenuFor(menuFor === chainId ? null : chainId);
+    setAddressFormFor(null);
+    setAddressDraft('');
+  };
   const [showAll, setShowAll] = useState(false);
 
   if (m.stage === 'sweeping' || m.stage === 'done') return <ProgressCard model={m} onForget={onForget} />;
@@ -107,11 +117,12 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
   const headline: DestTotal | undefined = m.readyTotals.find((t) => t.dest.chainId === m.destination && !t.isToken) ?? m.readyTotals[0];
   const otherTotals = m.readyTotals.filter((t) => t !== headline);
   const receiveUsd = m.destRow ? totalsUsd(m.readyTotals, m.prices) : null;
-  const readyRoutedUsd = m.readyRows.filter((r) => isRouted(m.choices[r.chainId])).reduce((s, r) => s + (rowUsd(r) ?? 0), 0);
+  const readyRoutedUsd = m.readyRows.filter((r) => isRouted(m.choices[r.chainId]) && m.choices[r.chainId] !== 'address').reduce((s, r) => s + (rowUsd(r) ?? 0), 0);
   const gasUsd = receiveUsd === null ? null : Math.max(0, readyRoutedUsd - receiveUsd - feeUsd);
   const readyBridges = [...new Set(m.readyRows.map((r) => m.bridgeOf[r.chainId]).filter((b): b is string => !!b))];
   const burned = m.selectedRows.filter((r) => m.choices[r.chainId] === 'burn');
   const donated = m.selectedRows.filter((r) => m.choices[r.chainId] === 'donate');
+  const toAddress = m.selectedRows.filter((r) => m.choices[r.chainId] === 'address');
 
   let action: { label: string; onClick?: () => void; disabled?: boolean };
   if (m.destination === null) action = { label: 'Choose where it goes', onClick: () => setPickerOpen(true) };
@@ -185,21 +196,78 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                 {needs && (
                   <span className="detail split">
                     <span className="warn-text">{blocked ?? st?.detail}</span>
-                    <button type="button" className="choose" onClick={() => setMenuFor(menuFor === r.chainId ? null : r.chainId)} aria-expanded={menuFor === r.chainId}>
+                    <button type="button" className="choose" onClick={() => openMenu(r.chainId)} aria-expanded={menuFor === r.chainId}>
                       {blocked?.startsWith('Too small') ? 'Too small' : 'No route'}: choose <ChevronIcon />
                     </button>
                   </span>
                 )}
-                {needs && menuFor === r.chainId && (
+                {!needs && !choice && r.canSweep && !m.busy && m.destination !== null && (
+                  <span className="detail">
+                    <button type="button" className="link-btn quiet-link" onClick={() => openMenu(r.chainId)} aria-expanded={menuFor === r.chainId}>
+                      Send elsewhere <ChevronIcon />
+                    </button>
+                  </span>
+                )}
+                {menuFor === r.chainId && (needs || !choice) && (
                   <span className="menu" role="group" aria-label={`What to do with ${r.name}`}>
                     <span className="menu-title">
-                      {!m.toSelf && m.destination !== null && deliversOnlyToSender(r.chainId, m.destination)
-                        ? `${r.name}'s bridge can only send to the loaded wallet, not to the address you set. Use your wallet as the recipient, or instead:`
-                        : blocked?.startsWith('Too small')
-                          ? `Add ${r.token} on ${r.name} to bridge it, or instead:`
-                          : `Nothing can carry ${r.token} to ${m.destRow?.name ?? 'the destination'} right now. Instead:`}
+                      {!needs
+                        ? isDest
+                          ? `${r.name} is the destination chain. To empty it, send it to another address:`
+                          : `Instead of ${m.destRow?.name ?? 'the destination'}, ${r.name} can go to:`
+                        : !m.toSelf && m.destination !== null && deliversOnlyToSender(r.chainId, m.destination)
+                          ? `${r.name}'s bridge can only send to the loaded wallet, not to the address you set. Use your wallet as the recipient, or instead:`
+                          : blocked?.startsWith('Too small')
+                            ? `Add ${r.token} on ${r.name} to bridge it, or instead:`
+                            : `Nothing can carry ${r.token} to ${m.destRow?.name ?? 'the destination'} right now. Instead:`}
                     </span>
-                    {m.altsFor(r).map((d) => (
+                    {(() => {
+                      const draftValid = isAddress(addressDraft, { strict: false });
+                      const isSelf = draftValid && addressDraft.toLowerCase() === m.address.toLowerCase();
+                      if (addressFormFor !== r.chainId) {
+                        return (
+                          <button type="button" className="menu-item" onClick={() => { setAddressFormFor(r.chainId); setAddressDraft(''); }}>
+                            <b>Send to an address on {r.name}</b>
+                            <span>For example an exchange deposit address for {r.token} on {r.name}. {amountText(r)} goes there, on {r.name}.</span>
+                          </button>
+                        );
+                      }
+                      return (
+                        <span className="menu-item address-form">
+                          <b>Send to an address on {r.name}</b>
+                          <label className="addr-label" htmlFor={`addr-${r.chainId}`}>Address on {r.name}</label>
+                          <input
+                            id={`addr-${r.chainId}`}
+                            className={`addr-field${addressDraft && !draftValid ? ' invalid' : ''}`}
+                            value={addressDraft}
+                            onChange={(e) => setAddressDraft(e.target.value.trim())}
+                            placeholder="0x…"
+                            spellCheck={false}
+                            autoComplete="off"
+                          />
+                          {addressDraft && !draftValid && <span className="field-error" role="alert">Not a valid address: 0x and 40 hex characters.</span>}
+                          {isSelf && <span className="field-error" role="alert">That is the loaded wallet: sending {r.name} to itself moves nothing.</span>}
+                          {draftValid && !isSelf && <AddressCheck address={addressDraft} />}
+                          <ul className="address-warnings">
+                            <li>The address must accept {r.token} on {r.name}. An exchange address for another network can lose the funds.</li>
+                            <li>Exchanges ignore deposits below their minimum. Check it for {r.token} on {r.name} first.</li>
+                            {!r.direct && <li>ZeroDust sends this from a contract call (an internal transfer). Some exchanges do not credit those: check with yours, or try a small amount first.</li>}
+                          </ul>
+                          <span className="address-actions">
+                            <button type="button" className="btn btn-ghost" onClick={() => setAddressFormFor(null)}>Back</button>
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              disabled={!draftValid || isSelf}
+                              onClick={() => { m.setChoice(r.chainId, 'address', undefined, addressDraft); setMenuFor(null); setAddressFormFor(null); }}
+                            >
+                              Use this address
+                            </button>
+                          </span>
+                        </span>
+                      );
+                    })()}
+                    {needs && m.altsFor(r).map((d) => (
                       <button key={`to-${d.chainId}`} type="button" className="menu-item" onClick={() => { m.setChoice(r.chainId, 'elsewhere', d.chainId); setMenuFor(null); }}>
                         <b>Send to {d.name} instead{rowToken(r.chainId, d.chainId) ? ` as ${rowToken(r.chainId, d.chainId)!.symbol} (token)` : ''}</b>
                         <span>
@@ -208,7 +276,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                         </span>
                       </button>
                     ))}
-                    {[...m.choicesFor(r), 'leave' as const].map((key) => {
+                    {(needs ? [...m.choicesFor(r), 'leave' as const] : []).map((key) => {
                       const c = CHOICES[key];
                       return (
                         <button
@@ -230,8 +298,12 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                 )}
                 {choice && (
                   <span className="detail split">
-                    <span className={choice === 'burn' ? 'danger-text strong' : choice === 'elsewhere' ? 'strong' : 'warn-text strong'}>
-                      {choice === 'elsewhere' ? `Goes to ${m.destOf(m.elsewhere[r.chainId]!)?.name ?? 'another chain'} instead` : CHOICE_LABEL[choice]}
+                    <span className={choice === 'burn' ? 'danger-text strong' : choice === 'elsewhere' || choice === 'address' ? 'strong' : 'warn-text strong'}>
+                      {choice === 'elsewhere'
+                        ? `Goes to ${m.destOf(m.elsewhere[r.chainId]!)?.name ?? 'another chain'} instead`
+                        : choice === 'address'
+                          ? `To ${shortAddress(m.addressOf[r.chainId]!)} on ${r.name}`
+                          : CHOICE_LABEL[choice]}
                     </span>
                     <button type="button" className="link-btn" onClick={() => m.setChoice(r.chainId, null)} disabled={m.busy}>Change</button>
                   </span>
@@ -311,6 +383,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
         {checked && readyBridges.length > 0 && <div><dt>Bridged by</dt><dd>{readyBridges.join(', ')}</dd></div>}
         <div><dt>ZeroDust fee</dt><dd>{checked ? '' : 'about '}{formatUsd(feeUsd) || '$0.00'}</dd></div>
         {checked && gasUsd !== null && <div><dt>Gas and bridges</dt><dd>{formatUsd(gasUsd) || '$0.00'}</dd></div>}
+        {toAddress.length > 0 && <div><dt>To other addresses</dt><dd>{toAddress.map((r) => `${amountText(r)} on ${r.name}`).join(', ')}</dd></div>}
         {burned.length > 0 && <div><dt>Burned</dt><dd className="danger-text">{burned.map(amountText).join(', ')}</dd></div>}
         {donated.length > 0 && <div><dt>Donated</dt><dd className="warn-text">{donated.map(amountText).join(', ')}</dd></div>}
         <div><dt>Chains</dt><dd>{counted.length} of {m.rows.length}</dd></div>
@@ -342,7 +415,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
  * The address as one unbroken string, its first and last characters picked out: what people
  * compare against the address they meant (owner, 2026-10-06: a spaced copy read as an error)
  */
-function AddressCheck({ address }: { address: string }) {
+export function AddressCheck({ address }: { address: string }) {
   const head = address.slice(0, 6);
   const tail = address.slice(-4);
   const middle = address.slice(6, -4);

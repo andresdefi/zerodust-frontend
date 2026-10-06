@@ -254,6 +254,61 @@ test('a chain that cannot reach the destination can go to another chain instead'
   expect(swept.has(43114)).toBe(true);
 });
 
+test('any chain can go to another address on that chain, set only from its menu', async ({ page }) => {
+  const key = generatePrivateKey();
+  const address = privateKeyToAccount(key).address;
+  const { swept, quoted } = await mockNetwork(page, address);
+  const exchange = '0x820653ccE8a755edbb52eC1bc5829D2a60CD5cc5';
+  await page.goto('/');
+  await useKey(page);
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.row')).toHaveCount(3);
+  await page.getByRole('checkbox', { name: 'Sweep Scroll' }).uncheck();
+  // No menu before a destination is chosen; after it, the bridge route stays the default
+  await expect(page.getByRole('button', { name: /Send elsewhere/ })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Choose where it goes' }).click();
+  await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /Arbitrum/ }).click();
+
+  const op = page.locator('.row', { hasText: 'Optimism' });
+  await op.getByRole('button', { name: /Send elsewhere/ }).click();
+  await op.getByRole('button', { name: /Send to an address on Optimism/ }).click();
+  const field = page.locator('#addr-10');
+  const use = op.getByRole('button', { name: 'Use this address' });
+  await field.fill('0x1234');
+  await expect(op.getByRole('alert')).toContainText('Not a valid address');
+  await expect(use).toBeDisabled();
+  // The loaded wallet itself would move nothing
+  await field.fill(address);
+  await expect(op.getByRole('alert')).toContainText('That is the loaded wallet');
+  await expect(use).toBeDisabled();
+  await field.fill(exchange.toLowerCase());
+  await expect(op.locator('.address-warnings')).toContainText('internal transfer');
+  await use.click();
+  await expect(op).toContainText('To 0x8206');
+  await expect(op).toContainText('on Optimism');
+
+  await page.getByRole('button', { name: 'Check sweep' }).click();
+  await expect(page.getByRole('button', { name: 'Sweep 2 chains' })).toBeVisible({ timeout: 20_000 });
+  // Quoted as a same-chain sweep to that address; Base still goes to Arbitrum, to the wallet
+  expect(quoted.filter((q) => q.from === 10).every((q) => q.to === 10 && q.destination === exchange)).toBe(true);
+  expect(quoted.filter((q) => q.from === 8453).every((q) => q.to === 42161 && q.destination.toLowerCase() === address.toLowerCase())).toBe(true);
+  // It is not counted as received
+  await expect(page.locator('.summary')).not.toContainText('on Optimism, ');
+  await expect(page.locator('.summary')).toContainText(/To other addresses.*on Optimism/);
+
+  await page.getByRole('button', { name: 'Sweep 2 chains' }).click();
+  // The title names every place the funds go
+  const confirm = page.getByRole('dialog', { name: 'Sweep 2 chains to Arbitrum and an address on Optimism?' });
+  await expect(confirm.locator('li', { hasText: 'Optimism' })).toContainText('to an address on Optimism');
+  await expect(confirm).toContainText('goes to this address on Optimism, not to Arbitrum');
+  await expect(confirm.locator('.addr-check')).toBeVisible();
+  await confirm.getByRole('button', { name: 'Sweep 2 chains' }).click();
+  await expect(page.getByText('2 of 2 at zero')).toBeVisible({ timeout: 30_000 });
+  expect([...swept].sort()).toEqual([10, 8453].sort());
+});
+
 test('a passing "unknown" route does not send a chain elsewhere', async ({ page }) => {
   const key = generatePrivateKey();
   await mockNetwork(page, privateKeyToAccount(key).address, { direct: true, hiccups: 1 });
