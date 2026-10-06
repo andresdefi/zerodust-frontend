@@ -25,8 +25,10 @@ const INSTRUCTIONS = [{
 const UR_ABI = parseAbi(['function execute(bytes commands, bytes[] inputs)']);
 const V3_INPUT = [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'bytes' }, { type: 'bool' }] as const;
 
+const VALUES: Record<string, bigint> = { '8453-137-split': 518_000_000_000_000_000n, '42161-56-lifi': 50_000_000_000_000_000n, '137-8453-nofallback': 200_000_000_000_000_000_000n };
 const expect_ = (k: string, over: Partial<SponsoredAcrossExpect> = {}): SponsoredAcrossExpect => {
   const [from, to] = k.split('-').map(Number) as [number, number];
+  if (VALUES[k]) over = { value: VALUES[k], ...over };
   // The receive shown is the bridge's expected output less 3%: below the swap's minimum
   return { fromChainId: from, toChainId: to, user: USER, recipient: USER, value: 2_000_000_000_000_000n, minNative: (BigInt(SAMPLES[k]!.minOutputAmount) * 97n) / 100n, ...over };
 };
@@ -77,7 +79,7 @@ function withUrSwap(k: string, edit: (input: { recipient: Hex; amountIn: bigint;
 
 // HyperEVM: Across drains the swap's leftover USDC to 0x1bfF...d213, a wallet in no Across deployment
 // list (no code on HyperEVM): refused until it is identified
-const HYPEREVM = (k: string) => k.endsWith('-999');
+const HYPEREVM = (k: string) => k.split('-')[1] === '999';
 
 describe('verifySponsoredAcross: live routes', () => {
   it.each(Object.keys(SAMPLES).filter((k) => HYPEREVM(k)))('%s is refused: a leftover drain pays an unknown wallet', (k) => {
@@ -87,7 +89,7 @@ describe('verifySponsoredAcross: live routes', () => {
   it.each(Object.keys(SAMPLES).filter((k) => !HYPEREVM(k)))('%s passes, paying only the address you set', (k) => {
     const { settler } = verifySponsoredAcross(SAMPLES[k]!, expect_(k));
     // Uniswap-shaped routes (BNB Chain, Polygon) have no Settler; 0x-shaped ones name one to confirm on-chain
-    if (k.endsWith('-56') || k.endsWith('-137') || k === '10-8453') expect(settler).toBeNull();
+    if (/-(56|137)(-|$)/.test(k) || k === '10-8453' || k === '137-8453-nofallback') expect(settler).toBeNull();
     else expect(settler).toMatch(/^0x[0-9a-fA-F]{40}$/);
   });
 
@@ -173,5 +175,122 @@ describe('verifySponsoredAcross: hardening', () => {
     expect(() => verifySponsoredAcross(plain((a) => { a[6] = 1n; }), expect_(k))).toThrow(/less than the amount shown/);
     expect(() => verifySponsoredAcross(SAMPLES[k]!, expect_(k, { recipient: EVIL }))).toThrow(/pays someone other than the address you set/);
     expect(() => verifySponsoredAcross(plain((a) => { a[3] = EVIL; }), expect_(k))).toThrow(/not WETH on the source/);
+  });
+});
+
+describe('verifySponsoredAcross: the swap must buy the genuine wrapped native token', () => {
+  const ZEROX = parseAbi([
+    'function exec(address operator, address token, uint256 amount, address target, bytes data)',
+    'function execute((address recipient, address buyToken, uint256 minAmountOut) slippage, bytes[] actions, bytes32 zid)',
+    'function makeCallWithBalance(address target, bytes callData, uint256 value, (address token, uint256 offset)[] replacement)',
+  ]);
+  /** Points every unwrap at a fake token too, so only the buy-token pin can catch it */
+  const unwrapFake = (m: Instructions) => {
+    for (const c of m.calls) {
+      if (!c.callData.startsWith('0xc41e8295')) continue;
+      const [, inner, value, repl] = decodeFunctionData({ abi: ZEROX, data: c.callData }).args as unknown as [Hex, Hex, bigint, { token: Hex; offset: bigint }[]];
+      c.callData = encodeFunctionData({ abi: ZEROX, functionName: 'makeCallWithBalance', args: [EVIL, inner, value, repl.map((r) => ({ ...r, token: EVIL as Hex }))] });
+    }
+  };
+
+  it('Uniswap shape: a swap into a fake token, "unwrapped" by the fake token, is refused', () => {
+    const fake = withMessage('8453-56', (m) => {
+      const call = m.calls.find((c) => c.callData.startsWith('0x24856bc3'))!;
+      const [commands, inputs] = decodeFunctionData({ abi: UR_ABI, data: call.callData }).args as unknown as [Hex, Hex[]];
+      const [recipient, amountIn, minOut, path, payerIsUser] = decodeAbiParameters(V3_INPUT, inputs[0]!);
+      const fakePath = `${path.slice(0, -40)}${EVIL.slice(2).toLowerCase()}` as Hex;
+      call.callData = encodeFunctionData({ abi: UR_ABI, functionName: 'execute', args: [commands, [encodeAbiParameters(V3_INPUT, [recipient, amountIn, minOut, fakePath, payerIsUser])]] });
+      unwrapFake(m);
+    });
+    expect(() => verifySponsoredAcross(fake, expect_('8453-56'))).toThrow(/buys another token than the native one/);
+  });
+
+  it('0x shape: a Settler swap into a fake token, "unwrapped" by the fake token, is refused', () => {
+    const fake = withMessage('8453-43114', (m) => {
+      const call = m.calls.find((c) => c.callData.startsWith('0x2213bc0b'))!;
+      const [operator, token, amount, target, inner] = decodeFunctionData({ abi: ZEROX, data: call.callData }).args as unknown as [Hex, Hex, bigint, Hex, Hex];
+      const [slippage, actions, zid] = decodeFunctionData({ abi: ZEROX, data: inner }).args as unknown as [{ recipient: Hex; buyToken: Hex; minAmountOut: bigint }, Hex[], Hex];
+      const fakeInner = encodeFunctionData({ abi: ZEROX, functionName: 'execute', args: [{ ...slippage, buyToken: EVIL }, actions, zid] });
+      call.callData = encodeFunctionData({ abi: ZEROX, functionName: 'exec', args: [operator, token, amount, target, fakeInner] });
+      unwrapFake(m);
+    });
+    expect(() => verifySponsoredAcross(fake, expect_('8453-43114'))).toThrow(/buys another token than the native one/);
+  });
+});
+
+describe('verifySponsoredAcross: split Universal Router swaps and LI.FI', () => {
+  const SWEEP_INPUT = [{ type: 'address' }, { type: 'address' }, { type: 'uint256' }] as const;
+  /** Rewrites the split sample's commands and inputs */
+  const withUr = (edit: (cmds: string[], inputs: Hex[]) => void) => withMessage('8453-137-split', (m) => {
+    const call = m.calls.find((c) => c.callData.startsWith('0x24856bc3'))!;
+    const [commands, inputs] = decodeFunctionData({ abi: UR_ABI, data: call.callData }).args as unknown as [Hex, Hex[]];
+    const cmds = commands.slice(2).match(/../g)!;
+    const ins = [...inputs];
+    edit(cmds, ins);
+    call.callData = encodeFunctionData({ abi: UR_ABI, functionName: 'execute', args: [`0x${cmds.join('')}`, ins] });
+  });
+  const sweepAt = (cmds: string[]) => cmds.indexOf('04');
+
+  it('the split sample swaps into the router, then sweeps to the handler', () => {
+    let cmds: string[] = [];
+    withUr((c) => { cmds = [...c]; });
+    expect(cmds).toContain('04');
+    expect(verifySponsoredAcross(SAMPLES['8453-137-split']!, expect_('8453-137-split')).settler).toBeNull();
+  });
+
+  it('a sweep to someone else, a missing sweep, or a sweep minimum below the amount shown is refused', () => {
+    const toEvil = withUr((c, ins) => {
+      const i = sweepAt(c);
+      const [token, , min] = decodeAbiParameters(SWEEP_INPUT, ins[i]!);
+      ins[i] = encodeAbiParameters(SWEEP_INPUT, [token, EVIL, min]);
+    });
+    expect(() => verifySponsoredAcross(toEvil, expect_('8453-137-split'))).toThrow(/sweep pays someone other than the handler/);
+    const noSweep = withUr((c, ins) => { const i = sweepAt(c); c.splice(i, 1); ins.splice(i, 1); });
+    expect(() => verifySponsoredAcross(noSweep, expect_('8453-137-split'))).toThrow(/left in the Universal Router/);
+    const lowMin = withUr((c, ins) => {
+      const i = sweepAt(c);
+      const [token, to] = decodeAbiParameters(SWEEP_INPUT, ins[i]!);
+      ins[i] = encodeAbiParameters(SWEEP_INPUT, [token, to, 1n]);
+    });
+    expect(() => verifySponsoredAcross(lowMin, expect_('8453-137-split'))).toThrow(/less than the amount shown/);
+  });
+
+  const LIFI = parseAbi([
+    'struct SwapData { address callTo; address approveTo; address sendingAssetId; address receivingAssetId; uint256 fromAmount; bytes callData; bool requiresDeposit; }',
+    'function swapTokensSingleV3ERC20ToERC20(bytes32 transactionId, string integrator, string referrer, address receiver, uint256 minAmountOut, SwapData swapData)',
+  ]);
+  const withLifi = (edit: (args: unknown[]) => void) => withMessage('42161-56-lifi', (m) => {
+    const call = m.calls.find((c) => c.callData.startsWith('0x4666fc80'))!;
+    const args = [...decodeFunctionData({ abi: LIFI, data: call.callData }).args] as unknown[];
+    edit(args);
+    call.callData = encodeFunctionData({ abi: LIFI, functionName: 'swapTokensSingleV3ERC20ToERC20', args: args as never });
+  });
+
+  it('the LI.FI sample passes; another receiver, a low minimum or a fake output token is refused', () => {
+    expect(verifySponsoredAcross(SAMPLES['42161-56-lifi']!, expect_('42161-56-lifi')).settler).toBeNull();
+    expect(() => verifySponsoredAcross(withLifi((a) => { a[3] = EVIL; }), expect_('42161-56-lifi'))).toThrow(/pays someone other than the handler/);
+    expect(() => verifySponsoredAcross(withLifi((a) => { a[4] = 1n; }), expect_('42161-56-lifi'))).toThrow(/less than the amount shown/);
+    const fakeOut = withLifi((a) => {
+      a[5] = { ...(a[5] as Record<string, unknown>), receivingAssetId: EVIL };
+    });
+    expect(() => verifySponsoredAcross(fakeOut, expect_('42161-56-lifi'))).toThrow(/buys another token than the native one/);
+  });
+});
+
+describe('verifySponsoredAcross: no fallback, no swap (Polygon -> Base: POL to WETH, bridged, unwrapped)', () => {
+  const k = '137-8453-nofallback';
+  it('passes: the bridged WETH is unwrapped and drained, with the leftover WETH, to you', () => {
+    expect(verifySponsoredAcross(SAMPLES[k]!, expect_(k)).settler).toBeNull();
+  });
+
+  it('without a fallback, a message that does not drain the bridged token is refused', () => {
+    const keeps = withMessage(k, (m) => {
+      m.calls = m.calls.filter((c) => !(c.callData.startsWith('0xef8738d3') && c.callData.slice(34, 74).toLowerCase() === '4200000000000000000000000000000000000006'));
+    });
+    expect(() => verifySponsoredAcross(keeps, expect_(k))).toThrow(/without a fallback, the bridged token must be drained/);
+  });
+
+  it('a bridged amount below the amount shown is refused', () => {
+    expect(() => verifySponsoredAcross(SAMPLES[k]!, expect_(k, { minNative: 10n ** 30n }))).toThrow(/less than the amount shown/);
   });
 });
