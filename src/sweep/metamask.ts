@@ -11,7 +11,10 @@
 
 import { l1FeeAllowanceWei, SWEEP_INTENT_TYPES, verifySweepQuote, type QuoteResponse, type SweepIntentMessage } from '@zerodust/sdk';
 import { getAddress, isAddress, toHex, type Address, type Hex } from 'viem';
+import { isRegisteredSettler, ZEROX_DEPLOYER, ZEROX_REGISTRY_CALLS } from '../direct/across';
+import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { rpcCall } from '../lib/rpc';
+import { verifySponsoredAcross } from './across-route';
 import { API_URL, DELEGATION_MANAGER, PERMISSION_DOMAIN_VERSION, PERMISSION_ROUTER } from './constants';
 
 export interface Eip1193Provider {
@@ -131,7 +134,7 @@ export async function requestPermissions(
 
 export interface PermissionQuote extends Omit<QuoteResponse, 'authNonce'> {
   signer?: string;
-  bridge?: { name: string; displayName: string };
+  bridge?: { name: string; displayName: string; inputAmount?: string; expectedOutput?: string };
   permission: { router: Address; delegationManager: string; domainVersion: string };
 }
 
@@ -181,12 +184,23 @@ export interface ChainReads {
   gasPrice(chainId: number): Promise<bigint>;
   /** Rollups: the L1 data fee allowance from the chain's oracle; 0 elsewhere */
   l1Fee(chainId: number): Promise<bigint>;
+  /** eth_call on a chain (the destination too: 0x's Settler registry) */
+  call(chainId: number, to: string, data: Hex): Promise<Hex>;
 }
 
 /** From the chain's public RPC in the page's CSP */
 export const rpcChainReads: ChainReads = {
   gasPrice: async (chainId) => BigInt(await rpcCall<string>(chainId, 'eth_gasPrice', [])),
   l1Fee: (chainId) => l1FeeAllowanceWei(chainId, async (call) => rpcCall<Hex>(chainId, 'eth_call', [call, 'latest'])),
+  // A destination may be a direct chain (Monad, Avalanche): its RPC is in the direct list
+  call: async (chainId, to, data) => {
+    const url = RPC_URLS[chainId] ?? DIRECT_RPC_URLS[chainId];
+    if (!url) throw new Error(`No RPC for chain ${chainId}`);
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to, data }, 'latest'] }) });
+    const body = (await res.json()) as { result?: Hex; error?: { message: string } };
+    if (body.error || body.result === undefined) throw new Error(body.error?.message ?? 'RPC error');
+    return body.result;
+  },
 };
 
 /** Bridges the router can call: they name the refund address and recipient themselves (backend permission.ts) */
@@ -223,7 +237,47 @@ export async function verifyPermissionQuote(
   if (verified.route.bridge !== null && !ROUTER_SAFE_BRIDGES.has(verified.route.bridge)) {
     throw new Error(`Stopped before signing: ${verified.route.bridge} cannot carry a MetaMask sweep`);
   }
+  if (verified.route.bridge === 'across') await verifyAcrossRecipient(quote, want, reads);
   return verified.typedData.message;
+}
+
+/**
+ * Where an Across deposit finally pays, read from its calldata (across-route.ts), and the 0x
+ * Settler a destination swap runs through confirmed in 0x's registry on the destination chain
+ */
+async function verifyAcrossRecipient(
+  quote: PermissionQuote,
+  want: { user: Address; fromChainId: number; toChainId: number; destination: Address },
+  reads: ChainReads
+): Promise<void> {
+  const callData = (quote.intent as { callData?: string }).callData;
+  const value = quote.bridge?.inputAmount;
+  if (!callData || !value) throw new Error('Stopped before signing: the Across route cannot be checked');
+  let settler: string | null;
+  try {
+    ({ settler } = verifySponsoredAcross({ to: quote.intent.callTarget, data: callData }, {
+      fromChainId: want.fromChainId,
+      toChainId: want.toChainId,
+      user: want.user,
+      recipient: want.destination,
+      value: BigInt(value),
+      minNative: BigInt(quote.estimatedReceive),
+    }));
+  } catch (error) {
+    throw new Error(`Stopped before signing: ${error instanceof Error ? error.message : 'the Across route failed a check'}`);
+  }
+  if (settler) {
+    const readRegistry = () => Promise.all([
+      reads.call(want.toChainId, ZEROX_DEPLOYER, ZEROX_REGISTRY_CALLS.ownerOf as Hex),
+      reads.call(want.toChainId, ZEROX_DEPLOYER, ZEROX_REGISTRY_CALLS.prev as Hex),
+    ]);
+    // One retry: a public RPC that hiccups should not read as a bad route
+    const answers = await readRegistry().catch(() => readRegistry()).catch(() => null);
+    if (!answers) throw new Error(`Stopped before signing: could not read 0x's Settler registry on chain ${want.toChainId}; try again`);
+    if (!isRegisteredSettler(settler, answers)) {
+      throw new Error('Stopped before signing: the destination swap does not run through 0x\'s registered Settler');
+    }
+  }
 }
 
 const INTENT_FIELDS = SWEEP_INTENT_TYPES.SweepIntent.map((f) => f.name);
