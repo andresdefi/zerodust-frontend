@@ -4,6 +4,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { ShieldIcon } from './icons';
 import { OFFLINE } from '../lib/env';
 import { isPaused, useServiceStatus } from '../sweep/status';
+import { connectMetaMask, findMetaMask, metamaskEnabled, type MetaMaskSession } from '../sweep/metamask';
 
 const KEY_PATTERN = /^(0x)?[0-9a-fA-F]{64}$/;
 
@@ -21,7 +22,10 @@ export type ClipboardState = 'cleared' | 'failed' | null;
  * password field, so macOS turns on Secure Event Input while it has focus.
  * A paste is followed by an immediate clipboard wipe.
  */
-export function KeyEntry({ onAccount }: { onAccount: (account: LocalAccount, clipboard: ClipboardState) => void }) {
+export function KeyEntry({ onAccount, onMetaMask }: {
+  onAccount: (account: LocalAccount, clipboard: ClipboardState) => void;
+  onMetaMask: (session: MetaMaskSession) => void;
+}) {
   const buffer = useRef('');
   const [length, setLength] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +46,25 @@ export function KeyEntry({ onAccount }: { onAccount: (account: LocalAccount, cli
       return false;
     }
   });
+
+  // MetaMask: offered only with ?metamask while it is tested, never in the offline file
+  const [showMetaMask] = useState(() => !OFFLINE && metamaskEnabled());
+  const [connecting, setConnecting] = useState(false);
+  const [mmError, setMmError] = useState<string | null>(null);
+  const connect = async () => {
+    if (paused) return;
+    setConnecting(true);
+    setMmError(null);
+    try {
+      const provider = await findMetaMask();
+      if (!provider) throw new Error('MetaMask was not found in this browser. Install it, or load the wallet with its key.');
+      onMetaMask(await connectMetaMask(provider));
+    } catch (error) {
+      setMmError(error instanceof Error ? error.message : 'Could not connect to MetaMask.');
+    } finally {
+      setConnecting(false);
+    }
+  };
 
   const reset = () => {
     buffer.current = '';
@@ -102,6 +125,18 @@ export function KeyEntry({ onAccount }: { onAccount: (account: LocalAccount, cli
           <p className="status-notice" role="status">
             {status?.message ?? 'ZeroDust is paused right now. Sweeps resume automatically; please come back shortly.'}
           </p>
+        )}
+        {showMetaMask && (
+          <>
+            <div className="metamask">
+              <span><b>No key needed with MetaMask.</b> You approve each chain in MetaMask; the key never leaves it.</span>
+              <button type="button" className="btn btn-ghost" onClick={connect} disabled={connecting || paused}>
+                {connecting ? 'Connecting…' : 'Connect MetaMask'}
+              </button>
+            </div>
+            {mmError && <p className="field-error" role="alert">{mmError}</p>}
+            <p className="or" aria-hidden="true"><span>or use the key</span></p>
+          </>
         )}
         <p id="key-help">Type or paste the private key of the wallet you want to empty.</p>
         <label className={paused ? 'keyfield is-disabled' : 'keyfield'}>
