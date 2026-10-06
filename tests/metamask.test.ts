@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { allowedCallTargets, ZERO_ROUTE_HASH } from '@zerodust/sdk';
+import { keccak256, type Hex } from 'viem';
+import { verifySponsoredAcross } from '../src/sweep/across-route';
 import { connectMetaMask, requestPermissions, sweepBatchWithPermissions, verifyPermissionQuote, type ChainReads, type Eip1193Provider, type MetaMaskSession, type PermissionQuote } from '../src/sweep/metamask';
 
 const ROUTER = '0x589CB1Fc24F8Cf6e41755Ea518e7815423e83f70';
@@ -97,7 +100,7 @@ describe('sweepBatchWithPermissions', () => {
   const ZERO = '0x0000000000000000000000000000000000000000';
   const ZERO_HASH = ZERO_ROUTE_HASH;
   const BALANCE = 10n ** 15n;
-  const reads: ChainReads = { gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n };
+  const reads: ChainReads = { gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, call: async () => '0x' };
 
   /** A same-chain permission quote to DEST that passes the SDK's checks */
   const quoteFor = (chainId: number, over: { router?: string; destination?: string } = {}) => ({
@@ -286,7 +289,55 @@ describe('verifyPermissionQuote', () => {
       intent: { mode: 1, destination: DEST, destinationChainId: '42161', callTarget: GASZIP_BASE, routeHash: `0x${'1'.repeat(64)}`, minReceive: '1' },
       deadline: Math.floor(Date.now() / 1000) + 50, nonce: 0, validForSeconds: 55,
     } as unknown as PermissionQuote;
-    await expect(verifyPermissionQuote(quote, { user: USER, fromChainId: 8453, toChainId: 42161, destination: DEST, balance: 10n ** 15n }, { gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n }))
+    await expect(verifyPermissionQuote(quote, { user: USER, fromChainId: 8453, toChainId: 42161, destination: DEST, balance: 10n ** 15n }, { gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, call: async () => '0x' }))
       .rejects.toThrow(/^Stopped before signing/);
+  });
+});
+
+describe('verifyPermissionQuote: Across routes', () => {
+  const OWNER = '0x820653ccE8a755edbb52eC1bc5829D2a60CD5cc5' as const;
+  const SAMPLES = JSON.parse(readFileSync(new URL('./fixtures/across-sponsored-2026-10-06.json', import.meta.url), 'utf8')) as Record<string, { to: string; data: Hex; minOutputAmount: string }>;
+  const acrossQuote = (k: string) => {
+    const s = SAMPLES[k]!;
+    const toChainId = Number(k.split('-')[1]);
+    return {
+      quoteId: 'q', version: 3, userBalance: '2100000000000000', estimatedReceive: ((BigInt(s.minOutputAmount) * 97n) / 100n).toString(), mode: 1, autoRevoke: false, signer: 'permission',
+      fees: { maxTotalFeeWei: '100000000000000', extraFeeWei: '0', overheadGasUnits: '100000', protocolFeeGasUnits: '0', reimbGasPriceCapWei: '1200000000', revokeGasUnits: '0' },
+      permission: { router: '0x369A97dd256F7eb37fF7116C4EcBd50318eBb286', delegationManager: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3', domainVersion: 'permission-2' },
+      bridge: { name: 'across', displayName: 'Across', inputAmount: '2000000000000000' },
+      intent: { mode: 1, destination: OWNER.toLowerCase(), destinationChainId: String(toChainId), callTarget: s.to, routeHash: keccak256(s.data), callData: s.data, minReceive: '1' },
+      deadline: Math.floor(Date.now() / 1000) + 50, nonce: 0, validForSeconds: 55,
+    } as unknown as PermissionQuote;
+  };
+  const want = (k: string) => ({ user: OWNER, fromChainId: Number(k.split('-')[0]), toChainId: Number(k.split('-')[1]), destination: OWNER, balance: 2_100_000_000_000_000n });
+  const settlerOf = (k: string) => verifySponsoredAcross(SAMPLES[k]!, { fromChainId: 8453, toChainId: Number(k.split('-')[1]), user: OWNER, recipient: OWNER, value: 2_000_000_000_000_000n, minNative: 0n }).settler!;
+  const readsWith = (registry: (to: string) => Hex): ChainReads => ({ gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, call: async (_c, to) => registry(to) });
+  const word = (a: string) => `0x${a.slice(2).toLowerCase().padStart(64, '0')}` as Hex;
+
+  it('a Uniswap-shaped route (Base -> BNB Chain) passes without a registry read', async () => {
+    const calls: string[] = [];
+    await expect(verifyPermissionQuote(acrossQuote('8453-56'), want('8453-56'), readsWith((to) => { calls.push(to); return '0x'; }))).resolves.toBeDefined();
+    expect(calls).toEqual([]);
+  });
+
+  it("a 0x-shaped route (Base -> Avalanche) passes when 0x's registry names its Settler, and stops otherwise", async () => {
+    const settler = settlerOf('8453-43114');
+    await expect(verifyPermissionQuote(acrossQuote('8453-43114'), want('8453-43114'), readsWith(() => word(settler)))).resolves.toBeDefined();
+    await expect(verifyPermissionQuote(acrossQuote('8453-43114'), want('8453-43114'), readsWith(() => word('0x000000000000000000000000000000000000dEaD'))))
+      .rejects.toThrow("Stopped before signing: the destination swap does not run through 0x's registered Settler");
+  });
+
+  it('an unreadable registry says so (after one retry) instead of blaming the route', async () => {
+    let calls = 0;
+    const flaky: ChainReads = { gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, call: async () => { calls++; throw new Error('timeout'); } };
+    await expect(verifyPermissionQuote(acrossQuote('8453-43114'), want('8453-43114'), flaky)).rejects.toThrow("could not read 0x's Settler registry on chain 43114; try again");
+    expect(calls).toBe(4);
+  });
+
+  it('a route to another address than the one chosen stops before signing', async () => {
+    const other = { ...want('8453-56'), destination: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC' as const };
+    const q = acrossQuote('8453-56');
+    (q.intent as { destination: string }).destination = other.destination.toLowerCase();
+    await expect(verifyPermissionQuote(q, other, readsWith(() => '0x'))).rejects.toThrow(/^Stopped before signing: Across route refused: /);
   });
 });
