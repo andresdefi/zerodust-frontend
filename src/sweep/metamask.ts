@@ -9,7 +9,7 @@
 // Raw EIP-1193 calls, as MetaMask's own smart-accounts-kit sends them (v2.0), without the kit
 // (it also sends usage analytics).
 
-import { l1FeeAllowanceWei, SWEEP_INTENT_TYPES, verifySweepQuote, type QuoteResponse, type SweepIntentMessage } from '@zerodust/sdk';
+import { bridgeForCallTarget, l1FeeAllowanceWei, SWEEP_INTENT_TYPES, verifySweepQuote, type QuoteResponse, type SweepIntentMessage } from '@zerodust/sdk';
 import { getAddress, isAddress, toHex, type Address, type Hex } from 'viem';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { rpcCall } from '../lib/rpc';
@@ -179,6 +179,8 @@ export function assertPinnedContracts(quote: PermissionQuote): void {
 // ============ Relay: the deposit comes from Relay, to this page ============
 
 const RELAY_API = 'https://api.relay.link';
+/** Relay deposits this page got from Relay itself, by quote id: the only Relay routes it signs */
+const ownRelayDeposits = new Map<string, string>();
 const NATIVE = '0x0000000000000000000000000000000000000000';
 
 interface RelayQuoteAnswer {
@@ -239,6 +241,7 @@ export async function bindOwnRelayDeposit(
   if (bound.intent?.callData?.toLowerCase() !== tx.data.toLowerCase() || bound.intent.callTarget.toLowerCase() !== tx.to.toLowerCase()) {
     stop('the API did not bind the deposit Relay gave this page');
   }
+  ownRelayDeposits.set(quote.quoteId, tx.data.toLowerCase());
   return { ...quote, intent: { ...quote.intent, ...bound.intent } };
 }
 
@@ -302,6 +305,13 @@ export async function verifyPermissionQuote(
     throw new Error(`Stopped before signing: ${verified.route.bridge} cannot carry a MetaMask sweep`);
   }
   if (verified.route.bridge === 'across') await verifyAcrossRecipient(quote, want, reads);
+  // Relay binds the recipient off-chain: only a deposit Relay gave this page can be signed
+  if (verified.route.bridge === 'relay') {
+    const callData = (quote.intent as { callData?: string }).callData?.toLowerCase();
+    if (!callData || ownRelayDeposits.get(quote.quoteId) !== callData) {
+      throw new Error('Stopped before signing: this Relay deposit did not come from Relay to this page');
+    }
+  }
   return verified.typedData.message;
 }
 
@@ -462,8 +472,9 @@ export async function sweepBatchWithPermissions(
       onStep(item.chainId, 'Quoting');
       try {
         let quote = await permissionQuote({ fromChainId: item.chainId, toChainId: item.toChainId, user: address, destination: item.destination });
-        // A Relay route: the page asks Relay for the deposit itself, so Relay pays the recipient asked for here
-        if (quote.bridge?.name === 'relay') {
+        // A Relay route: the page asks Relay for the deposit itself, so Relay pays the recipient asked for here.
+        // Known by the contract the route calls, not by the API's label (verifyPermissionQuote enforces it)
+        if (quote.bridge?.name === 'relay' || (quote.intent.callTarget && bridgeForCallTarget(item.chainId, quote.intent.callTarget) === 'relay')) {
           onStep(item.chainId, 'Asking Relay');
           quote = await bindOwnRelayDeposit(quote, { user: address, fromChainId: item.chainId, toChainId: item.toChainId, destination: item.destination });
         }
