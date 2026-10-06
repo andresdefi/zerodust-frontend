@@ -9,8 +9,10 @@
 // Raw EIP-1193 calls, as MetaMask's own smart-accounts-kit sends them (v2.0), without the kit
 // (it also sends usage analytics).
 
+import { l1FeeAllowanceWei, SWEEP_INTENT_TYPES, verifySweepQuote, type QuoteResponse, type SweepIntentMessage } from '@zerodust/sdk';
 import { getAddress, isAddress, toHex, type Address, type Hex } from 'viem';
-import { API_URL } from './constants';
+import { rpcCall } from '../lib/rpc';
+import { API_URL, DELEGATION_MANAGER, PERMISSION_DOMAIN_VERSION, PERMISSION_ROUTER } from './constants';
 
 export interface Eip1193Provider {
   request(args: { method: string; params?: unknown[] | Record<string, unknown> }): Promise<unknown>;
@@ -127,10 +129,8 @@ export async function requestPermissions(
 
 // ============ ZeroDust API ============
 
-export interface PermissionQuote {
-  quoteId: string;
-  userBalance: string;
-  estimatedReceive: string;
+export interface PermissionQuote extends Omit<QuoteResponse, 'authNonce'> {
+  signer?: string;
   bridge?: { name: string; displayName: string };
   permission: { router: Address; delegationManager: string; domainVersion: string };
 }
@@ -158,7 +158,124 @@ export function permissionQuote(p: { fromChainId: number; toChainId: number; use
     destination: p.destination,
     signer: 'permission',
   });
-  return api<PermissionQuote>(`/quote?${q}`);
+  return api<PermissionQuote>(`/quote?${q}`).then((quote) => {
+    assertPinnedContracts(quote);
+    return quote;
+  });
+}
+
+const sameAddress = (a: unknown, b: string) => typeof a === 'string' && isAddress(a) && a.toLowerCase() === b.toLowerCase();
+
+/** A permission quote must name ZeroDust's router, MetaMask's DelegationManager and the router's domain */
+export function assertPinnedContracts(quote: PermissionQuote): void {
+  const p = quote?.permission;
+  if (quote?.signer !== 'permission' || !p || !sameAddress(p.router, PERMISSION_ROUTER) || !sameAddress(p.delegationManager, DELEGATION_MANAGER) || p.domainVersion !== PERMISSION_DOMAIN_VERSION) {
+    throw new Error('Stopped: the quote is not for the ZeroDust router');
+  }
+}
+
+// ============ Checks before signing ============
+
+/** What the page reads from the chain itself to check a quote (never the API's word) */
+export interface ChainReads {
+  gasPrice(chainId: number): Promise<bigint>;
+  /** Rollups: the L1 data fee allowance from the chain's oracle; 0 elsewhere */
+  l1Fee(chainId: number): Promise<bigint>;
+}
+
+/** From the chain's public RPC in the page's CSP */
+export const rpcChainReads: ChainReads = {
+  gasPrice: async (chainId) => BigInt(await rpcCall<string>(chainId, 'eth_gasPrice', [])),
+  l1Fee: (chainId) => l1FeeAllowanceWei(chainId, async (call) => rpcCall<Hex>(chainId, 'eth_call', [call, 'latest'])),
+};
+
+/** Bridges the router can call: they name the refund address and recipient themselves (backend permission.ts) */
+const ROUTER_SAFE_BRIDGES = new Set(['relay', 'across', 'hyperlane']);
+
+/**
+ * Checks one chain's permission quote the way the SDK checks a key sweep (verifySweepQuote:
+ * wallet, destination and chain as the user chose, the bridge contract and its decoded deposit
+ * paying this wallet's refunds and the destination, fees within bounds read from the chain,
+ * deadline), and returns the SweepIntent to sign, built here from the checked fields.
+ */
+export async function verifyPermissionQuote(
+  quote: PermissionQuote,
+  want: { user: Address; fromChainId: number; toChainId: number; destination: Address; balance: bigint },
+  reads: ChainReads
+): Promise<SweepIntentMessage> {
+  assertPinnedContracts(quote);
+  const [gasPriceWei, l1FeeWei] = await Promise.all([reads.gasPrice(want.fromChainId), reads.l1Fee(want.fromChainId)]);
+  let verified;
+  try {
+    verified = await verifySweepQuote(quote as unknown as QuoteResponse, {
+      signer: want.user,
+      fromChainId: want.fromChainId,
+      toChainId: want.toChainId,
+      destination: want.destination,
+      balanceWei: want.balance,
+      gasPriceWei,
+      nowSeconds: Math.floor(Date.now() / 1000),
+      l1FeeWei,
+    });
+  } catch (error) {
+    throw new Error(`Stopped before signing: ${error instanceof Error ? error.message.replace(/^Refusing to sign: /, '') : 'the quote failed a check'}`);
+  }
+  if (verified.route.bridge !== null && !ROUTER_SAFE_BRIDGES.has(verified.route.bridge)) {
+    throw new Error(`Stopped before signing: ${verified.route.bridge} cannot carry a MetaMask sweep`);
+  }
+  return verified.typedData.message;
+}
+
+const INTENT_FIELDS = SWEEP_INTENT_TYPES.SweepIntent.map((f) => f.name);
+
+/**
+ * The SweepBatch to sign, built here: the router's domain (no chain id) and every chain's
+ * checked intent, uint256 values as decimal strings (mode a number), exactly as the backend builds it.
+ */
+export function buildSweepBatch(entries: Array<{ chainId: number; intent: SweepIntentMessage }>): TypedData {
+  return {
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'verifyingContract', type: 'address' },
+      ],
+      SweepIntent: SWEEP_INTENT_TYPES.SweepIntent.map((f) => ({ ...f })),
+      ChainSweep: [
+        { name: 'chainId', type: 'uint256' },
+        { name: 'intent', type: 'SweepIntent' },
+      ],
+      SweepBatch: [{ name: 'sweeps', type: 'ChainSweep[]' }],
+    },
+    primaryType: 'SweepBatch',
+    domain: { name: 'ZeroDust', version: PERMISSION_DOMAIN_VERSION, verifyingContract: getAddress(PERMISSION_ROUTER) },
+    message: {
+      sweeps: entries.map((e) => ({
+        chainId: String(e.chainId),
+        intent: Object.fromEntries(INTENT_FIELDS.map((k) => {
+          const v = (e.intent as unknown as Record<string, unknown>)[k];
+          return [k, typeof v === 'bigint' ? v.toString() : v];
+        })),
+      })),
+    },
+  };
+}
+
+/** Addresses, hashes and numbers compared by value, whatever case or type the API used */
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((k) => [k, canonical((value as Record<string, unknown>)[k])]));
+  }
+  if (typeof value === 'bigint' || typeof value === 'number') return value.toString();
+  return typeof value === 'string' ? value.toLowerCase() : value;
+}
+
+/** The API's batch must be exactly the one built here: same domain, types and every intent */
+export function assertBatchMatches(api: TypedData, local: TypedData): void {
+  if (JSON.stringify(canonical(api)) !== JSON.stringify(canonical(local))) {
+    throw new Error('Stopped before signing: the batch differs from the checked quotes');
+  }
 }
 
 export type SweepStatus = 'pending' | 'simulating' | 'executing' | 'broadcasted' | 'bridging' | 'completed' | 'failed';
@@ -193,10 +310,11 @@ export interface BatchResult {
  */
 export async function sweepBatchWithPermissions(
   session: MetaMaskSession,
-  router: Address,
   items: BatchItem[],
-  onStep: (chainId: number, step: string) => void
+  onStep: (chainId: number, step: string) => void,
+  reads: ChainReads = rpcChainReads
 ): Promise<Map<number, BatchResult>> {
+  const router = getAddress(PERMISSION_ROUTER);
   const { provider, address } = session;
   const results = new Map<number, BatchResult>();
   const fail = (chainId: number, error: string) => {
@@ -228,13 +346,18 @@ export async function sweepBatchWithPermissions(
 
   // 2-4. Quote, sign once, submit; once more if the quotes ran out while signing
   for (let attempt = 0; attempt < 2; attempt++) {
-    const quoted: Array<{ item: BatchItem; quote: PermissionQuote }> = [];
+    const quoted: Array<{ item: BatchItem; quote: PermissionQuote; intent: SweepIntentMessage }> = [];
     await Promise.all(granted.map(async (item) => {
       onStep(item.chainId, 'Quoting');
       try {
         const quote = await permissionQuote({ fromChainId: item.chainId, toChainId: item.toChainId, user: address, destination: item.destination });
-        if (quote.permission.router.toLowerCase() !== router.toLowerCase()) throw new Error('The quote is not for the ZeroDust router');
-        quoted.push({ item, quote });
+        onStep(item.chainId, 'Checking');
+        const intent = await verifyPermissionQuote(
+          quote,
+          { user: address, fromChainId: item.chainId, toChainId: item.toChainId, destination: item.destination, balance: await item.readBalance() },
+          reads
+        );
+        quoted.push({ item, quote, intent });
       } catch (error) {
         fail(item.chainId, error instanceof Error ? error.message : 'No quote');
       }
@@ -246,12 +369,14 @@ export async function sweepBatchWithPermissions(
     let signature: Hex;
     try {
       const { typedData } = await api<{ typedData: TypedData }>('/authorization/batch', { method: 'POST', body: JSON.stringify({ quoteIds }) });
-      const sweeps = (typedData.message.sweeps as unknown[] | undefined) ?? [];
-      if (String(typedData.domain.verifyingContract).toLowerCase() !== router.toLowerCase() || sweeps.length !== quoteIds.length) {
+      if (!sameAddress(typedData?.domain?.verifyingContract, router)) {
         throw new Error('Stopped before signing: the batch is not for the ZeroDust router');
       }
+      // Sign the batch built here from the checked quotes; the API's is only compared
+      const local = buildSweepBatch(quoted.map((q) => ({ chainId: q.item.chainId, intent: q.intent })));
+      assertBatchMatches(typedData, local);
       for (const { item } of quoted) onStep(item.chainId, 'Sign in MetaMask');
-      signature = (await provider.request({ method: 'eth_signTypedData_v4', params: [address, JSON.stringify(typedData)] })) as Hex;
+      signature = (await provider.request({ method: 'eth_signTypedData_v4', params: [address, JSON.stringify(local)] })) as Hex;
     } catch (error) {
       for (const { item } of quoted) fail(item.chainId, error instanceof Error ? error.message : 'Signature refused');
       return results;
