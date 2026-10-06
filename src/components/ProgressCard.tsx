@@ -50,7 +50,7 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
             <span className="done-ring"><CheckIcon /></span>
             <div>
               <div className="amt">{done.length} of {swept.length} at zero</div>
-              <div className="sub">Every balance reads 0 on-chain{swept.some((r) => !r.direct) ? ' and every delegation is revoked' : ''}</div>
+              <div className="sub">Every balance reads 0 on-chain{m.wallet === 'key' && swept.some((r) => !r.direct) ? ' and every delegation is revoked' : ''}</div>
             </div>
           </div>
         ) : (
@@ -92,7 +92,7 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
                 <ChainIcon chainId={r.chainId} name={r.name} />
                 <span className="name">
                   {r.name}
-                  <span className="bal">{st.phase === 'failed' ? failedText : what || st.detail}</span>
+                  <span className="bal">{st.phase === 'failed' ? failedText : what || (st.phase === 'sweeping' ? STATUS_LABEL[st.detail ?? ''] : undefined) || st.detail}</span>
                   {kind && st.report && (
                     <span className="report">
                       {st.reference ? <span>Ref {st.reference}</span> : null}
@@ -122,13 +122,17 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
         </p>
       )}
       <p className="footnote">
-        {finished ? 'The key is still in this tab’s memory. Forget it when you are done.' : 'Keep this tab open until every chain shows 0. Results stay here until you leave.'}
+        {!finished
+          ? 'Keep this tab open until every chain shows 0. Results stay here until you leave.'
+          : m.wallet === 'metamask'
+            ? 'The key never left MetaMask. Each permission was used once and expires within 10 minutes.'
+            : 'The key is still in this tab’s memory. Forget it when you are done.'}
       </p>
       <div className="actions two">
         {finished ? (
           <>
             <button type="button" className="btn btn-ghost btn-block" onClick={m.reload}>Refresh balances</button>
-            <button type="button" className="btn btn-primary btn-block" onClick={onForget}>Forget key</button>
+            <button type="button" className="btn btn-primary btn-block" onClick={onForget}>{m.wallet === 'metamask' ? 'Done' : 'Forget key'}</button>
           </>
         ) : (
           <button type="button" className="btn btn-ghost btn-block" disabled>Sweeping…</button>
