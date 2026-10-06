@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderMarkdown, slugify } from '../src/pages/docs';
+import { DOC_NAV, docSource, renderDoc, renderMarkdown, slugify } from '../src/pages/docs';
 
 describe('docs rendering', () => {
   it('escapes raw HTML: a content file cannot put markup or script on a page', () => {
@@ -26,5 +26,30 @@ describe('docs rendering', () => {
     expect(renderMarkdown('### `GET /agent/me`')).toBe('<h3 id="get-agentme"><code>GET /agent/me</code></h3>\n');
     expect(renderMarkdown('# Title')).toBe('<h1>Title</h1>\n');
     expect(slugify('<b>"x" onload=1</b>')).toBe('bx-onload1b');
+  });
+});
+
+describe('docs content', () => {
+  const pages = Object.fromEntries(DOC_NAV.map((d) => [d.slug, renderDoc(d.slug).html]));
+
+  it('every /docs link with an anchor lands on a heading that exists', () => {
+    const broken: string[] = [];
+    for (const [slug, html] of Object.entries(pages)) {
+      for (const [, target, anchor] of html.matchAll(/href="\/docs(?:\/([a-z-]+))?#([a-z0-9-]+)"/g)) {
+        const page = pages[target ?? 'index'];
+        if (!page?.includes(`id="${anchor}"`)) broken.push(`${slug} -> ${target ?? 'index'}#${anchor}`);
+      }
+      for (const [, anchor] of html.matchAll(/href="#([a-z0-9-]+)"/g)) {
+        if (!html.includes(`id="${anchor}"`)) broken.push(`${slug} -> #${anchor}`);
+      }
+    }
+    expect(broken).toEqual([]);
+  });
+
+  it('documents the MetaMask flow and its endpoints', () => {
+    for (const text of ['signer=permission', 'POST /authorization/batch', 'batchQuoteIds', 'permissionContext', 'GET /bridges/timing']) {
+      expect(docSource('api')).toContain(text);
+    }
+    expect(docSource('index')).toMatch(/switch to smart account/);
   });
 });

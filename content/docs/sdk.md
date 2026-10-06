@@ -21,6 +21,8 @@ npm install @zerodust/sdk viem
 
 Use `ZeroDustAgent` unless you need to sign somewhere the agent cannot run. It is the only path that applies every pre-signing check for you.
 
+The SDK signs with a key (EIP-7702). Sweeping through MetaMask Advanced Permissions, without the key, is not in the SDK yet; see the [REST API](/docs/api#with-metamask).
+
 ## Configuration
 
 Both classes accept the same options (`ZeroDustConfig`). `ZeroDustAgent` adds `account`, `rpcUrls` and `requireVerifiedRoute`.
