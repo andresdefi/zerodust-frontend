@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { onlySelfSweep, plainReason } from '../src/sweep/useSweep';
+import { bridgingText, onlySelfSweep, plainReason } from '../src/sweep/useSweep';
 
 // A same-chain sweep to the same wallet moves nothing: the page asks for another address
 // instead of offering it (owner, 2026-10-06, found sweeping Base to Base from MetaMask)
@@ -37,5 +37,12 @@ describe('plainReason for MetaMask permission limits', () => {
     expect(plainReason(detail, 'ETH', 'Base')).toBe('No bridge takes ETH out of Base right now');
     const unavailable = 'Sweeping with a MetaMask permission is not available on Linea yet';
     expect(plainReason(unavailable, 'ETH', 'Linea')).toBe(unavailable);
+  });
+});
+
+describe('bridgingText', () => {
+  it('says the wallet reads 0, who delivers where, and for how long', () => {
+    expect(bridgingText('Gas.zip', 'Base', 42)).toBe('Wallet reads 0. Gas.zip is delivering to Base (42s; usually under a minute, sometimes a few)');
+    expect(bridgingText('Across', 'Arbitrum', 257)).toBe('Wallet reads 0. Across is delivering to Arbitrum (4m 17s; usually under a minute, sometimes a few)');
   });
 });
