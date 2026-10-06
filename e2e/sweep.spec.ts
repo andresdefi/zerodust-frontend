@@ -32,6 +32,11 @@ async function watchForKey(page: Page, key: string) {
   };
 }
 
+/** MetaMask is the main way in; the key is one click away (owner, 2026-10-06) */
+async function useKey(page: import('@playwright/test').Page) {
+  await page.getByRole('button', { name: 'Use a private key' }).click();
+}
+
 test('the key never reaches the DOM, storage, a request or the console', async ({ page }) => {
   const key = generatePrivateKey();
   const address = privateKeyToAccount(key).address;
@@ -39,6 +44,7 @@ test('the key never reaches the DOM, storage, a request or the console', async (
   const watch = await watchForKey(page, key);
 
   await page.goto('/');
+  await useKey(page);
   const input = page.locator('.keyfield input');
   await input.focus();
   await page.keyboard.type(key, { delay: 2 });
@@ -62,6 +68,7 @@ test('pasting a key wipes the clipboard', async ({ page, context, browserName })
   const key = generatePrivateKey();
   await mockNetwork(page, privateKeyToAccount(key).address);
   await page.goto('/');
+  await useKey(page);
   await page.evaluate((k) => navigator.clipboard.writeText(k), key);
   await page.locator('.keyfield input').focus();
   await page.keyboard.press('ControlOrMeta+V');
@@ -79,6 +86,7 @@ test('a loaded key is forgotten after 15 minutes without activity', async ({ pag
   const key = generatePrivateKey();
   await mockNetwork(page, privateKeyToAccount(key).address);
   await page.goto('/');
+  await useKey(page);
   await expect(page.locator('.safety')).toContainText('Browser extensions can read what you type');
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
@@ -99,11 +107,14 @@ test('while ZeroDust is paused: says so before a key is entered and takes no key
   await mockNetwork(page, privateKeyToAccount(key).address, { paused: true });
   await page.goto('/');
   await expect(page.getByRole('status').filter({ hasText: 'ZeroDust is paused' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connect MetaMask' })).toBeDisabled();
+  await useKey(page);
   await expect(page.locator('.keyfield input')).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Load wallet' })).toBeDisabled();
   await page.unrouteAll({ behavior: 'ignoreErrors' });
   await mockNetwork(page, privateKeyToAccount(key).address);
   await page.reload();
+  await useKey(page);
   await expect(page.locator('.keyfield input')).toBeEnabled();
   await expect(page.getByText('ZeroDust is paused')).toHaveCount(0);
 });
@@ -111,6 +122,7 @@ test('while ZeroDust is paused: says so before a key is entered and takes no key
 test('rejects something that is not a key, without echoing it', async ({ page }) => {
   await mockNetwork(page, privateKeyToAccount(generatePrivateKey()).address);
   await page.goto('/');
+  await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type('abc123');
   await page.keyboard.press('Enter');
@@ -125,6 +137,7 @@ test('sweeps sponsored chains to one destination, burning a chain with no route'
   const watch = await watchForKey(page, key);
 
   await page.goto('/');
+  await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
   await page.keyboard.press('Enter');
@@ -169,6 +182,7 @@ test('sweeps a direct chain: plan checked and replayed in the page, signed here,
   const watch = await watchForKey(page, key);
 
   await page.goto('/');
+  await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
   await page.keyboard.press('Enter');
@@ -209,6 +223,7 @@ test('a chain that cannot reach the destination can go to another chain instead'
   const key = generatePrivateKey();
   const { swept, sent } = await mockNetwork(page, privateKeyToAccount(key).address, { direct: true, onlyTo: 10 });
   await page.goto('/');
+  await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
   await page.keyboard.press('Enter');
@@ -243,6 +258,7 @@ test('a passing "unknown" route does not send a chain elsewhere', async ({ page 
   const key = generatePrivateKey();
   await mockNetwork(page, privateKeyToAccount(key).address, { direct: true, hiccups: 1 });
   await page.goto('/');
+  await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
   await page.keyboard.press('Enter');
@@ -261,6 +277,7 @@ test('token delivery: Mitosis is swept to exactly 0 and arrives as MITO (a token
   const key = generatePrivateKey();
   const { swept } = await mockNetwork(page, privateKeyToAccount(key).address, { mitosis: true });
   await page.goto('/');
+  await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
   await page.keyboard.press('Enter');
@@ -291,6 +308,7 @@ test('a balance below every bridge minimum says how much to add, at load, at the
   // Direct chain: known when the wallet loads
   await mockNetwork(page, privateKeyToAccount(key).address, { monad: true, tooSmall: 'direct' });
   await page.goto('/');
+  await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
   await page.keyboard.press('Enter');
@@ -307,6 +325,7 @@ for (const when of ['check', 'sweep'] as const) {
     const key = generatePrivateKey();
     const { reports } = await mockNetwork(page, privateKeyToAccount(key).address, { mitosis: true, tooSmall: when });
     await page.goto('/');
+    await useKey(page);
     await page.locator('.keyfield input').focus();
     await page.keyboard.type(key, { delay: 1 });
     await page.keyboard.press('Enter');
@@ -339,6 +358,7 @@ test('token delivery, own wallet only: Endurance goes as ACE to this wallet on B
   const key = generatePrivateKey();
   const { swept } = await mockNetwork(page, privateKeyToAccount(key).address, { endurance: true });
   await page.goto('/');
+  await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
   await page.keyboard.press('Enter');
@@ -369,6 +389,7 @@ test('refuses a direct plan that pays someone else, and sends nothing', async ({
   const key = generatePrivateKey();
   const { sent } = await mockNetwork(page, privateKeyToAccount(key).address, { direct: true, tamper: true });
   await page.goto('/');
+  await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
   await page.keyboard.press('Enter');
@@ -391,6 +412,7 @@ test('sweeps Monad through Across: gas-limit rules, deposit decoded and its Sett
   const { swept, sent } = await mockNetwork(page, privateKeyToAccount(key).address, { monad: true });
   const watch = await watchForKey(page, key);
   await page.goto('/');
+  await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
   await page.keyboard.press('Enter');
@@ -418,6 +440,7 @@ test('refuses an Across plan whose deposit pays someone else, and sends nothing'
   const key = generatePrivateKey();
   const { sent } = await mockNetwork(page, privateKeyToAccount(key).address, { monad: true, tamper: true });
   await page.goto('/');
+  await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
   await page.keyboard.press('Enter');
@@ -431,4 +454,17 @@ test('refuses an Across plan whose deposit pays someone else, and sends nothing'
   await expect(refused).toHaveAttribute('title', /Across deposit refused: the fallback recipient is not the address you set/);
   await expect(page.getByRole('button', { name: /^Sweep \d/ })).toHaveCount(0);
   expect(sent).toEqual([]);
+});
+
+test('lands on MetaMask: Connect MetaMask first, the key one click away, and a clear error without MetaMask', async ({ page }) => {
+  await mockNetwork(page, privateKeyToAccount(generatePrivateKey()).address);
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Connect wallet' })).toBeVisible();
+  await expect(page.locator('.keyfield input')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Connect MetaMask' }).click();
+  await expect(page.getByRole('alert')).toHaveText(/MetaMask was not found in this browser/);
+  await useKey(page);
+  await expect(page.getByRole('heading', { name: 'Load wallet' })).toBeVisible();
+  await page.getByRole('button', { name: 'Use MetaMask' }).click();
+  await expect(page.getByRole('heading', { name: 'Connect wallet' })).toBeVisible();
 });
