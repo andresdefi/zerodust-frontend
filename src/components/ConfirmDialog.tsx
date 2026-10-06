@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
 import { isExit, isRouted, rowToken, type Row, type SweepModel } from '../sweep/useSweep';
-import { totalsText, totalsUsd } from './SweepCard';
+import { AddressCheck, totalsText, totalsUsd } from './SweepCard';
 
 /** Last stop before anything is sent: every chain, its amount, and any burn or donation spelled out */
 export function ConfirmDialog({ open, model: m, onCancel, onConfirm }: {
@@ -29,8 +29,12 @@ export function ConfirmDialog({ open, model: m, onCancel, onConfirm }: {
   const donated = m.readyRows.filter((r) => m.choices[r.chainId] === 'donate');
   const dest = m.destRow;
   const receiveUsd = formatUsd(totalsUsd(m.readyTotals, m.prices));
-  const destNames = m.readyTotals.map((t) => t.dest.name);
-  const toNames = destNames.length > 1 ? `${destNames.slice(0, -1).join(', ')} and ${destNames.at(-1)}` : dest?.name;
+  // Every place the funds go, including another address on a chain
+  const destNames = [
+    ...m.readyTotals.map((t) => t.dest.name),
+    ...routed.filter((r) => m.choices[r.chainId] === 'address').map((r) => `an address on ${r.name}`),
+  ];
+  const toNames = destNames.length > 1 ? `${destNames.slice(0, -1).join(', ')} and ${destNames.at(-1)}` : destNames[0] ?? dest?.name;
   const n = m.readyRows.length;
 
   return (
@@ -42,6 +46,7 @@ export function ConfirmDialog({ open, model: m, onCancel, onConfirm }: {
           <li key={r.chainId}>
             <span>
               {r.name}{m.choices[r.chainId] === 'elsewhere' && <small> to {m.destOf(m.elsewhere[r.chainId]!)?.name}</small>}
+              {m.choices[r.chainId] === 'address' && <small> to an address on {r.name}</small>}
               {m.bridgeOf[r.chainId] && <small> via {m.bridgeOf[r.chainId]}</small>}
             </span>
             <span>{amount(r)}</span>
@@ -56,6 +61,12 @@ export function ConfirmDialog({ open, model: m, onCancel, onConfirm }: {
           <p key={`token-${r.chainId}`} className="donate-note">{r.name}: arrives as {token.symbol}, a token on {dest.name}, not {dest.token} gas. You can swap or keep it there.</p>
         );
       })}
+      {routed.filter((r) => m.choices[r.chainId] === 'address').map((r) => (
+        <div key={`addr-${r.chainId}`} className="donate-note">
+          {r.name}: {amount(r)} goes to this address on {r.name}, not to {dest?.name ?? 'the destination'}:
+          <AddressCheck address={m.addressOf[r.chainId]!} />
+        </div>
+      ))}
       {exits.map((r) => <p key={r.chainId} className="donate-note">{r.name}: swapped out through LI.FI; the few cents of gas reserve left are {m.choices[r.chainId] === 'exit-burn' ? 'burned' : 'donated to ZeroDust'}.</p>)}
       {burned.map((r) => <p key={r.chainId} className="burn-note">{r.name}: {amount(r)} is burned. You will not receive it.</p>)}
       {donated.map((r) => <p key={r.chainId} className="donate-note">{r.name}: {amount(r)} is donated to ZeroDust. You will not receive it.</p>)}

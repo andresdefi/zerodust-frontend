@@ -30,10 +30,10 @@ const ROUTE_RETRY_MS = 3000;
  * with a swap route can also swap out; the few cents of gas reserve the swap
  * leaves are then donated or burned, so the wallet still ends at exactly 0.
  */
-export type Choice = 'exit-donate' | 'exit-burn' | 'donate' | 'burn' | 'elsewhere';
+export type Choice = 'exit-donate' | 'exit-burn' | 'donate' | 'burn' | 'elsewhere' | 'address';
 export const isExit = (c?: Choice) => c === 'exit-donate' || c === 'exit-burn';
 /** The balance reaches the recipient (on the chosen chain, or on another one for 'elsewhere') */
-export const isRouted = (c?: Choice) => !c || isExit(c) || c === 'elsewhere';
+export const isRouted = (c?: Choice) => !c || isExit(c) || c === 'elsewhere' || c === 'address';
 
 /**
  * Chains offered instead when a source cannot reach the chosen destination
@@ -176,6 +176,9 @@ export function useSweep(wallet: Wallet) {
   const [alts, setAlts] = useState<Record<number, number[]>>({});
   // 'elsewhere' choices: the chain each of those sources goes to instead
   const [elsewhere, setElsewhere] = useState<Record<number, number>>({});
+  // 'address' choices: another address on the chain itself, e.g. an exchange deposit (owner,
+  // 2026-10-06: for chains no bridge serves, and anyone who wants one chain somewhere else)
+  const [addressOf, setAddressOf] = useState<Record<number, string>>({});
   // Which bridge carries each chain (owner, 2026-10-03: say plainly the bridging is theirs, not ZeroDust's)
   const [bridgeOf, setBridgeOf] = useState<Record<number, string>>({});
   const setBridge = (chainId: number, name: string | undefined) =>
@@ -406,7 +409,7 @@ export function useSweep(wallet: Wallet) {
   };
 
   /** The choices a chain with no route gets: a swap out where one exists (direct chains), else donate or burn */
-  const choicesFor = (row: Row): Array<Exclude<Choice, 'elsewhere'>> => {
+  const choicesFor = (row: Row): Array<Exclude<Choice, 'elsewhere' | 'address'>> => {
     const exit = row.direct && directRoutes[row.chainId]?.exit ? ['exit-donate', 'exit-burn'] as const : [];
     return [...exit, 'donate', 'burn'];
   };
@@ -419,7 +422,13 @@ export function useSweep(wallet: Wallet) {
       return next;
     });
 
-  const setChoice = (chainId: number, choice: Choice | null, toChainId?: number) => {
+  const setChoice = (chainId: number, choice: Choice | null, toChainId?: number, address?: string) => {
+    setAddressOf((prev) => {
+      const next = { ...prev };
+      if (choice === 'address' && address) next[chainId] = getAddress(address);
+      else delete next[chainId];
+      return next;
+    });
     setElsewhere((prev) => {
       const next = { ...prev };
       if (choice === 'elsewhere' && toChainId !== undefined) next[chainId] = toChainId;
@@ -442,8 +451,9 @@ export function useSweep(wallet: Wallet) {
   );
   const readyRows = selectedRows.filter((r) => states[r.chainId]?.phase === 'ready');
   // Everything selected is the destination chain itself, to this same wallet: nothing would move
-  const selfOnly = onlySelfSweep(rows, selected, destination, toSelf);
-  const readyTotals = totalsByDest(readyRows.map((r) => states[r.chainId]!), destination, destOf);
+  const selfOnly = onlySelfSweep(rows, new Set([...selected].filter((id) => choices[id] !== 'address')), destination, toSelf);
+  // What the user receives: not what goes to another address
+  const readyTotals = totalsByDest(readyRows.filter((r) => choices[r.chainId] !== 'address').map((r) => states[r.chainId]!), destination, destOf);
 
   /** Where a row's balance goes: the destination (also for a swap exit), or burn/donate on its own chain */
   const targetFor = (row: Row) => {
@@ -451,6 +461,7 @@ export function useSweep(wallet: Wallet) {
     if (choice === 'burn') return { toChainId: row.chainId, recipient: BURN_ADDRESS };
     if (choice === 'donate') return { toChainId: row.chainId, recipient: ZERODUST_ADDRESS };
     if (choice === 'elsewhere') return { toChainId: elsewhere[row.chainId]!, recipient };
+    if (choice === 'address') return { toChainId: row.chainId, recipient: addressOf[row.chainId]! };
     return { toChainId: destination!, recipient };
   };
 
@@ -797,7 +808,7 @@ export function useSweep(wallet: Wallet) {
   return {
     wallet: wallet.kind, address, rows, stage, loadError, prices, dests, sourceCount, destination, destRow, setDestination,
     recipient, setRecipient, recipientValid, toSelf, selected, toggle, states, choices, setChoice, choicesFor,
-    altsFor, elsewhere, destOf, bridgeOf, blockedReason, needsChoice, selectedRows, readyRows, readyTotals, busy, check, sweep, reload, selfOnly,
+    altsFor, elsewhere, addressOf, destOf, bridgeOf, blockedReason, needsChoice, selectedRows, readyRows, readyTotals, busy, check, sweep, reload, selfOnly,
   };
 }
 
