@@ -163,7 +163,7 @@ export function verifyAcrossDeposit(tx: { to: string; data: string }, x: AcrossE
   if (dep.outputAmount <= 0n) fail('nothing is bridged');
   const bridged = addressOf(dep.outputToken) ?? fail('the bridged token is not an address');
 
-  const { settler } = verifyAcrossMessage(dep.message, { toChainId: x.toChainId, recipient: x.recipient, bridged, minNative: x.minNative }, fail);
+  const { settler } = verifyAcrossMessage(dep.message, { toChainId: x.toChainId, recipient: x.recipient, bridged, bridgedAmount: dep.outputAmount, minNative: x.minNative }, fail);
   if (!settler) fail('the destination swap does not run through 0x');
   // The last second the SpokePool still accepts this deposit
   return { settler: settler!, expiresAt: dep.quoteTimestamp + ACROSS_QUOTE_BUFFER_SECONDS };
@@ -175,23 +175,25 @@ export interface AcrossMessageExpect {
   recipient: string;
   /** The token the deposit delivers to the handler */
   bridged: string;
+  /** How much of it: a Universal Router swap must spend exactly this (its balance is anyone's to sweep) */
+  bridgedAmount: bigint;
   /** The least native the destination swap may deliver (the receive shown to the user) */
   minNative: bigint;
 }
 
 /** A Universal Router swap path: first and last token (V3 packed path or a V2 address list) */
-function urPathEnds(command: number, input: Hex): { recipient: string; minOut: bigint; payerIsUser: boolean; first: string; last: string } {
+function urPathEnds(command: number, input: Hex): { recipient: string; amountIn: bigint; minOut: bigint; payerIsUser: boolean; first: string; last: string } {
   if (command === UR_V3_SWAP_EXACT_IN) {
-    const [recipient, , minOut, path, payerIsUser] = decodeAbiParameters(
+    const [recipient, amountIn, minOut, path, payerIsUser] = decodeAbiParameters(
       [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'bytes' }, { type: 'bool' }], input);
     // token (20) + [fee (3) + token (20)]...
     if ((path.length - 2) / 2 < 43 || ((path.length - 2) / 2 - 20) % 23 !== 0) throw new Error('bad path');
-    return { recipient, minOut, payerIsUser, first: `0x${path.slice(2, 42)}`, last: `0x${path.slice(-40)}` };
+    return { recipient, amountIn, minOut, payerIsUser, first: `0x${path.slice(2, 42)}`, last: `0x${path.slice(-40)}` };
   }
-  const [recipient, , minOut, path, payerIsUser] = decodeAbiParameters(
+  const [recipient, amountIn, minOut, path, payerIsUser] = decodeAbiParameters(
     [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'address[]' }, { type: 'bool' }], input);
   if (path.length < 2) throw new Error('bad path');
-  return { recipient, minOut, payerIsUser, first: path[0]!, last: path[path.length - 1]! };
+  return { recipient, amountIn, minOut, payerIsUser, first: path[0]!, last: path[path.length - 1]! };
 }
 
 /**
@@ -238,6 +240,7 @@ export function verifyAcrossMessage(message: Hex, x: AcrossMessageExpect, fail: 
       const bytes = commands.slice(2).match(/../g) ?? [];
       if (bytes.length === 0 || bytes.length !== inputs.length) fail('the Universal Router commands are malformed');
       let minOut = 0n;
+      let amountIn = 0n;
       for (const [i, hex] of bytes.entries()) {
         const command = parseInt(hex, 16);
         if (command !== UR_V3_SWAP_EXACT_IN && command !== UR_V2_SWAP_EXACT_IN) fail(`a Universal Router command (0x${hex}) is not an exact-in swap`);
@@ -253,8 +256,11 @@ export function verifyAcrossMessage(message: Hex, x: AcrossMessageExpect, fail: 
         if (buyToken && !eq(swap.last, buyToken)) fail('the swaps buy different tokens');
         buyToken = swap.last.toLowerCase();
         minOut += swap.minOut;
+        amountIn += swap.amountIn;
       }
       if (minOut < x.minNative) fail('the swap may deliver less than the amount shown');
+      // What the router keeps after a swap anyone can take: it must spend all it was given
+      if (amountIn !== x.bridgedAmount) fail('the swap does not spend all of the bridged token');
       urSwap = true;
       continue;
     }
@@ -309,7 +315,7 @@ export function verifyAcrossMessage(message: Hex, x: AcrossMessageExpect, fail: 
     }
   }
   if ((!settler && !urSwap) || !buyToken) return fail('no swap to the native token');
-  if (urSwap && !urFunded) fail('the Universal Router swap is not funded by the bridged token');
+  if (urSwap !== urFunded) fail('the Universal Router is funded without a swap, or swaps without funding');
   if (buyToken !== NATIVE_SENTINEL && !unwrapped.has(buyToken)) fail('the swap output is not unwrapped to the native token');
   if (!nativeDrain) fail('nothing sends the native token to the address you set');
   return { settler };
