@@ -175,6 +175,14 @@ a { color: inherit; }
 .addr-field { width: 100%; background: var(--surface); color: var(--ink); border: 1.5px solid var(--warn); border-radius: calc(var(--radius-row) - 4px); padding: 12px; font: inherit; font-size: 13.5px; }
 .addr-field.invalid { border-color: var(--danger); }
 .addr-warn { margin-top: 8px; background: var(--warn-soft); color: var(--warn); border-radius: calc(var(--radius-row) - 4px); padding: 10px 12px; font-size: 13px; }
+.quiet-link { font-size: 12.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
+.address-form { display: grid; gap: 8px; cursor: default; }
+.address-form:hover { background: none; }
+.address-form .field-error { color: var(--danger); font-size: 12.5px; }
+.address-form .addr-check { margin-top: 0; }
+.address-form .addr-field { width: 100%; }
+.address-warnings { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.address-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .addr-check { margin-top: 8px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
 .addr-check b { color: var(--ink); font-weight: 700; }
 .summary { padding: 14px 12px 6px; display: grid; gap: 8px; font-size: 13.5px; }
