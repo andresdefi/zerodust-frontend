@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { LocalAccount } from 'viem';
 import { Nav } from './components/Nav';
 import { IDLE_FLAG, KeyEntry, type ClipboardState } from './components/KeyEntry';
 import { SweepCard } from './components/SweepCard';
 import { LeftPanel, RightPanel } from './components/SidePanels';
-import { useSweep } from './sweep/useSweep';
+import { useSweep, type Wallet } from './sweep/useSweep';
 
 /** Dropping the key: a reload clears this tab's memory */
 const forget = () => window.location.reload();
@@ -12,8 +11,8 @@ const forget = () => window.location.reload();
 /** A loaded key left alone this long is forgotten (never during a sweep) */
 export const IDLE_FORGET_MS = 15 * 60 * 1000;
 
-function Sweep({ account, clipboard }: { account: LocalAccount; clipboard: ClipboardState }) {
-  const model = useSweep(account);
+function Sweep({ wallet, clipboard }: { wallet: Wallet; clipboard: ClipboardState }) {
+  const model = useSweep(wallet);
   const sweeping = model.stage === 'sweeping';
   useEffect(() => {
     if (sweeping) return;
@@ -37,8 +36,8 @@ function Sweep({ account, clipboard }: { account: LocalAccount; clipboard: Clipb
 }
 
 export function App() {
-  // The account object holds the key in memory only; it never reaches the DOM
-  const [loaded, setLoaded] = useState<{ account: LocalAccount; clipboard: ClipboardState } | null>(null);
+  // A key's account object lives in memory only and never reaches the DOM; a MetaMask session holds no key
+  const [loaded, setLoaded] = useState<{ wallet: Wallet; clipboard: ClipboardState } | null>(null);
 
   return (
     <>
@@ -46,8 +45,11 @@ export function App() {
       <main className="home">
         <LeftPanel />
         {loaded
-          ? <Sweep account={loaded.account} clipboard={loaded.clipboard} />
-          : <KeyEntry onAccount={(account, clipboard) => setLoaded({ account, clipboard })} />}
+          ? <Sweep wallet={loaded.wallet} clipboard={loaded.clipboard} />
+          : <KeyEntry
+              onAccount={(account, clipboard) => setLoaded({ wallet: { kind: 'key', account }, clipboard })}
+              onMetaMask={(session) => setLoaded({ wallet: { kind: 'metamask', session }, clipboard: null })}
+            />}
         <RightPanel />
       </main>
     </>

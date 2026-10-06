@@ -78,6 +78,13 @@ a { color: inherit; }
 .safety { display: grid; gap: 10px; margin-top: 16px; }
 .safety div { display: flex; gap: 10px; font-size: 13.5px; align-items: flex-start; }
 .safety svg { flex: none; margin-top: 2px; color: var(--ok); }
+.metamask { margin-bottom: 4px; padding: 14px; border-radius: var(--radius-row); border: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13.5px; }
+.metamask span { color: var(--muted); }
+.metamask b { color: var(--ink); font-weight: 600; }
+.metamask .btn { white-space: nowrap; flex: none; }
+.or { display: flex; align-items: center; gap: 10px; margin: 14px 0; font-size: 12.5px; color: var(--muted); }
+.or::before, .or::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+@media (max-width: 480px) { .metamask { flex-direction: column; align-items: stretch; } }
 .offline { margin-top: 16px; padding: 14px; border-radius: var(--radius-row); border: 1px dashed var(--line); display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13.5px; }
 .offline span { color: var(--muted); }
 .offline a { font-weight: 600; white-space: nowrap; color: var(--accent-text); }
