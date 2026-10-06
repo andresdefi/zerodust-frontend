@@ -78,16 +78,9 @@ a { color: inherit; }
 .safety { display: grid; gap: 10px; margin-top: 16px; }
 .safety div { display: flex; gap: 10px; font-size: 13.5px; align-items: flex-start; }
 .safety svg { flex: none; margin-top: 2px; color: var(--ok); }
-.metamask { margin-bottom: 4px; padding: 14px; border-radius: var(--radius-row); border: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13.5px; }
-.metamask span { color: var(--muted); }
-.metamask b { color: var(--ink); font-weight: 600; }
-.metamask .btn { white-space: nowrap; flex: none; }
-.or { display: flex; align-items: center; gap: 10px; margin: 14px 0; font-size: 12.5px; color: var(--muted); }
-.or::before, .or::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
-@media (max-width: 480px) { .metamask { flex-direction: column; align-items: stretch; } }
 .offline { margin-top: 16px; padding: 14px; border-radius: var(--radius-row); border: 1px dashed var(--line); display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13.5px; }
 .offline span { color: var(--muted); }
-.offline a { font-weight: 600; white-space: nowrap; color: var(--accent-text); }
+.offline a, .offline .link-btn { font-weight: 600; white-space: nowrap; color: var(--accent-text); }
 
 @media (max-width: 1100px) {
   .home { grid-template-columns: 1fr; justify-items: center; }
@@ -182,7 +175,8 @@ a { color: inherit; }
 .addr-field { width: 100%; background: var(--surface); color: var(--ink); border: 1.5px solid var(--warn); border-radius: calc(var(--radius-row) - 4px); padding: 12px; font: inherit; font-size: 13.5px; }
 .addr-field.invalid { border-color: var(--danger); }
 .addr-warn { margin-top: 8px; background: var(--warn-soft); color: var(--warn); border-radius: calc(var(--radius-row) - 4px); padding: 10px 12px; font-size: 13px; }
-.addr-chunks { margin-top: 8px; color: var(--ink); font-size: 14px; letter-spacing: 0.04em; word-spacing: 0.3em; }
+.addr-check { margin-top: 8px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.addr-check b { color: var(--ink); font-weight: 700; }
 .summary { padding: 14px 12px 6px; display: grid; gap: 8px; font-size: 13.5px; }
 .summary div { display: flex; justify-content: space-between; gap: 12px; }
 .summary dt { color: var(--muted); }

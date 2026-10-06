@@ -86,13 +86,15 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
             const kind = st.phase === 'failed' ? failureKind(st, r.decimals) : null;
             const minimum = kind === 'too-small' ? minimumOf(st.detail, r.decimals) : null;
             const failedText = minimum !== null ? tooSmallText(minimum, r) : kind && kind !== 'check' ? `${st.detail} Nothing was sent.` : st.detail;
+            // A bridge delivering after the wallet already reads 0: the sentence says who and for how long
+            const bridgingNow = st.phase === 'sweeping' && !!st.detail?.startsWith('Wallet reads 0.');
             return (
               <li key={r.chainId} className="row">
                 <span />
                 <ChainIcon chainId={r.chainId} name={r.name} />
                 <span className="name">
                   {r.name}
-                  <span className="bal">{st.phase === 'failed' ? failedText : what || (st.phase === 'sweeping' ? STATUS_LABEL[st.detail ?? ''] : undefined) || st.detail}</span>
+                  <span className="bal">{st.phase === 'failed' ? failedText : bridgingNow ? st.detail : what || (st.phase === 'sweeping' ? STATUS_LABEL[st.detail ?? ''] : undefined) || st.detail}</span>
                   {kind && st.report && (
                     <span className="report">
                       {st.reference ? <span>Ref {st.reference}</span> : null}
@@ -108,7 +110,7 @@ export function ProgressCard({ model: m, onForget }: { model: SweepModel; onForg
                 <span className="right">
                   {st.phase === 'done' && <span className="done-zero">0 left</span>}
                   {kind && <span className={`${kind === 'check' ? 'danger-text' : 'warn-text'} strong`}>{FAILURE_LABEL[kind]}</span>}
-                  {st.phase === 'sweeping' && <span className="pill neutral"><span className="spin" aria-hidden="true" />{STATUS_LABEL[st.detail ?? ''] ?? st.detail}</span>}
+                  {st.phase === 'sweeping' && <span className="pill neutral"><span className="spin" aria-hidden="true" />{bridgingNow ? 'Bridging' : STATUS_LABEL[st.detail ?? ''] ?? st.detail}</span>}
                   {tx && <a className="tx" href={tx} target="_blank" rel="noreferrer noopener">View tx</a>}
                 </span>
               </li>
