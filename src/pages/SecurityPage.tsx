@@ -6,11 +6,33 @@ export function SecurityPage({ build }: { build: BuildRecord }) {
     <StaticPage>
       <h1>Security</h1>
       <p className="doc-lede">
-        To empty a wallet, this page needs its private key. Here is exactly what happens to that key, what
-        the page talks to, and how to check that the page you run is the one published here.
+        With MetaMask, this page never sees your key: MetaMask grants a narrow permission and signs. For
+        chains MetaMask does not cover, and on the offline page, the page needs the wallet's private key.
+        Here is exactly what each way allows, what the page talks to, and how to check that the page you
+        run is the one published here.
       </p>
 
-      <h2>The key</h2>
+      <h2>With MetaMask</h2>
+      <ul>
+        <li>The key stays in MetaMask. The page gets your address and what you approve, nothing else.</li>
+        <li>
+          Per chain, MetaMask grants a one-time permission (ERC-7715) to move that chain's balance once.
+          ZeroDust's router is the only contract that can use it and the only one that can receive from it,
+          and it expires after 10 minutes.
+        </li>
+        <li>
+          You sign one message for every chain. It names each chain's destination, the least that must
+          arrive and the most the fees can take. The router refuses any sweep that differs from it, and
+          reverts unless the wallet ends at exactly 0.
+        </li>
+        <li>
+          The first time on a chain, MetaMask also switches the account to its smart account. That is
+          MetaMask's own delegation, not ZeroDust's, and it stays after the sweep.
+        </li>
+        <li>Router: <code>0x369A97dd256F7eb37fF7116C4EcBd50318eBb286</code>, the same address on every chain it is on.</li>
+      </ul>
+
+      <h2>With the key</h2>
       <ul>
         <li>It stays in the memory of the tab. It is never sent anywhere, saved, logged or shown.</li>
         <li>
@@ -29,6 +51,7 @@ export function SecurityPage({ build }: { build: BuildRecord }) {
           exactly 0, and for chains without a sponsor, to send the signed transactions directly. The list is
           fixed in the page's Content-Security-Policy; the browser blocks anything else.
         </li>
+        <li><strong>MetaMask</strong>, through the extension in your browser, when you connect it.</li>
         <li>Nothing else: no analytics, no third-party scripts or fonts, no wallet SDKs, no tracking cookies.</li>
       </ul>
 
