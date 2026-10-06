@@ -380,6 +380,30 @@ describe('bindOwnRelayDeposit: the Relay deposit comes from Relay, to this page'
     expect(bound.intent.callData).toBe(s.data);
   });
 
+  /** A full permission quote for the captured Relay deposit (Base -> Arbitrum), as the API would serve it */
+  const relayQuote = (label: string) => ({
+    quoteId: '44444444-4444-4444-8444-444444444444', version: 3, userBalance: '2100000000000000', estimatedReceive: '1', mode: 1, autoRevoke: false, signer: 'permission',
+    fees: { maxTotalFeeWei: '100000000000000', extraFeeWei: '0', overheadGasUnits: '100000', protocolFeeGasUnits: '0', reimbGasPriceCapWei: '1200000000', revokeGasUnits: '0' },
+    permission: { router: '0x369A97dd256F7eb37fF7116C4EcBd50318eBb286', delegationManager: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3', domainVersion: 'permission-2' },
+    bridge: { name: label, displayName: label, inputAmount: s.value },
+    intent: { mode: 1, destination: OWNER.toLowerCase(), destinationChainId: '42161', callTarget: s.to, routeHash: keccak256(s.data), callData: s.data, minReceive: '1' },
+    deadline: Math.floor(Date.now() / 1000) + 50, nonce: 0, validForSeconds: 55,
+  }) as unknown as PermissionQuote;
+  const reads: ChainReads = { gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, code: async () => '0x' };
+  const verifyWant = { ...want, balance: 2_100_000_000_000_000n };
+
+  it("refuses to sign a Relay deposit the page did not get from Relay, whatever the API's label says", async () => {
+    for (const label of ['relay', 'gaszip', 'across']) {
+      await expect(verifyPermissionQuote(relayQuote(label), verifyWant, reads)).rejects.toThrow('this Relay deposit did not come from Relay to this page');
+    }
+  });
+
+  it('signs the Relay deposit once the page got it from Relay itself', async () => {
+    stub();
+    const bound = await bindOwnRelayDeposit(relayQuote('gaszip'), want);
+    await expect(verifyPermissionQuote(bound, verifyWant, reads)).resolves.toBeDefined();
+  });
+
   it('stops when Relay would pay someone else, deliver a token, or less than shown', async () => {
     stub((a) => { a.details.recipient = '0x000000000000000000000000000000000000dEaD'; });
     await expect(bindOwnRelayDeposit(quote, want)).rejects.toThrow('Relay would pay someone other than the address you set');
