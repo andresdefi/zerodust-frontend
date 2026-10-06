@@ -1,16 +1,12 @@
 // An Across route on a sponsored chain, checked by the page before a MetaMask sweep is signed
-// (the API is untrusted). The SDK's verifySweepQuote already checks the periphery, the refund
-// address and a plain deposit's recipient; this adds what it cannot read: where a deposit that
-// swaps on the destination finally pays. Two shapes, both from Across's swap API (2026-10-06):
-// - depositNative of WETH, then on the destination Uniswap's Universal Router swaps it to the
-//   native gas token (BNB Chain, Polygon);
-// - swapAndBridge: the source swaps to USDC (0x or LI.FI), then on the destination a 0x
-//   Settler swaps it to the native gas token (Avalanche, HyperEVM, Monad, Plasma).
-// Every contract is pinned from Across's and Uniswap's published deployments; any other shape
-// is refused.
+// (the API is untrusted). ZeroDust delivers the destination's native gas, so Across is used only
+// for ETH to ETH as a plain deposit (owner, 2026-10-06): WETH in, paid out as native ETH to an
+// ordinary or EIP-7702 wallet. Anything that swaps or runs a destination message is refused:
+// Across settles those in another token when a swap fails or leaves a remainder, and pays WETH
+// to a contract recipient. Contracts are pinned from Across's published deployments.
 
 import { decodeFunctionData, parseAbi, type Hex } from 'viem';
-import { ACROSS_HANDLERS, ACROSS_TOKENS, LIFI_DIAMOND, UNIVERSAL_ROUTERS, verifyAcrossMessage, ZEROX_ALLOWANCE_HOLDER } from '../direct/across';
+import { ACROSS_TOKENS } from '../direct/across';
 
 /** SpokePoolPeriphery per source chain (across-protocol/contracts deployed-addresses.json, 2026-10-06) */
 const PERIPHERY_DEFAULT = '0x97CCDBea4632140639aD5eA9b944aa034eb15fD4';
@@ -30,26 +26,12 @@ export const ACROSS_SOURCE_SPOKE_POOLS: Readonly<Record<number, string>> = {
   42161: '0xe35e9842fceaCA96570B734083f4a58e8F7C5f2A',
   59144: '0x7E63A5f1a8F0B4d0934B2f2327DAED3F6bb2ee75',
 };
-const bridgeable = (chainId: number, token: string) => {
-  const t = ACROSS_TOKENS[chainId];
-  return !!t && ((t.weth !== null && eqAddr(t.weth, token)) || t.stables.some((s) => eqAddr(s, token)));
-};
-/**
- * Exchanges a swapAndBridge may swap through on the source: 0x's AllowanceHolder, LI.FI's Diamond,
- * and Uniswap's Universal Router where it is pinned (BNB Chain, Polygon)
- */
-const sourceExchanges = (chainId: number) => [ZEROX_ALLOWANCE_HOLDER, LIFI_DIAMOND, ...(UNIVERSAL_ROUTERS[chainId] ? [UNIVERSAL_ROUTERS[chainId]!] : [])];
 
 const PERIPHERY_ABI = parseAbi([
   'function depositNative(address spokePool, address depositor, bytes32 recipient, address inputToken, uint256 inputAmount, bytes32 outputToken, uint256 outputAmount, uint256 destinationChainId, bytes32 exclusiveRelayer, uint32 quoteTimestamp, uint32 fillDeadline, uint32 exclusivityParameter, bytes message)',
-  'struct Fees { uint256 amount; address recipient; }',
-  'struct BaseDepositData { address inputToken; bytes32 outputToken; uint256 outputAmount; address depositor; bytes32 recipient; uint256 destinationChainId; bytes32 exclusiveRelayer; uint32 quoteTimestamp; uint32 fillDeadline; uint32 exclusivityParameter; bytes message; }',
-  'struct SwapAndDepositData { Fees submissionFees; BaseDepositData depositData; address swapToken; address exchange; uint8 transferType; uint256 swapTokenAmount; uint256 minExpectedInputTokenAmount; bytes routerCalldata; bool enableProportionalAdjustment; address spokePool; uint256 nonce; }',
-  'function swapAndBridge(SwapAndDepositData swapAndDepositData)',
 ]);
 
 const eq = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-function eqAddr(a: string, b: string) { return a.toLowerCase() === b.toLowerCase(); }
 const bytes32Of = (address: string) => `0x${address.slice(2).toLowerCase().padStart(64, '0')}`;
 const addressOf = (word: string): string | null => (/^0x0{24}[0-9a-f]{40}$/i.test(word) ? `0x${word.slice(26)}` : null);
 
@@ -62,65 +44,37 @@ export interface SponsoredAcrossExpect {
   recipient: string;
   /** What the sweep routes into the bridge (the quote's bridge.inputAmount) */
   value: bigint;
-  /** The least native the destination may deliver (the quote's estimatedReceive) */
+  /** The least the destination may deliver (the quote's estimatedReceive) */
   minNative: bigint;
 }
 
 /**
- * Checks a sponsored-chain Across deposit end to end.
- * @returns the 0x Settler the destination swap runs through (the caller confirms it in 0x's
- *   registry on the destination chain), or null when there is none to confirm
+ * Checks a sponsored-chain Across deposit: a plain WETH-to-WETH depositNative (paid out as native
+ * ETH) into Across's SpokePool, refunding to this wallet, paying the address set at least the
+ * amount shown. The caller still checks that the recipient is not a contract on the destination.
  */
-export function verifySponsoredAcross(tx: { to: string; data: string }, x: SponsoredAcrossExpect): { settler: string | null } {
+export function verifySponsoredAcross(tx: { to: string; data: string }, x: SponsoredAcrossExpect): void {
   const fail = (why: string): never => { throw new Error(`Across route refused: ${why}`); };
   const spokePool = ACROSS_SOURCE_SPOKE_POOLS[x.fromChainId] ?? fail(`no known Across SpokePool on chain ${x.fromChainId}`);
+  const sourceWeth = ACROSS_TOKENS[x.fromChainId]?.weth ?? fail(`Across does not carry ETH from chain ${x.fromChainId}`);
+  const destWeth = ACROSS_TOKENS[x.toChainId]?.weth ?? fail(`Across does not deliver ETH on chain ${x.toChainId}`);
   if (!eq(tx.to, ACROSS_PERIPHERIES[x.fromChainId] ?? PERIPHERY_DEFAULT)) fail(`it targets ${tx.to}, not the Across periphery`);
 
-  let decoded;
+  let args;
   try {
-    decoded = decodeFunctionData({ abi: PERIPHERY_ABI, data: tx.data as Hex });
+    const decoded = decodeFunctionData({ abi: PERIPHERY_ABI, data: tx.data as Hex });
+    args = decoded.args;
   } catch {
-    return fail('it is not a known Across deposit');
+    return fail('it swaps or is not a plain Across deposit; ZeroDust only uses plain ETH deposits');
   }
-
-  let dep: { depositor: string; recipient: string; destinationChainId: bigint; outputToken: string; outputAmount: bigint; message: Hex };
-  if (decoded.functionName === 'depositNative') {
-    const [pool, depositor, recipient, inputToken, inputAmount, outputToken, outputAmount, destinationChainId, , , , , message] = decoded.args;
-    if (!eq(pool, spokePool)) fail(`it deposits into ${pool}, not Across's SpokePool`);
-    if (inputAmount !== x.value) fail('the amount deposited is not the amount sent');
-    const weth = ACROSS_TOKENS[x.fromChainId]?.weth;
-    if (!weth || !eq(inputToken, weth)) fail('a native deposit that is not WETH on the source');
-    dep = { depositor, recipient, destinationChainId, outputToken, outputAmount, message };
-  } else {
-    const d = decoded.args[0];
-    if (!eq(d.spokePool, spokePool)) fail(`it deposits into ${d.spokePool}, not Across's SpokePool`);
-    if (d.submissionFees.amount !== 0n) fail('it pays a submission fee to someone');
-    if (d.swapTokenAmount !== x.value) fail('the amount swapped is not the amount sent');
-    if (!sourceExchanges(x.fromChainId).some((e) => eq(e, d.exchange))) fail(`the source swap runs through ${d.exchange}`);
-    // The periphery reverts unless the swap returns this much, and it bridges at most that
-    if (d.minExpectedInputTokenAmount < d.depositData.outputAmount) fail('the source swap may return less than is bridged');
-    if (!bridgeable(x.fromChainId, d.depositData.inputToken)) fail(`it bridges ${d.depositData.inputToken}, not a token Across carries`);
-    dep = d.depositData;
-  }
-
-  if (!eq(dep.depositor, x.user)) fail(`refunds go to ${dep.depositor}, not this wallet`);
-  if (dep.destinationChainId !== BigInt(x.toChainId)) fail(`it goes to chain ${dep.destinationChainId}, not ${x.toChainId}`);
-  if (dep.outputAmount <= 0n) fail('nothing is bridged');
-
-  const bridged = addressOf(dep.outputToken) ?? fail('the bridged token is not an address');
-
-  // A plain deposit pays the recipient directly: WETH, which Across pays out as native ETH
-  if (dep.message === '0x') {
-    if (!eq(dep.recipient, bytes32Of(x.recipient))) fail('the deposit pays someone other than the address you set');
-    const weth = ACROSS_TOKENS[x.toChainId]?.weth;
-    if (!weth || !eq(bridged, weth)) fail('the deposit delivers another token than the native one');
-    if (dep.outputAmount < x.minNative) fail('the deposit may deliver less than the amount shown');
-    return { settler: null };
-  }
-
-  // Otherwise Across's handler receives it and runs the message
-  const handler = ACROSS_HANDLERS[x.toChainId] ?? fail(`no known Across handler on chain ${x.toChainId}`);
-  if (!eq(dep.recipient, bytes32Of(handler))) fail('the deposit does not go to Across\'s handler for the destination');
-  if (!bridgeable(x.toChainId, bridged)) fail(`it delivers ${bridged}, not a token Across carries`);
-  return verifyAcrossMessage(dep.message, { toChainId: x.toChainId, recipient: x.recipient, bridged, bridgedAmount: dep.outputAmount, minNative: x.minNative }, fail);
+  const [pool, depositor, recipient, inputToken, inputAmount, outputToken, outputAmount, destinationChainId, , , , , message] = args;
+  if (!eq(pool, spokePool)) fail(`it deposits into ${pool}, not Across's SpokePool`);
+  if (!eq(inputToken, sourceWeth)) fail('a native deposit that is not WETH on the source');
+  if (inputAmount !== x.value) fail('the amount deposited is not the amount sent');
+  if (!eq(depositor, x.user)) fail(`refunds go to ${depositor}, not this wallet`);
+  if (destinationChainId !== BigInt(x.toChainId)) fail(`it goes to chain ${destinationChainId}, not ${x.toChainId}`);
+  if (message !== '0x') fail('it runs a destination message; ZeroDust only uses plain ETH deposits');
+  if (!eq(recipient, bytes32Of(x.recipient))) fail('the deposit pays someone other than the address you set');
+  if (!eq(addressOf(outputToken) ?? '', destWeth)) fail('the deposit delivers another token than ETH');
+  if (outputAmount < x.minNative) fail('the deposit may deliver less than the amount shown');
 }
