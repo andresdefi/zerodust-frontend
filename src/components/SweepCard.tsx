@@ -10,6 +10,7 @@ import { ChevronIcon, DownIcon, PencilIcon, RefreshIcon } from './icons';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
 import { serviceFeeUsd } from '../lib/fees';
 import { deliversOnlyToSender } from '@zerodust/sdk';
+import { durationText } from '../sweep/timing';
 import { isRouted, plainReason, rowToken, type Choice, type DestTotal, type Row, type SweepModel } from '../sweep/useSweep';
 
 const CHOICES: Record<Exclude<Choice, 'elsewhere' | 'address'> | 'leave', { label: string; text: (amount: string, dest: string) => string; danger?: boolean; quiet?: boolean }> = {
@@ -191,7 +192,15 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                 })()}
                 {!r.canSweep && <span className="detail muted">{r.unavailable ?? 'Too small to sweep'}</span>}
                 {st?.phase === 'quoting' && <span className="detail muted">Checking…</span>}
-                {st?.phase === 'ready' && m.bridgeOf[r.chainId] && <span className="detail muted">Bridged by {m.bridgeOf[r.chainId]}</span>}
+                {st?.phase === 'ready' && m.bridgeOf[r.chainId] && (() => {
+                  const expected = m.expectedFor(r);
+                  return (
+                    <span className="detail muted">
+                      Bridged by {m.bridgeOf[r.chainId]}{expected && `, usually ${durationText(expected.seconds)}`}
+                      {expected?.slowLately && <span className="warn-text">. Slower than usual lately</span>}
+                    </span>
+                  );
+                })()}
                 {st?.phase === 'no-route' && !needs && <span className="detail warn-text" title={st.detail}>{plainReason(st.detail ?? '', r.token, r.name, r)}</span>}
                 {needs && (
                   <span className="detail split">
