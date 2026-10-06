@@ -63,6 +63,12 @@ export function SecurityPage({ build }: { build: BuildRecord }) {
           the ZeroDust contract, and the sweep cannot finish unless your balance ends at exactly 0.
         </li>
         <li>
+          With MetaMask: the router's address is fixed in the page, not taken from the API. Each chain's
+          quote gets the same checks as a key sweep, and the one message you sign is built in the page from
+          those checked quotes. A quote or message that names another contract or differs in any field is
+          refused before MetaMask is asked to sign.
+        </li>
+        <li>
           Chains without a sponsor: the page checks the plan the API sends (it spends your balance to the
           wei, the fee is at most 5%, the deposit names your address) and replays it on a copy of the chain
           inside the page before signing. A plan that fails any check is refused, never adjusted.
