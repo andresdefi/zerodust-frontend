@@ -313,3 +313,10 @@ describe('verifySponsoredAcross: steps must run swap, unwrap, then pay out', () 
     expect(() => verifySponsoredAcross(withMessage(k, (m) => moveBefore(m, isUnwrap, isSwap)), expect_(k))).toThrow(/unwrap runs before the swap|paid out before/);
   });
 });
+
+describe('verifySponsoredAcross: only the swap, unwrap, drains and Across logging may run', () => {
+  it.each(['8453-56', '8453-43114'])('%s: emitData on another contract is refused', (k) => {
+    const other = withMessage(k, (m) => { m.calls.find((c) => c.callData.startsWith('0xd836083e'))!.target = EVIL; });
+    expect(() => verifySponsoredAcross(other, expect_(k))).toThrow(/not Across's logger/);
+  });
+});
