@@ -196,8 +196,6 @@ export function useSweep(wallet: Wallet) {
   const [swept, setSwept] = useState(false);
   // Direct chains: a fee transfer that landed before its sweep failed is not charged again
   const feePaid = useRef<Record<number, string>>({});
-  // MetaMask: the permission router the API quotes (the same address on every chain)
-  const router = useRef<Address | null>(null);
 
   const setState = (chainId: number, state: RowState) => setStates((prev) => ({ ...prev, [chainId]: state }));
 
@@ -509,7 +507,6 @@ export function useSweep(wallet: Wallet) {
         // A permission quote: nothing is signed until the sweep
         try {
           const quote = await permissionQuote({ fromChainId: row.chainId, toChainId: target.toChainId, user: address, destination: getAddress(target.recipient) });
-          router.current = quote.permission.router;
           setBridge(row.chainId, quote.bridge?.displayName);
           setState(row.chainId, isRouted(choice) && !isExit(choice)
             ? { phase: 'ready', choice, receive: BigInt(quote.estimatedReceive), toChainId: target.toChainId, token: rowToken(row.chainId, target.toChainId) }
@@ -641,14 +638,8 @@ export function useSweep(wallet: Wallet) {
       const m = meta.get(chainId)!;
       if (detail !== 'failed') setState(chainId, { phase: 'sweeping', detail, choice: m.choice });
     };
-    let routerAddress = router.current;
-    if (!routerAddress && targets[0]) {
-      const t0 = meta.get(targets[0].chainId)!;
-      routerAddress = (await permissionQuote({ fromChainId: t0.row.chainId, toChainId: t0.target.toChainId, user: address, destination: getAddress(t0.target.recipient) })).permission.router;
-    }
     const results = await sweepBatchWithPermissions(
       session!,
-      routerAddress!,
       targets.map((row) => {
         const m = meta.get(row.chainId)!;
         return {
