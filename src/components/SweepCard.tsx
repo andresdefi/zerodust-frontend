@@ -71,10 +71,15 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
             </>
           )}
         </div>
-        <div className="actions">
-          {m.stage === 'error'
-            ? <button type="button" className="btn btn-primary btn-block" onClick={m.reload}>Try again</button>
-            : m.stage === 'empty' && <button type="button" className="btn btn-ghost btn-block" onClick={onForget}>Load another wallet</button>}
+        <div className={m.stage === 'empty' ? 'actions two' : 'actions'}>
+          {m.stage === 'error' && <button type="button" className="btn btn-primary btn-block" onClick={m.reload}>Try again</button>}
+          {m.stage === 'empty' && (
+            <>
+              {/* A wallet funded after it was loaded: read the chains again without reloading it */}
+              <button type="button" className="btn btn-ghost btn-block" onClick={onForget}>Load another wallet</button>
+              <button type="button" className="btn btn-primary btn-block" onClick={m.reload} disabled={m.busy}>{m.busy ? 'Checking…' : 'Check again'}</button>
+            </>
+          )}
         </div>
       </section>
     );
@@ -111,6 +116,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
   let action: { label: string; onClick?: () => void; disabled?: boolean };
   if (m.destination === null) action = { label: 'Choose where it goes', onClick: () => setPickerOpen(true) };
   else if (!m.recipientValid) action = { label: 'Enter a valid address', disabled: true };
+  else if (m.selfOnly) action = { label: 'Enter another address', onClick: () => setEditing(true) };
   else if (m.selectedRows.length === 0) action = { label: 'Select a chain to sweep', disabled: true };
   else if (checked) action = { label: `Sweep ${m.readyRows.length} chain${m.readyRows.length === 1 ? '' : 's'}`, onClick: () => setConfirmOpen(true), disabled: m.busy };
   else action = { label: m.busy ? 'Checking…' : 'Check sweep', onClick: m.check, disabled: m.busy };
@@ -119,7 +125,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
     <section className="card" aria-labelledby="sweep-title">
       <WalletHead title="Sweep" address={m.address} titleId="sweep-title" />
       <p className="wallet-line">
-        Loaded <span className="addr">{m.address}</span>. Check this is the wallet you meant.
+        {m.wallet === 'metamask' ? 'Connected MetaMask account' : 'Loaded'} <span className="addr">{m.address}</span>. Check this is the wallet you meant.
         {clipboard === 'cleared' && ' Clipboard wiped.'}
       </p>
 
@@ -162,7 +168,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                     {formatAmount(r.balance, r.decimals)} {r.token}
                   </span>
                 </span>
-                {isDest && <span className="detail muted">Destination chain: nothing to move</span>}
+                {isDest && <span className="detail muted">Same chain, same wallet: nothing would move</span>}
                 {!isDest && !blocked && (() => {
                   const to = m.elsewhere[r.chainId] ?? m.destination;
                   const token = to === null ? undefined : rowToken(r.chainId, to);
@@ -172,7 +178,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                     </span>
                   );
                 })()}
-                {!r.canSweep && <span className="detail muted">Too small to sweep</span>}
+                {!r.canSweep && <span className="detail muted">{r.unavailable ?? 'Too small to sweep'}</span>}
                 {st?.phase === 'quoting' && <span className="detail muted">Checking…</span>}
                 {st?.phase === 'ready' && m.bridgeOf[r.chainId] && <span className="detail muted">Bridged by {m.bridgeOf[r.chainId]}</span>}
                 {st?.phase === 'no-route' && !needs && <span className="detail warn-text" title={st.detail}>{plainReason(st.detail ?? '', r.token, r.name, r)}</span>}
@@ -268,7 +274,12 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
               : <div className="sub">{m.destination === null ? 'Pick the chain that receives everything' : 'Check for a quote'}</div>}
           </div>
         </div>
-        {(editing || !m.toSelf) && (
+        {m.selfOnly && (
+          <p className="field-warn" role="alert">
+            {m.destRow?.name ?? 'This chain'} to the same wallet on {m.destRow?.name ?? 'the same chain'} moves nothing. To empty it, receive at another address.
+          </p>
+        )}
+        {(editing || !m.toSelf || m.selfOnly) && (
           <div className="recipient">
             <label className="addr-label" htmlFor="recipient">Receive at</label>
             <input
