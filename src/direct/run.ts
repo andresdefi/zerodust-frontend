@@ -2,7 +2,7 @@ import { chainConfig as zkChainConfig } from 'viem/zksync';
 import type { Hex, LocalAccount } from 'viem';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { isRegisteredSettler, ZEROX_DEPLOYER, ZEROX_REGISTRY_CALLS } from './across';
-import { directChains, FIXED_PRICE_CHAINS, GASLIMIT_CHAINS, ZK_PAYMASTERS, prepareExit, preparePlan, TX_GAP_BLOCKS, type DirectPlan, type PlanMode, type Target } from './plan';
+import { directChains, FIXED_PRICE_CHAINS, GASLIMIT_CHAINS, tokenExitFor, ZK_PAYMASTERS, prepareExit, preparePlan, TX_GAP_BLOCKS, type DirectPlan, type PlanMode, type Target } from './plan';
 import { checkReplay, replay } from './replay';
 import { verifyPlan } from './verify';
 
@@ -71,6 +71,12 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string)
     // The chain charges its network price whatever is offered: any other price leaves dust
     const network = BigInt(await rpc<string>(t.chainId, 'eth_gasPrice', []));
     if (plan.txs.some((tx) => BigInt(tx.gasPrice) !== network)) throw new Error('Plan refused: its gas price is not the network gas price, so the sweep would leave dust');
+  }
+  const tokenExit = mode === 'exit' ? tokenExitFor(t.chainId, t.toChainId) : undefined;
+  if (tokenExit) {
+    // The OFT spends a wrapped balance first and would keep the native value as its fee
+    const wrapped = await rpc<string>(t.chainId, 'eth_call', [{ to: tokenExit.oft, data: `0x70a08231${t.from.slice(2).toLowerCase().padStart(64, '0')}` }, 'latest']);
+    if (BigInt(wrapped) !== 0n) throw new Error(`Plan refused: this wallet holds wrapped ${tokenExit.token.symbol} on the bridge; unwrap it first`);
   }
   const checks = verifyPlan(plan, { ...t, mode, ...wallet });
   // ZK-stack chains: the paymaster pays all gas, so the values adding up to the balance (checked

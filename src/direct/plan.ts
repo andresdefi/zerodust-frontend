@@ -32,6 +32,28 @@ export const GASLIMIT_CHAINS: ReadonlySet<number> = new Set([143]);
 export const FIXED_PRICE_CHAINS: ReadonlySet<number> = new Set([40]);
 
 /**
+ * Direct chains whose own bridge is the exit (the API's route 'oft'): a
+ * LayerZero v1 native OFT that delivers the chain's token as an ERC-20 on one
+ * destination, not gas (owner decision 2026-10-07, like MITO). Pinned here: a
+ * plan naming another contract, chain or token is refused.
+ */
+export const TOKEN_EXITS: Readonly<Record<number, {
+  toChainId: number;
+  oft: string;
+  lzChainId: number;
+  bridge: string;
+  token: { symbol: string; address: string; decimals: number };
+}>> = {
+  40: {
+    toChainId: 8453, oft: '0x02Ea28694Ae65358Be92bAFeF5Cb8C211f33Db1A', lzChainId: 184, bridge: "Telos's own bridge",
+    token: { symbol: 'TLOS', address: '0x7252c865c05378Ffc15120F428dd65804dD0CE63', decimals: 18 },
+  },
+};
+
+/** The pinned token exit from `chainId` to `toChainId`, if there is one */
+export const tokenExitFor = (chainId: number, toChainId: number) => (TOKEN_EXITS[chainId]?.toChainId === toChainId ? TOKEN_EXITS[chainId] : undefined);
+
+/**
  * ZK-stack chains (direct kind 'zk'): the ZeroDust paymaster pays all gas, so a
  * fee transaction plus a sweep whose values add up to the balance leave exactly
  * 0. Pinned here, not taken from the API: a plan naming another paymaster is
@@ -51,7 +73,7 @@ export const PAYMASTER_GENERAL = '0x8c5a3445';
  */
 export const TX_GAP_BLOCKS: Readonly<Record<number, number>> = { 143: 4 };
 
-export type DirectRoute = 'gaszip' | 'relay' | 'across' | 'transfer' | 'burn' | 'donate' | 'lifi';
+export type DirectRoute = 'gaszip' | 'relay' | 'across' | 'transfer' | 'burn' | 'donate' | 'lifi' | 'oft';
 export type PlanMode = 'route' | 'burn' | 'donate' | 'exit';
 
 export interface PlanTx {
@@ -87,6 +109,8 @@ export interface DirectPlan {
   txGapBlocks?: number;
   /** Across: unix seconds after which the deposit reverts; the page recomputes it from the calldata */
   expiresAt?: number;
+  /** Token exits: what arrives is this token, not gas (the page uses its own pinned TOKEN_EXITS) */
+  receiveToken?: { chainId: number; symbol: string; address: string; decimals: number };
 }
 
 export interface DirectChainInfo {

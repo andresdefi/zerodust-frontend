@@ -4,7 +4,7 @@ import { ZeroDust, ZeroDustAgent, deliveredToken, deliversOnlyToSender, type Des
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { inPool } from '../lib/pool';
 import { readState } from '../lib/rpc';
-import { deliveryStatus, directBalances, directChains, directRoute, BURN_ADDRESS, ZERODUST_ADDRESS, type PlanMode } from '../direct/plan';
+import { deliveryStatus, directBalances, directChains, directRoute, tokenExitFor, BURN_ADDRESS, ZERODUST_ADDRESS, type PlanMode } from '../direct/plan';
 import { broadcast, planChecked, settledBalance, signPlan } from '../direct/run';
 import { API_URL } from './constants';
 import { formatAmountUp } from '../lib/format';
@@ -92,7 +92,7 @@ export interface RowState {
 }
 
 /** Display names of the bridges a direct plan can use (the API's own adapters name the sponsored ones) */
-const DIRECT_BRIDGE_NAMES: Record<string, string> = { gaszip: 'Gas.zip', relay: 'Relay', across: 'Across', lifi: 'LI.FI' };
+const DIRECT_BRIDGE_NAMES: Record<string, string> = { gaszip: 'Gas.zip', relay: 'Relay', across: 'Across', lifi: 'LI.FI', oft: 'LayerZero' };
 
 /** The bridge that carries a sponsored quote, as the API names it (none for a same-chain transfer) */
 /** The quote's bridge id (gaszip, relay, across, hyperlane, endurance), for reports */
@@ -106,7 +106,7 @@ function quoteBridge(quote: unknown): string | undefined {
 
 /** The token a row delivers instead of gas on `toChainId`, if any (owner decision 2026-10-03) */
 export function rowToken(sourceChainId: number, toChainId: number): RowState['token'] {
-  const t = deliveredToken(sourceChainId, toChainId);
+  const t = deliveredToken(sourceChainId, toChainId) ?? tokenExitFor(sourceChainId, toChainId)?.token;
   return t ? { symbol: t.symbol, decimals: t.decimals } : undefined;
 }
 
@@ -393,6 +393,9 @@ export function useSweep(wallet: Wallet) {
       const minimum = directRoutes[row.chainId]?.minimumBalanceWei;
       if (available === false && minimum) return tooSmallText(BigInt(minimum), row);
       const blocked = available === false || (available === null && (alts[row.chainId]?.length ?? 0) > 0);
+      // Its own bridge is the way out, as a token: not a passing outage
+      const tokenExit = tokenExitFor(row.chainId, destination);
+      if (blocked && tokenExit) return `No gas bridge takes ${row.token} to ${destRow?.name ?? 'this chain'}; ${tokenExit.bridge} sends it as the ${tokenExit.token.symbol} token`;
       return blocked ? `No bridge takes ${row.token} to ${destRow?.name ?? 'this chain'} right now` : null;
     }
     // Its bridge has no recipient: it can only pay the loaded wallet (Endurance)
@@ -415,7 +418,9 @@ export function useSweep(wallet: Wallet) {
 
   /** The choices a chain with no route gets: a swap out where one exists (direct chains), else donate or burn */
   const choicesFor = (row: Row): Array<Exclude<Choice, 'elsewhere' | 'address'>> => {
-    const exit = row.direct && directRoutes[row.chainId]?.exit ? ['exit-donate', 'exit-burn'] as const : [];
+    // A token exit (the chain's own bridge): one option, its leftover counts toward ZeroDust's fee
+    const tokenExit = destination !== null && tokenExitFor(row.chainId, destination);
+    const exit = row.direct && directRoutes[row.chainId]?.exit ? (tokenExit ? ['exit-donate'] as const : ['exit-donate', 'exit-burn'] as const) : [];
     return [...exit, 'donate', 'burn'];
   };
 
@@ -495,7 +500,7 @@ export function useSweep(wallet: Wallet) {
           setBridge(row.chainId, DIRECT_BRIDGE_NAMES[plan.route]);
           setState(row.chainId, {
             phase: 'ready', choice, fee: BigInt(plan.fee),
-            ...(mode === 'burn' || mode === 'donate' ? {} : { receive: BigInt(plan.receive), toChainId: targetFor(row).toChainId }),
+            ...(mode === 'burn' || mode === 'donate' ? {} : { receive: BigInt(plan.receive), toChainId: targetFor(row).toChainId, token: rowToken(row.chainId, targetFor(row).toChainId) }),
           });
         } catch (error) {
           setState(row.chainId, { phase: 'no-route', detail: error instanceof Error ? error.message : 'No route' });
@@ -547,7 +552,7 @@ export function useSweep(wallet: Wallet) {
     const hashes: string[] = [];
     let last: RowState | undefined;
     const update = (s: Omit<RowState, 'choice'>) => {
-      last = { ...s, choice, toChainId, txHash: s.txHash ?? hash, sent: sentAny || hash !== undefined };
+      last = { ...s, choice, toChainId, token: rowToken(row.chainId, toChainId), txHash: s.txHash ?? hash, sent: sentAny || hash !== undefined };
       setState(row.chainId, last);
     };
     const onSent = (h: string) => {

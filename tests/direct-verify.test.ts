@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { encodeFunctionData, parseAbi } from 'viem';
 import { BURN_ADDRESS, GASZIP_DEPOSIT, LIFI_DIAMOND, ZERODUST_ADDRESS, type DirectPlan, type PlanTx } from '../src/direct/plan';
 import { totalSpend, verifyPlan, type PlanContext } from '../src/direct/verify';
 import { ACROSS, acrossDepositData, transferCall } from './fixtures/across-direct';
@@ -174,5 +175,46 @@ describe('verifyPlan: gas-limit chains (Monad) and Across', () => {
     const avax = { ...acrossPlan(), chainId: 43114 };
     expect(() => verifyPlan(avax, monCtx({ chainId: 43114 }))).toThrow(/only used on chains that charge the whole gas limit/);
     expect(() => verifyPlan({ ...acrossPlan(), receive: '0' }, monCtx())).toThrow(/nothing arriving/);
+  });
+});
+
+describe('verifyPlan: a token exit through the chain\'s own bridge (Telos -> TLOS on Base)', () => {
+  const OFT = '0x02Ea28694Ae65358Be92bAFeF5Cb8C211f33Db1A';
+  const SEND = parseAbi(['function sendFrom(address from, uint16 dstChainId, bytes32 toAddress, uint256 amount, (address refundAddress, address zroPaymentAddress, bytes adapterParams) callParams) payable']);
+  const AP = `0x0001${(200_000).toString(16).padStart(64, '0')}` as const;
+  const pad = (a: string) => `0x${a.slice(2).toLowerCase().padStart(64, '0')}` as `0x${string}`;
+  const AMOUNT = 5n * 10n ** 16n;
+  const telosCtx = (over: Partial<PlanContext> = {}) => ctx({ chainId: 40, toChainId: 8453, recipient: OTHER, mode: 'exit', ...over });
+  function plan(o: { from?: string; dst?: number; to?: string; refund?: string; amount?: bigint; target?: string; receive?: bigint; route?: DirectPlan['route'] } = {}): DirectPlan {
+    const data = encodeFunctionData({
+      abi: SEND, functionName: 'sendFrom',
+      args: [(o.from ?? FROM) as `0x${string}`, o.dst ?? 184, pad(o.to ?? OTHER), o.amount ?? AMOUNT, { refundAddress: (o.refund ?? ZERODUST_ADDRESS) as `0x${string}`, zroPaymentAddress: '0x0000000000000000000000000000000000000000', adapterParams: AP }],
+    });
+    const gas = 520_000n;
+    const value = BALANCE - FEE - 21_000n * PRICE - gas * PRICE - 42_000n * PRICE;
+    return {
+      chainId: 40, route: o.route ?? 'oft', requestId: null, receive: String(o.receive ?? o.amount ?? AMOUNT), fee: FEE.toString(), balance: BALANCE.toString(),
+      leftoverMax: String(gas * PRICE + 42_000n * PRICE),
+      txs: [tx({ kind: 'fee', to: ZERODUST_ADDRESS, value: FEE.toString() }), tx({ nonce: 5, to: o.target ?? OFT, data, value: value.toString(), gas: gas.toString() })],
+    };
+  }
+
+  it('accepts the pinned OFT sending from the wallet to the recipient on Base, refund to ZeroDust', () => {
+    expect(() => verifyPlan(plan(), telosCtx())).not.toThrow();
+  });
+
+  it('refuses another contract, sender, chain, recipient, a refund to the wallet, an amount it cannot carry, or a shown amount that differs', () => {
+    expect(() => verifyPlan(plan({ target: OTHER }), telosCtx())).toThrow(/Telos's own bridge/);
+    expect(() => verifyPlan(plan({ route: 'lifi' }), telosCtx())).toThrow(/Telos's own bridge/);
+    expect(() => verifyPlan(plan({ from: OTHER }), telosCtx())).toThrow(/another wallet/);
+    expect(() => verifyPlan(plan({ dst: 101 }), telosCtx())).toThrow(/another chain/);
+    expect(() => verifyPlan(plan({ to: FROM }), telosCtx())).toThrow(/pays someone else/);
+    expect(() => verifyPlan(plan({ refund: FROM }), telosCtx())).toThrow(/refund/);
+    expect(() => verifyPlan(plan({ amount: BALANCE }), telosCtx())).toThrow(/does not fit/);
+    expect(() => verifyPlan(plan({ receive: AMOUNT + 1n }), telosCtx())).toThrow(/amount shown/);
+  });
+
+  it('a Telos exit to any other chain is still a LI.FI swap', () => {
+    expect(() => verifyPlan(plan(), telosCtx({ toChainId: 1 }))).toThrow(/LI.FI/);
   });
 });

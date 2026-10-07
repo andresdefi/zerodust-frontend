@@ -1,5 +1,9 @@
 import { verifyAcrossDeposit } from './across';
+import { decodeFunctionData, parseAbi } from 'viem';
+import { tokenExitFor } from './plan';
 import { BURN_ADDRESS, GASLIMIT_CHAINS, GASZIP_DEPOSIT, LIFI_DIAMOND, PAYMASTER_GENERAL, RELAY_DEPOSIT_NATIVE, ZERODUST_ADDRESS, ZK_PAYMASTERS, type DirectPlan, type PlanMode } from './plan';
+
+const OFT_SEND = parseAbi(['function sendFrom(address from, uint16 dstChainId, bytes32 toAddress, uint256 amount, (address refundAddress, address zroPaymentAddress, bytes adapterParams) callParams) payable']);
 
 // The API is untrusted input: before anything is signed, the page checks the
 // plan against what the owner asked for and against chain state it read
@@ -95,10 +99,32 @@ export function verifyPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
     case 'donate':
       if (plan.route !== 'donate' || !eq(last.to, ZERODUST_ADDRESS) || last.data !== '0x') fail('the donation does not go to ZeroDust');
       return {};
-    case 'exit':
-      if (plan.route !== 'lifi' || last.kind !== 'swap' || !eq(last.to, LIFI_DIAMOND)) fail('the swap does not go to LI.FI\'s contract');
+    case 'exit': {
       if (ctx.toChainId === ctx.chainId) fail('a swap exit must leave the chain');
+      const tokenExit = tokenExitFor(ctx.chainId, ctx.toChainId);
+      if (!tokenExit) {
+        if (plan.route !== 'lifi' || last.kind !== 'swap' || !eq(last.to, LIFI_DIAMOND)) fail('the swap does not go to LI.FI\'s contract');
+        return {};
+      }
+      // The chain's own bridge: sendFrom(wallet, destination, recipient, amount, refund elsewhere than the wallet)
+      if (plan.route !== 'oft' || last.kind !== 'sweep' || !eq(last.to, tokenExit.oft)) fail(`the transfer does not go to ${tokenExit.bridge}`);
+      let args: readonly [string, number, string, bigint, { refundAddress: string; zroPaymentAddress: string }];
+      try {
+        args = decodeFunctionData({ abi: OFT_SEND, data: last.data as `0x${string}` }).args as typeof args;
+      } catch {
+        return fail('the bridge call is not a sendFrom');
+      }
+      const [from, dst, to, amount, params] = args;
+      if (!eq(from, ctx.from)) fail('the bridge transfer sends from another wallet');
+      if (dst !== tokenExit.lzChainId) fail('the bridge transfer goes to another chain');
+      if (to.toLowerCase() !== `0x${recipientBody.padStart(64, '0')}`) fail('the bridge transfer pays someone else');
+      // A refund to the wallet would leave dust; ZeroDust or the burn address only
+      if (!eq(params.refundAddress, ZERODUST_ADDRESS) && !eq(params.refundAddress, BURN_ADDRESS)) fail('the bridge fee refund does not go to ZeroDust');
+      if (BigInt(params.zroPaymentAddress) !== 0n) fail('the bridge transfer pays in ZRO');
+      if (amount === 0n || amount >= BigInt(last.value)) fail('the bridged amount does not fit in the value sent');
+      if (BigInt(plan.receive) !== amount) fail('the amount shown is not the amount bridged');
       return {};
+    }
     case 'route':
       break;
   }

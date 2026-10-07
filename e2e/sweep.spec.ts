@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { mockNetwork } from './fixtures';
+import { mockNetwork, TELOS } from './fixtures';
 
 /** Every place a key could leak to: DOM, input values, storage, requests, console */
 async function watchForKey(page: Page, key: string) {
@@ -546,4 +546,47 @@ test('lands on MetaMask: Connect MetaMask first, the key one click away, and a c
   await expect(page.getByRole('heading', { name: 'Load wallet' })).toBeVisible();
   await page.getByRole('button', { name: 'Use MetaMask' }).click();
   await expect(page.getByRole('heading', { name: 'Connect wallet' })).toBeVisible();
+});
+
+test('token exit: Telos leaves through its own bridge as TLOS (a token) on Base, said plainly; the leftover cents are donated', async ({ page }) => {
+  const key = generatePrivateKey();
+  const { swept, sent, reports } = await mockNetwork(page, privateKeyToAccount(key).address, { telos: true });
+  await page.goto('/');
+  await useKey(page);
+  await page.locator('.keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.row')).toHaveCount(4);
+  for (const name of ['Base', 'Optimism', 'Scroll']) await page.getByRole('checkbox', { name: `Sweep ${name}` }).uncheck();
+  await page.getByRole('button', { name: 'Choose where it goes' }).click();
+  await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^Base/ }).click();
+
+  const telos = page.locator('.row', { hasText: 'Telos' });
+  await expect(telos).toContainText("No gas bridge takes TLOS to Base; Telos's own bridge sends it as the TLOS token");
+  await telos.getByRole('button', { name: /choose/i }).click();
+  const option = page.getByRole('button', { name: /^Bridge out as TLOS \(token\)/ }).first();
+  await expect(option).toContainText("Telos's own bridge sends it to Base as the TLOS token, not ETH gas. The few cents of gas it does not use count toward ZeroDust's fee.");
+  // One option for a token exit: no burn variant, nothing framed as a donation
+  await expect(page.getByRole('button', { name: /burn the cents left/ })).toHaveCount(0);
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/telos-exit-menu.png` });
+  await option.click();
+  await expect(telos).toContainText('Bridged out as TLOS (token)');
+
+  await page.getByRole('button', { name: 'Check sweep' }).click();
+  await expect(page.getByRole('button', { name: 'Sweep 1 chain' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('.summary')).toContainText(/TLOS \(token\) on Base/);
+  await page.getByRole('button', { name: 'Sweep 1 chain' }).click();
+  const confirm = page.getByRole('dialog', { name: /Sweep 1 chain/ });
+  await expect(confirm).toContainText('Telos: arrives as TLOS, a token on Base, not ETH gas');
+  await expect(confirm).toContainText("Telos: bridged out through Telos's own bridge; the few cents of gas it does not use count toward ZeroDust's fee.");
+  await expect(confirm).not.toContainText('donated');
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/telos-exit-confirm.png` });
+  await confirm.getByRole('button', { name: 'Sweep 1 chain' }).click();
+  await expect(page.getByText('1 of 1 at zero')).toBeVisible({ timeout: 60_000 });
+  if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/telos-exit-done.png` });
+  // Fee, bridge send, then the leftover donated
+  expect(sent).toHaveLength(3);
+  expect(swept.has(TELOS)).toBe(true);
+  await expect.poll(() => reports.length).toBe(1);
+  expect(reports[0]).toMatchObject({ kind: 'direct', outcome: 'done', chainId: TELOS, route: 'oft', mode: 'exit' });
 });

@@ -136,12 +136,13 @@ describe('planChecked: a fixed-price chain (Telos)', () => {
       txs: [{ kind: 'sweep', to: OTHER, data: '0x', value: (bal - 21_000n * price).toString(), gas: '21000', gasPrice: price.toString(), nonce: 0 }],
     };
   };
-  const telosNet = (plan: DirectPlan, kind = 'fixedprice') => vi.fn(async (url: string, init?: RequestInit) => {
+  const telosNet = (plan: DirectPlan, kind = 'fixedprice', wrapped = 0n) => vi.fn(async (url: string, init?: RequestInit) => {
     const reply = (result: unknown) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
     if (url.includes('/direct/chains')) return new Response(JSON.stringify({ chains: [{ chainId: TELOS, name: 'Telos', token: 'TLOS', decimals: 18, explorerUrl: '', rpcUrl: '', kind }], prices: {} }));
-    if (url.includes('/direct/prepare')) return new Response(JSON.stringify(plan));
+    if (url.includes('/direct/prepare') || url.includes('/direct/exit')) return new Response(JSON.stringify(plan));
     const { method } = JSON.parse(String(init!.body)) as { method: string };
     if (method === 'eth_gasPrice') return reply(hex(NETWORK));
+    if (method === 'eth_call') return reply(hex(wrapped));
     if (method === 'eth_getBalance') return reply(hex(80n * 10n ** 18n));
     if (method === 'eth_getTransactionCount') return reply('0x0');
     throw new Error(`stop after the price check: ${method}`);
@@ -155,6 +156,11 @@ describe('planChecked: a fixed-price chain (Telos)', () => {
   it('passes the price check when the plan offers exactly the network price', async () => {
     vi.stubGlobal('fetch', telosNet(telosPlan(NETWORK)));
     await expect(run.planChecked(telosTarget, 'route')).rejects.not.toThrow(/gas price|disagree/);
+  });
+
+  it('refuses a token exit from a wallet holding wrapped TLOS on the bridge (it would be spent first)', async () => {
+    vi.stubGlobal('fetch', telosNet({ ...telosPlan(NETWORK), route: 'oft' }, 'fixedprice', 1n));
+    await expect(run.planChecked({ ...telosTarget, toChainId: 8453 }, 'exit')).rejects.toThrow(/wrapped TLOS/);
   });
 
   it('refuses when the API does not call Telos a fixed-price chain', async () => {
