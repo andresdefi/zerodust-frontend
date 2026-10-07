@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { encodeFunctionData, parseAbi } from 'viem';
 import type { DirectPlan, PlanTx } from '../src/direct/plan';
 import { ACROSS, acrossDepositData, addressWord } from './fixtures/across-direct';
 
@@ -136,13 +137,18 @@ describe('planChecked: a fixed-price chain (Telos)', () => {
       txs: [{ kind: 'sweep', to: OTHER, data: '0x', value: (bal - 21_000n * price).toString(), gas: '21000', gasPrice: price.toString(), nonce: 0 }],
     };
   };
-  const telosNet = (plan: DirectPlan, kind = 'fixedprice', wrapped = 0n) => vi.fn(async (url: string, init?: RequestInit) => {
+  const telosNet = (plan: DirectPlan, kind = 'fixedprice', wrapped = 0n, lzFee = 3n * 10n ** 18n) => vi.fn(async (url: string, init?: RequestInit) => {
     const reply = (result: unknown) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
     if (url.includes('/direct/chains')) return new Response(JSON.stringify({ chains: [{ chainId: TELOS, name: 'Telos', token: 'TLOS', decimals: 18, explorerUrl: '', rpcUrl: '', kind }], prices: {} }));
     if (url.includes('/direct/prepare') || url.includes('/direct/exit')) return new Response(JSON.stringify(plan));
     const { method } = JSON.parse(String(init!.body)) as { method: string };
     if (method === 'eth_gasPrice') return reply(hex(NETWORK));
-    if (method === 'eth_call') return reply(hex(wrapped));
+    if (method === 'eth_call') {
+      const data = String((JSON.parse(String(init!.body)) as { params: [{ data: string }] }).params[0].data);
+      // estimateSendFee: LayerZero's fee for the send; balanceOf: the wallet's wrapped TLOS
+      if (data.startsWith('0x365260b4')) return reply(`0x${lzFee.toString(16).padStart(64, '0')}${'0'.repeat(64)}`);
+      return reply(hex(wrapped));
+    }
     if (method === 'eth_getBalance') return reply(hex(80n * 10n ** 18n));
     if (method === 'eth_getTransactionCount') return reply('0x0');
     throw new Error(`stop after the price check: ${method}`);
@@ -161,6 +167,29 @@ describe('planChecked: a fixed-price chain (Telos)', () => {
   it('refuses a token exit from a wallet holding wrapped TLOS on the bridge (it would be spent first)', async () => {
     vi.stubGlobal('fetch', telosNet({ ...telosPlan(NETWORK), route: 'oft' }, 'fixedprice', 1n));
     await expect(run.planChecked({ ...telosTarget, toChainId: 8453 }, 'exit')).rejects.toThrow(/wrapped TLOS/);
+  });
+
+  it("refuses a token exit whose bridge fee is above LayerZero's own quote (the excess would go to ZeroDust)", async () => {
+    const OFT = '0x02Ea28694Ae65358Be92bAFeF5Cb8C211f33Db1A';
+    const AP = `0x0001${(200_000).toString(16).padStart(64, '0')}` as const;
+    const bal = 80n * 10n ** 18n;
+    const gas = 520_000n;
+    const value = bal - gas * NETWORK - 42_000n * NETWORK;
+    const exitPlan = (amount: bigint): DirectPlan => ({
+      chainId: TELOS, route: 'oft', requestId: null, fee: '0', balance: bal.toString(), receive: amount.toString(),
+      leftoverMax: String(gas * NETWORK + 42_000n * NETWORK),
+      txs: [{ kind: 'sweep', to: OFT, value: value.toString(), gas: gas.toString(), gasPrice: NETWORK.toString(), nonce: 0,
+        data: encodeFunctionData({ abi: parseAbi(['function sendFrom(address from, uint16 dstChainId, bytes32 toAddress, uint256 amount, (address refundAddress, address zroPaymentAddress, bytes adapterParams) callParams) payable']), functionName: 'sendFrom',
+          args: [FROM, 184, `0x${OTHER.slice(2).padStart(64, '0')}`, amount, { refundAddress: '0x01eD5c94DE39E73C986b98B85C2c0A3d1BEDff7D', zroPaymentAddress: '0x0000000000000000000000000000000000000000', adapterParams: AP }] }) }],
+    });
+    const target = { ...telosTarget, toChainId: 8453 };
+    // A tenth of the value bridged: the rest would be "fee", refunded to ZeroDust
+    vi.stubGlobal('fetch', telosNet(exitPlan(10n ** 18n), 'fixedprice', 0n));
+    await expect(run.planChecked(target, 'exit')).rejects.toThrow(/above what the bridge quotes/);
+    // The quoted 3 TLOS fee with 10%: past the fee check (the replay then runs, and this mock stops it)
+    const amount = ((value - 33n * 10n ** 17n) / 10n ** 14n) * 10n ** 14n;
+    vi.stubGlobal('fetch', telosNet(exitPlan(amount), 'fixedprice', 0n));
+    await expect(run.planChecked(target, 'exit')).rejects.not.toThrow(/above what the bridge quotes|refused/);
   });
 
   it('refuses when the API does not call Telos a fixed-price chain', async () => {

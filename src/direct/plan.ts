@@ -41,14 +41,22 @@ export const TOKEN_EXITS: Readonly<Record<number, {
   toChainId: number;
   oft: string;
   lzChainId: number;
+  /** The only adapterParams accepted: type 1 with the OFT's minimum destination gas (it prices the fee) */
+  adapterParams: string;
+  /** Amounts round down to a multiple of this (the OFT's shared decimals); the rounding joins the fee */
+  dustRate: bigint;
   bridge: string;
   token: { symbol: string; address: string; decimals: number };
 }>> = {
   40: {
-    toChainId: 8453, oft: '0x02Ea28694Ae65358Be92bAFeF5Cb8C211f33Db1A', lzChainId: 184, bridge: "Telos's own bridge",
+    toChainId: 8453, oft: '0x02Ea28694Ae65358Be92bAFeF5Cb8C211f33Db1A', lzChainId: 184,
+    adapterParams: `0x0001${(200_000).toString(16).padStart(64, '0')}`, dustRate: 10n ** 14n, bridge: "Telos's own bridge",
     token: { symbol: 'TLOS', address: '0x7252c865c05378Ffc15120F428dd65804dD0CE63', decimals: 18 },
   },
 };
+
+/** Headroom the page allows on the LayerZero fee it reads itself (the planner adds 10%) */
+export const OFT_FEE_MARGIN_PERCENT = 110n;
 
 /** The pinned token exit from `chainId` to `toChainId`, if there is one */
 export const tokenExitFor = (chainId: number, toChainId: number) => (TOKEN_EXITS[chainId]?.toChainId === toChainId ? TOKEN_EXITS[chainId] : undefined);

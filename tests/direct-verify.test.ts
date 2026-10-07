@@ -185,16 +185,16 @@ describe('verifyPlan: a token exit through the chain\'s own bridge (Telos -> TLO
   const pad = (a: string) => `0x${a.slice(2).toLowerCase().padStart(64, '0')}` as `0x${string}`;
   const AMOUNT = 5n * 10n ** 16n;
   const telosCtx = (over: Partial<PlanContext> = {}) => ctx({ chainId: 40, toChainId: 8453, recipient: OTHER, mode: 'exit', ...over });
-  function plan(o: { from?: string; dst?: number; to?: string; refund?: string; amount?: bigint; target?: string; receive?: bigint; route?: DirectPlan['route'] } = {}): DirectPlan {
+  function plan(o: { from?: string; dst?: number; to?: string; refund?: string; amount?: bigint; target?: string; receive?: bigint; route?: DirectPlan['route']; adapterParams?: `0x${string}`; leaveExtra?: bigint } = {}): DirectPlan {
     const data = encodeFunctionData({
       abi: SEND, functionName: 'sendFrom',
-      args: [(o.from ?? FROM) as `0x${string}`, o.dst ?? 184, pad(o.to ?? OTHER), o.amount ?? AMOUNT, { refundAddress: (o.refund ?? ZERODUST_ADDRESS) as `0x${string}`, zroPaymentAddress: '0x0000000000000000000000000000000000000000', adapterParams: AP }],
+      args: [(o.from ?? FROM) as `0x${string}`, o.dst ?? 184, pad(o.to ?? OTHER), o.amount ?? AMOUNT, { refundAddress: (o.refund ?? ZERODUST_ADDRESS) as `0x${string}`, zroPaymentAddress: '0x0000000000000000000000000000000000000000', adapterParams: o.adapterParams ?? AP }],
     });
     const gas = 520_000n;
-    const value = BALANCE - FEE - 21_000n * PRICE - gas * PRICE - 42_000n * PRICE;
+    const value = BALANCE - FEE - 21_000n * PRICE - gas * PRICE - 42_000n * PRICE - (o.leaveExtra ?? 0n);
     return {
       chainId: 40, route: o.route ?? 'oft', requestId: null, receive: String(o.receive ?? o.amount ?? AMOUNT), fee: FEE.toString(), balance: BALANCE.toString(),
-      leftoverMax: String(gas * PRICE + 42_000n * PRICE),
+      leftoverMax: String(gas * PRICE + 42_000n * PRICE + (o.leaveExtra ?? 0n)),
       txs: [tx({ kind: 'fee', to: ZERODUST_ADDRESS, value: FEE.toString() }), tx({ nonce: 5, to: o.target ?? OFT, data, value: value.toString(), gas: gas.toString() })],
     };
   }
@@ -212,6 +212,12 @@ describe('verifyPlan: a token exit through the chain\'s own bridge (Telos -> TLO
     expect(() => verifyPlan(plan({ refund: FROM }), telosCtx())).toThrow(/refund/);
     expect(() => verifyPlan(plan({ amount: BALANCE }), telosCtx())).toThrow(/does not fit/);
     expect(() => verifyPlan(plan({ receive: AMOUNT + 1n }), telosCtx())).toThrow(/amount shown/);
+  });
+
+  it('refuses other destination gas (it prices the fee) and a plan leaving more than the leftover transfer needs', () => {
+    expect(() => verifyPlan(plan({ adapterParams: `0x0001${(5_000_000).toString(16).padStart(64, '0')}` }), telosCtx())).toThrow(/destination gas/);
+    // Within the bound at exactly two plain transfers' gas; one wei more is refused
+    expect(() => verifyPlan(plan({ leaveExtra: 1n }), telosCtx())).toThrow(/leaves more than the leftover transfer needs/);
   });
 
   it('a Telos exit to any other chain is still a LI.FI swap', () => {

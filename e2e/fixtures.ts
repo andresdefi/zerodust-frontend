@@ -446,6 +446,8 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       // 0x's Settler registry on a destination (Across routes): ownerOf(2) is the fixture's Settler
       if (r.method === 'eth_call') {
         const data = String((r.params?.[0] as { data?: string } | undefined)?.data ?? '');
+        // Telos's bridge: LayerZero's fee (3.2 TLOS) for estimateSendFee
+        if (data.startsWith('0x365260b4')) return { jsonrpc: '2.0', id: r.id, result: `0x${(32n * 10n ** 17n).toString(16).padStart(64, '0')}${'0'.repeat(64)}` };
         return { jsonrpc: '2.0', id: r.id, result: addressWord(data.startsWith('0x6352211e') ? ACROSS.settler : ZERO) };
       }
       const result = {
