@@ -2,7 +2,7 @@ import { chainConfig as zkChainConfig } from 'viem/zksync';
 import type { Hex, LocalAccount } from 'viem';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { isRegisteredSettler, ZEROX_DEPLOYER, ZEROX_REGISTRY_CALLS } from './across';
-import { directChains, GASLIMIT_CHAINS, ZK_PAYMASTERS, prepareExit, preparePlan, TX_GAP_BLOCKS, type DirectPlan, type PlanMode, type Target } from './plan';
+import { directChains, FIXED_PRICE_CHAINS, GASLIMIT_CHAINS, ZK_PAYMASTERS, prepareExit, preparePlan, TX_GAP_BLOCKS, type DirectPlan, type PlanMode, type Target } from './plan';
 import { checkReplay, replay } from './replay';
 import { verifyPlan } from './verify';
 
@@ -66,6 +66,12 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string)
   // The page's own list decides how a plan is checked; the API must agree with it
   if ((kinds[t.chainId] === 'gaslimit') !== GASLIMIT_CHAINS.has(t.chainId)) throw new Error('Plan refused: the API and this page disagree on how this chain charges gas');
   if ((kinds[t.chainId] === 'zk') !== (ZK_PAYMASTERS[t.chainId] !== undefined)) throw new Error('Plan refused: the API and this page disagree on how this chain pays gas');
+  if ((kinds[t.chainId] === 'fixedprice') !== FIXED_PRICE_CHAINS.has(t.chainId)) throw new Error('Plan refused: the API and this page disagree on how this chain prices gas');
+  if (FIXED_PRICE_CHAINS.has(t.chainId)) {
+    // The chain charges its network price whatever is offered: any other price leaves dust
+    const network = BigInt(await rpc<string>(t.chainId, 'eth_gasPrice', []));
+    if (plan.txs.some((tx) => BigInt(tx.gasPrice) !== network)) throw new Error('Plan refused: its gas price is not the network gas price, so the sweep would leave dust');
+  }
   const checks = verifyPlan(plan, { ...t, mode, ...wallet });
   // ZK-stack chains: the paymaster pays all gas, so the values adding up to the balance (checked
   // above) is the whole exact-zero argument; there is no EVM fork to replay them on
