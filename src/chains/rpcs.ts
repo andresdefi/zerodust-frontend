@@ -55,6 +55,8 @@ export const RPC_URLS: Record<number, string> = {
   // Kaia and 0G (added 2026-10-07; probe-rpcs.mjs passed for both)
   8217: 'https://public-en.node.kaia.io',
   16661: 'https://evmrpc.0g.ai',
+  // Arbitrum Nova (added 2026-10-07; probe-rpcs.mjs passed)
+  42170: 'https://nova.arbitrum.io/rpc',
   124816: 'https://rpc.mitosis.org',
   648: 'https://rpc-endurance.fusionist.io',
 };
@@ -84,4 +86,6 @@ export const DIRECT_RPC_URLS: Record<number, string> = {
   232: 'https://rpc.lens.xyz',
   // Monad: passed probe-rpcs on 2026-10-02
   143: 'https://rpc.monad.xyz',
+  // Vana (direct, added 2026-10-07; probe-rpcs.mjs passed)
+  1480: 'https://rpc.vana.org',
 };
