@@ -207,22 +207,64 @@ function monadPlan(nonce: number, recipient: string, tamper: boolean) {
   };
 }
 
+/** Telos (direct, fixed price) holding TELOS_BALANCE when `telos` is on: its only exit is its own TLOS bridge to Base */
+export const TELOS = 40;
+export const TELOS_BALANCE = 60n * 10n ** 18n;
+const TELOS_OFT = '0x02Ea28694Ae65358Be92bAFeF5Cb8C211f33Db1A';
+const TELOS_FEE = 10n ** 18n;
+const TELOS_SEND_GAS = 520_000n;
+const TELOS_AFTER_FEE = TELOS_BALANCE - TELOS_FEE - 21_000n * GAS_PRICE;
+const TELOS_SEND_VALUE = TELOS_AFTER_FEE - TELOS_SEND_GAS * GAS_PRICE - 42_000n * GAS_PRICE;
+/** What the bridge send leaves (its whole gas reserve, in this mock) */
+const TELOS_LEFTOVER = TELOS_AFTER_FEE - TELOS_SEND_VALUE;
+export const TELOS_BRIDGED = ((TELOS_SEND_VALUE - 35n * 10n ** 17n) / 10n ** 14n) * 10n ** 14n;
+const OFT_SEND = parseAbi(['function sendFrom(address from, uint16 dstChainId, bytes32 toAddress, uint256 amount, (address refundAddress, address zroPaymentAddress, bytes adapterParams) callParams) payable']);
+
+/** The API's Telos exit to Base: fee, then sendFrom on Telos's own bridge; the leftover follows as a donation */
+function telosExitPlan(nonce: number, from: string, recipient: string) {
+  const data = encodeFunctionData({
+    abi: OFT_SEND, functionName: 'sendFrom',
+    args: [from as Address, 184, `0x${recipient.slice(2).toLowerCase().padStart(64, '0')}`, TELOS_BRIDGED, { refundAddress: ZERODUST_SPONSOR, zroPaymentAddress: ZERO, adapterParams: `0x0001${(200_000).toString(16).padStart(64, '0')}` }],
+  });
+  return {
+    chainId: TELOS, route: 'oft', requestId: null, receive: TELOS_BRIDGED.toString(), quoted: TELOS_BRIDGED.toString(), fee: TELOS_FEE.toString(), balance: TELOS_BALANCE.toString(),
+    leftoverMax: ((TELOS_LEFTOVER * 101n) / 100n).toString(), tool: 'TLOS bridge (LayerZero)',
+    receiveToken: { chainId: 8453, symbol: 'TLOS', address: '0x7252c865c05378Ffc15120F428dd65804dD0CE63', decimals: 18 },
+    txs: [
+      { kind: 'fee', to: ZERODUST_SPONSOR, data: '0x', value: TELOS_FEE.toString(), gas: '21000', gasPrice: GAS_PRICE.toString(), nonce },
+      { kind: 'sweep', to: TELOS_OFT, data, value: TELOS_SEND_VALUE.toString(), gas: TELOS_SEND_GAS.toString(), gasPrice: GAS_PRICE.toString(), nonce: nonce + 1 },
+    ],
+  };
+}
+
+/** The leftover after the bridge send, donated to ZeroDust exactly */
+function telosLeftoverPlan(nonce: number) {
+  return {
+    chainId: TELOS, route: 'donate', requestId: null, receive: '0', fee: '0', balance: TELOS_LEFTOVER.toString(),
+    txs: [{ kind: 'sweep', to: ZERODUST_SPONSOR, data: '0x', value: (TELOS_LEFTOVER - 21_000n * GAS_PRICE).toString(), gas: '21000', gasPrice: GAS_PRICE.toString(), nonce }],
+  };
+}
+
 /** Everything the page may call, answered offline; returns what was swept */
 /**
  * `onlyTo`: the direct chain's bridges reach only this chain; any other answers
  * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base);
  * `hiccups`: the first route checks answer "unknown", then the real answer
  */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown } = {}) {
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown } = {}) {
   const chains = [...CHAINS, ...(opts.mitosis ? [MITOSIS_CHAIN] : []), ...(opts.endurance ? [ENDURANCE_CHAIN] : [])];
   const funded = [...FUNDED, ...(opts.mitosis ? [MITOSIS] : []), ...(opts.endurance ? [ENDURANCE] : [])];
   let hiccups = opts.hiccups ?? 0;
   /** The funded direct chain, if any */
-  const DIRECT = opts.monad ? MONAD : AVAX;
-  const DIRECT_BALANCE = opts.monad ? MONAD_BALANCE : AVAX_BALANCE;
-  const directInfo = opts.monad
-    ? { chainId: MONAD, name: 'Monad', token: 'MON', decimals: 18, explorerUrl: 'https://monadvision.com' }
-    : { chainId: AVAX, name: 'Avalanche', token: 'AVAX', decimals: 18, explorerUrl: 'https://snowtrace.io' };
+  const DIRECT = opts.telos ? TELOS : opts.monad ? MONAD : AVAX;
+  const DIRECT_BALANCE = opts.telos ? TELOS_BALANCE : opts.monad ? MONAD_BALANCE : AVAX_BALANCE;
+  const directInfo = opts.telos
+    ? { chainId: TELOS, name: 'Telos', token: 'TLOS', decimals: 18, explorerUrl: 'https://teloscan.io' }
+    : opts.monad
+      ? { chainId: MONAD, name: 'Monad', token: 'MON', decimals: 18, explorerUrl: 'https://monadvision.com' }
+      : { chainId: AVAX, name: 'Avalanche', token: 'AVAX', decimals: 18, explorerUrl: 'https://snowtrace.io' };
+  /** Telos: transactions sent so far (fee, bridge send, leftover) */
+  let telosSent = 0;
   /** Stored quotes: Relay ones carry inputAmount and a route token; token-delivery ones a simpler bridge */
   type StoredQuote = Omit<ReturnType<typeof quote>, 'bridge' | 'relayRouteToken'> & {
     bridge?: { name: string; displayName: string; inputAmount?: string; expectedOutput?: string };
@@ -272,15 +314,18 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
         chains: [
           { chainId: AVAX, name: 'Avalanche', token: 'AVAX', decimals: 18, explorerUrl: 'https://snowtrace.io', rpcUrl: DIRECT_RPC_URLS[AVAX], kind: 'evm' },
           { chainId: MONAD, name: 'Monad', token: 'MON', decimals: 18, explorerUrl: 'https://monadvision.com', rpcUrl: DIRECT_RPC_URLS[MONAD], kind: 'gaslimit', txGapBlocks: 4 },
+          { chainId: TELOS, name: 'Telos', token: 'TLOS', decimals: 18, explorerUrl: 'https://teloscan.io', rpcUrl: DIRECT_RPC_URLS[TELOS], kind: 'fixedprice' },
         ],
-        prices: { AVAX: 25, MON: 0.034 },
+        prices: { AVAX: 25, MON: 0.034, TLOS: 0.0192 },
       });
     }
     if (path.startsWith('/direct/balances/')) {
-      return json(route, opts.direct || opts.monad ? [{ ...directInfo, balance: (swept.has(DIRECT) ? 0n : DIRECT_BALANCE).toString() }] : []);
+      return json(route, opts.direct || opts.monad || opts.telos ? [{ ...directInfo, balance: (swept.has(DIRECT) ? 0n : DIRECT_BALANCE).toString() }] : []);
     }
     if (path === '/direct/route') {
       const to = Number(url.searchParams.get('toChainId'));
+      // Telos: no gas bridge; its own bridge delivers TLOS as a token on Base
+      if (opts.telos) return json(route, to === 8453 ? { available: false, exit: true, reason: 'No gas bridge takes TLOS out; its own bridge delivers TLOS as a token' } : { available: false, exit: false, reason: 'Gas.zip: Quote: Please Try Again' });
       // A bridge's passing hiccup: the first answers are "unknown"
       if (hiccups > 0) {
         hiccups -= 1;
@@ -293,6 +338,8 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       return json(route, opts.onlyTo === undefined || opts.onlyTo === to ? { available: true } : { available: null, reason: 'Gas.zip: Quote: Please Try Again' });
     }
     if (path === '/direct/prepare' && opts.monad) return json(route, monadPlan(directNonce, url.searchParams.get('recipient')!, !!opts.tamper));
+    if (path === '/direct/exit' && opts.telos) return json(route, telosExitPlan(directNonce, url.searchParams.get('from')!, url.searchParams.get('recipient')!));
+    if (path === '/direct/prepare' && opts.telos) return json(route, telosLeftoverPlan(directNonce));
     if (path === '/direct/prepare') {
       const plan = avaxPlan(directNonce);
       // A compromised API: the same amounts, but the deposit credits an attacker on Base
@@ -372,10 +419,19 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     const body = route.request().postDataJSON() as { id: number; method: string; params?: unknown[] } | Array<{ id: number; method: string; params?: unknown[] }>;
     const answer = (r: { id: number; method: string; params?: unknown[] }) => {
       const isUser = String(r.params?.[0] ?? '').toLowerCase() === user.toLowerCase();
-      const direct = chainId === AVAX || chainId === MONAD;
+      const direct = chainId === AVAX || chainId === MONAD || chainId === TELOS;
+      // Telos: the full balance, then after the fee and the bridge send only the leftover
+      const telosBalance = telosSent < 2 ? TELOS_BALANCE : telosSent === 2 ? TELOS_LEFTOVER : 0n;
       const balance = direct
-        ? (isUser && chainId === DIRECT && (opts.direct || opts.monad) && !swept.has(DIRECT) ? DIRECT_BALANCE : 0n)
+        ? (isUser && chainId === DIRECT && (opts.direct || opts.monad || opts.telos) && !swept.has(DIRECT) ? (opts.telos ? telosBalance : DIRECT_BALANCE) : 0n)
         : (funded.includes(chainId) && !swept.has(chainId) ? BALANCE : 0n);
+      if (r.method === 'eth_sendRawTransaction' && opts.telos) {
+        sent.push(String(r.params![0]));
+        directNonce += 1;
+        telosSent += 1;
+        if (telosSent === 3) swept.add(TELOS);
+        return { jsonrpc: '2.0', id: r.id, result: `0x${sent.length.toString(16).padStart(64, '0')}` };
+      }
       if (r.method === 'eth_sendRawTransaction') {
         sent.push(String(r.params![0]));
         directNonce += 1;
@@ -390,6 +446,8 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       // 0x's Settler registry on a destination (Across routes): ownerOf(2) is the fixture's Settler
       if (r.method === 'eth_call') {
         const data = String((r.params?.[0] as { data?: string } | undefined)?.data ?? '');
+        // Telos's bridge: LayerZero's fee (3.2 TLOS) for estimateSendFee
+        if (data.startsWith('0x365260b4')) return { jsonrpc: '2.0', id: r.id, result: `0x${(32n * 10n ** 17n).toString(16).padStart(64, '0')}${'0'.repeat(64)}` };
         return { jsonrpc: '2.0', id: r.id, result: addressWord(data.startsWith('0x6352211e') ? ACROSS.settler : ZERO) };
       }
       const result = {

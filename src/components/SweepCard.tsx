@@ -12,6 +12,7 @@ import { serviceFeeUsd } from '../lib/fees';
 import { deliversOnlyToSender } from '@zerodust/sdk';
 import { durationText } from '../sweep/timing';
 import { isRouted, plainReason, rowToken, type Choice, type DestTotal, type Row, type SweepModel } from '../sweep/useSweep';
+import { tokenExitFor } from '../direct/plan';
 
 const CHOICES: Record<Exclude<Choice, 'elsewhere' | 'address'> | 'leave', { label: string; text: (amount: string, dest: string) => string; danger?: boolean; quiet?: boolean }> = {
   'exit-donate': { label: 'Swap out', text: (_a, d) => `Swap to a token a bridge takes, then send it to ${d}. The few cents of gas reserve left are donated to ZeroDust.` },
@@ -20,6 +21,17 @@ const CHOICES: Record<Exclude<Choice, 'elsewhere' | 'address'> | 'leave', { labe
   burn: { label: 'Burn all', text: (a) => `${a} is destroyed. Nobody receives it.`, danger: true },
   leave: { label: 'Leave it', text: () => 'This chain is not swept and keeps its balance.', quiet: true },
 };
+
+/** A chain whose exit is its own token bridge (Telos): the exit choices say so, not "swap" */
+function tokenExitCopy(chainId: number, toChainId: number | null | undefined, key: string, dest: string, destGas: string) {
+  const x = toChainId == null ? undefined : tokenExitFor(chainId, toChainId);
+  if (!x || (key !== 'exit-donate' && key !== 'exit-burn')) return null;
+  return {
+    label: `Bridge out as ${x.token.symbol} (token)`,
+    text: `${x.bridge} sends it to ${dest} as the ${x.token.symbol} token, not ${destGas} gas. The few cents of gas it does not use count toward ZeroDust's fee.`,
+    row: `Bridged out as ${x.token.symbol} (token)`,
+  };
+}
 
 /** How a chosen fallback reads on its row */
 export const CHOICE_LABEL: Record<Choice, string> = {
@@ -286,7 +298,8 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                       </button>
                     ))}
                     {(needs ? [...m.choicesFor(r), 'leave' as const] : []).map((key) => {
-                      const c = CHOICES[key];
+                      const t = tokenExitCopy(r.chainId, m.destination, key, m.destRow?.name ?? 'the destination', m.destRow?.token ?? 'native');
+                      const c = t ? { ...CHOICES[key], label: t.label, text: () => t.text } : CHOICES[key];
                       return (
                         <button
                           key={key}
@@ -312,7 +325,7 @@ export function SweepCard({ model, clipboard, onForget }: { model: SweepModel; c
                         ? `Goes to ${m.destOf(m.elsewhere[r.chainId]!)?.name ?? 'another chain'} instead`
                         : choice === 'address'
                           ? `To ${shortAddress(m.addressOf[r.chainId]!)} on ${r.name}`
-                          : CHOICE_LABEL[choice]}
+                          : tokenExitCopy(r.chainId, m.destination, choice, '', '')?.row ?? CHOICE_LABEL[choice]}
                     </span>
                     <button type="button" className="link-btn" onClick={() => m.setChoice(r.chainId, null)} disabled={m.busy}>Change</button>
                   </span>
