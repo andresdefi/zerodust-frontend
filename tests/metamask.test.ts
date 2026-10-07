@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { allowedCallTargets, ZERO_ROUTE_HASH } from '@zerodust/sdk';
-import { keccak256, type Hex } from 'viem';
+import { encodeFunctionData, encodeFunctionResult, keccak256, parseAbi, type Hex } from 'viem';
 import { bindOwnRelayDeposit, connectMetaMask, requestPermissions, sweepBatchWithPermissions, verifyPermissionQuote, type ChainReads, type Eip1193Provider, type MetaMaskSession, type PermissionQuote } from '../src/sweep/metamask';
 
 const ROUTER = '0x589CB1Fc24F8Cf6e41755Ea518e7815423e83f70';
@@ -99,7 +99,7 @@ describe('sweepBatchWithPermissions', () => {
   const ZERO = '0x0000000000000000000000000000000000000000';
   const ZERO_HASH = ZERO_ROUTE_HASH;
   const BALANCE = 10n ** 15n;
-  const reads: ChainReads = { gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, code: async () => '0x' };
+  const reads: ChainReads = { gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, code: async () => '0x', call: async () => '0x' };
 
   /** A same-chain permission quote to DEST that passes the SDK's checks */
   const quoteFor = (chainId: number, over: { router?: string; destination?: string } = {}) => ({
@@ -290,7 +290,7 @@ describe('verifyPermissionQuote', () => {
       intent: { mode: 1, destination: DEST, destinationChainId: '42161', callTarget: GASZIP_BASE, routeHash: `0x${'1'.repeat(64)}`, minReceive: '1' },
       deadline: Math.floor(Date.now() / 1000) + 50, nonce: 0, validForSeconds: 55,
     } as unknown as PermissionQuote;
-    await expect(verifyPermissionQuote(quote, { user: USER, fromChainId: 8453, toChainId: 42161, destination: DEST, balance: 10n ** 15n }, { gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, code: async () => '0x' }))
+    await expect(verifyPermissionQuote(quote, { user: USER, fromChainId: 8453, toChainId: 42161, destination: DEST, balance: 10n ** 15n }, { gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, code: async () => '0x', call: async () => '0x' }))
       .rejects.toThrow(/^Stopped before signing/);
   });
 });
@@ -311,7 +311,7 @@ describe('verifyPermissionQuote: Across routes (plain ETH deposits to wallets on
     } as unknown as PermissionQuote;
   };
   const want = (k: string) => ({ user: OWNER, fromChainId: Number(k.split('-')[0]), toChainId: Number(k.split('-')[1]), destination: OWNER, balance: 2_100_000_000_000_000n });
-  const readsWith = (code: () => Promise<Hex>): ChainReads => ({ gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, code });
+  const readsWith = (code: () => Promise<Hex>): ChainReads => ({ gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, code, call: async () => '0x' });
 
   it('a plain ETH deposit (OP -> Base) to an ordinary wallet or an EIP-7702 one passes', async () => {
     await expect(verifyPermissionQuote(acrossQuote('10-8453'), want('10-8453'), readsWith(async () => '0x'))).resolves.toBeDefined();
@@ -332,6 +332,49 @@ describe('verifyPermissionQuote: Across routes (plain ETH deposits to wallets on
 
   it.each(['8453-56', '8453-43114', '137-8453-nofallback'])('%s (a swap route) stops before signing', async (k) => {
     await expect(verifyPermissionQuote(acrossQuote(k), want(k), readsWith(async () => '0x'))).rejects.toThrow(/^Stopped before signing/);
+  });
+});
+
+describe('verifyPermissionQuote: Stargate native-ETH pools (Base -> Arbitrum)', () => {
+  const OWNER = '0x820653ccE8a755edbb52eC1bc5829D2a60CD5cc5' as const;
+  const POOL = '0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7';
+  const PARAM = '(uint32 dstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD, bytes extraOptions, bytes composeMsg, bytes oftCmd)';
+  const abi = parseAbi([
+    `function send(${PARAM} sendParam, (uint256 nativeFee, uint256 lzTokenFee) fee, address refundAddress) payable`,
+    `function quoteSend(${PARAM} sendParam, bool payInLzToken) view returns ((uint256 nativeFee, uint256 lzTokenFee) fee)`,
+  ]);
+  const FEE = 10n ** 13n;
+  const BAL = 2_100_000_000_000_000n;
+  const RESERVE = 100_000_000_000_000n;
+  const stargateQuote = (extraFee = 0n) => {
+    const amountLD = ((BAL - RESERVE - (FEE * 105n) / 100n - extraFee) / 10n ** 12n) * 10n ** 12n;
+    const data = encodeFunctionData({ abi, functionName: 'send', args: [
+      { dstEid: 30110, to: `0x${OWNER.slice(2).toLowerCase().padStart(64, '0')}`, amountLD, minAmountLD: amountLD - amountLD / 1000n, extraOptions: '0x', composeMsg: '0x', oftCmd: '0x' },
+      { nativeFee: FEE, lzTokenFee: 0n }, '0x01eD5c94DE39E73C986b98B85C2c0A3d1BEDff7D',
+    ] });
+    return {
+      quoteId: 'q', version: 3, userBalance: BAL.toString(), estimatedReceive: '1', mode: 1, autoRevoke: false, signer: 'permission',
+      fees: { maxTotalFeeWei: RESERVE.toString(), extraFeeWei: '0', overheadGasUnits: '100000', protocolFeeGasUnits: '0', reimbGasPriceCapWei: '1200000000', revokeGasUnits: '0' },
+      permission: { router: '0x369A97dd256F7eb37fF7116C4EcBd50318eBb286', delegationManager: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3', domainVersion: 'permission-2' },
+      bridge: { name: 'stargate', displayName: 'Stargate' },
+      intent: { mode: 1, destination: OWNER.toLowerCase(), destinationChainId: '42161', callTarget: POOL, routeHash: keccak256(data), callData: data, minReceive: '1' },
+      deadline: Math.floor(Date.now() / 1000) + 50, nonce: 0, validForSeconds: 55,
+    } as unknown as PermissionQuote;
+  };
+  const want = { user: OWNER, fromChainId: 8453, toChainId: 42161, destination: OWNER, balance: BAL };
+  const calls: Array<{ chainId: number; to: string }> = [];
+  const reads: ChainReads = {
+    gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, code: async () => '0x',
+    call: async (chainId, request) => { calls.push({ chainId, to: request.to }); return encodeFunctionResult({ abi, functionName: 'quoteSend', result: { nativeFee: FEE, lzTokenFee: 0n } }); },
+  };
+
+  it('passes through the router, the fee read from the pool on the source chain', async () => {
+    await expect(verifyPermissionQuote(stargateQuote(), want, reads)).resolves.toBeDefined();
+    expect(calls.at(-1)).toEqual({ chainId: 8453, to: POOL });
+  });
+
+  it('stops before signing when the route keeps more than the pool quotes as its fee', async () => {
+    await expect(verifyPermissionQuote(stargateQuote(10n ** 14n), want, reads)).rejects.toThrow(/^Stopped before signing: .*above the .* wei it quotes/);
   });
 });
 
@@ -393,7 +436,7 @@ describe('bindOwnRelayDeposit: the Relay deposit comes from Relay, to this page'
     intent: { mode: 1, destination: OWNER.toLowerCase(), destinationChainId: '42161', callTarget: s.to, routeHash: keccak256(s.data), callData: s.data, minReceive: '1' },
     deadline: Math.floor(Date.now() / 1000) + 50, nonce: 0, validForSeconds: 55,
   }) as unknown as PermissionQuote;
-  const reads: ChainReads = { gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, code: async () => '0x' };
+  const reads: ChainReads = { gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, code: async () => '0x', call: async () => '0x' };
   const verifyWant = want;
 
   it("refuses to sign a Relay deposit the page did not get from Relay, whatever the API's label says", async () => {

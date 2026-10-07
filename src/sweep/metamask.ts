@@ -259,6 +259,8 @@ export interface ChainReads {
   l1Fee(chainId: number): Promise<bigint>;
   /** An address's code on a chain (the destination too: is the recipient a contract?) */
   code(chainId: number, address: string): Promise<Hex>;
+  /** eth_call on a chain (Stargate: the pool's own LayerZero fee quote) */
+  call(chainId: number, request: { to: string; data: Hex }): Promise<Hex>;
 }
 
 /** From the chain's public RPC in the page's CSP */
@@ -273,10 +275,11 @@ export const rpcChainReads: ChainReads = {
     if (body.error || body.result === undefined) throw new Error(body.error?.message ?? 'RPC error');
     return body.result;
   },
+  call: (chainId, request) => rpcCall<Hex>(chainId, 'eth_call', [request, 'latest']),
 };
 
 /** Bridges the router can call: they name the refund address and recipient themselves (backend permission.ts) */
-const ROUTER_SAFE_BRIDGES = new Set(['relay', 'across', 'hyperlane']);
+const ROUTER_SAFE_BRIDGES = new Set(['relay', 'across', 'hyperlane', 'stargate']);
 
 /**
  * Checks one chain's permission quote the way the SDK checks a key sweep (verifySweepQuote:
@@ -302,6 +305,8 @@ export async function verifyPermissionQuote(
       gasPriceWei,
       nowSeconds: Math.floor(Date.now() / 1000),
       l1FeeWei,
+      // Stargate: the LayerZero fee read from the pool on the source chain
+      ethCall: (request) => reads.call(want.fromChainId, request),
     });
   } catch (error) {
     throw new Error(`Stopped before signing: ${error instanceof Error ? error.message.replace(/^Refusing to sign: /, '') : 'the quote failed a check'}`);
