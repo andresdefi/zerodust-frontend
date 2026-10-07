@@ -185,6 +185,8 @@ describe('sweepBatchWithPermissions', () => {
 
     const results = await run(provider, [item(8453), item(42161), item(10)]);
 
+    // First, so a failure names the reason (one CI run on 2026-10-07 stopped before signing, unexplained)
+    expect([...results].map(([id, r]) => [id, r.error ?? null])).toEqual([[8453, null], [42161, null], [10, null]]);
     expect(calls.map((c) => c.method)).toEqual(['wallet_requestExecutionPermissions', 'eth_signTypedData_v4']);
     expect((calls[0]!.params as Array<{ to: string }>).every((r) => r.to === PINNED)).toBe(true);
     // What MetaMask signs is the locally built batch, equal to the backend's
