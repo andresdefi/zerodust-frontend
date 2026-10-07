@@ -18,7 +18,7 @@ const NETWORKS = {
   747474: 'katana', 7777777: 'zora',
   // Direct chains (no EIP-7702 in ZeroDust)
   43114: 'avalanche', 25: 'cronos', 1088: 'metis-andromeda', 13371: 'immutable', 122: 'fuse',
-  50: 'xdc', 999: 'hyper-evm', 1625: 'gravity', 42793: 'etherlink',
+  50: 'xdc', 999: 'hyper-evm', 1625: 'gravity', 42793: 'etherlink', 40: 'telos', 1480: 'vana',
   // Destinations only
   324: 'zksync', 81457: 'blast', 2741: 'abstract', 8217: 'kaia', 2222: 'kava', 1284: 'moonbeam',
   1313161554: 'aurora', 232: 'lens', 14: 'flare', 30: 'rootstock', 21000000: 'corn',

@@ -1,8 +1,8 @@
 import { chainConfig as zkChainConfig } from 'viem/zksync';
-import type { Hex, LocalAccount } from 'viem';
+import { decodeFunctionData, decodeFunctionResult, encodeFunctionData, parseAbi, type Hex, type LocalAccount } from 'viem';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { isRegisteredSettler, ZEROX_DEPLOYER, ZEROX_REGISTRY_CALLS } from './across';
-import { directChains, FIXED_PRICE_CHAINS, GASLIMIT_CHAINS, ZK_PAYMASTERS, prepareExit, preparePlan, TX_GAP_BLOCKS, type DirectPlan, type PlanMode, type Target } from './plan';
+import { directChains, FIXED_PRICE_CHAINS, GASLIMIT_CHAINS, OFT_FEE_MARGIN_PERCENT, tokenExitFor, ZK_PAYMASTERS, prepareExit, preparePlan, TX_GAP_BLOCKS, type DirectPlan, type PlanMode, type Target } from './plan';
 import { checkReplay, replay } from './replay';
 import { verifyPlan } from './verify';
 
@@ -30,6 +30,9 @@ export async function readWallet(chainId: number, address: string): Promise<{ ba
   ]);
   return { balance: BigInt(balance), nonce: Number(BigInt(nonce)) };
 }
+
+const OFT_SEND_ABI = parseAbi(['function sendFrom(address from, uint16 dstChainId, bytes32 toAddress, uint256 amount, (address refundAddress, address zroPaymentAddress, bytes adapterParams) callParams) payable']);
+const OFT_FEE_ABI = parseAbi(['function estimateSendFee(uint16 dstChainId, bytes32 toAddress, uint256 amount, bool useZro, bytes adapterParams) view returns (uint256 nativeFee, uint256 zroFee)']);
 
 let chainKinds: Promise<Record<number, string | undefined>> | null = null;
 /** The API's gas rule per direct chain, read once per page load */
@@ -72,7 +75,24 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string)
     const network = BigInt(await rpc<string>(t.chainId, 'eth_gasPrice', []));
     if (plan.txs.some((tx) => BigInt(tx.gasPrice) !== network)) throw new Error('Plan refused: its gas price is not the network gas price, so the sweep would leave dust');
   }
+  const tokenExit = mode === 'exit' ? tokenExitFor(t.chainId, t.toChainId) : undefined;
+  if (tokenExit) {
+    // The OFT spends a wrapped balance first and would keep the native value as its fee
+    const wrapped = await rpc<string>(t.chainId, 'eth_call', [{ to: tokenExit.oft, data: `0x70a08231${t.from.slice(2).toLowerCase().padStart(64, '0')}` }, 'latest']);
+    if (BigInt(wrapped) !== 0n) throw new Error(`Plan refused: this wallet holds wrapped ${tokenExit.token.symbol} on the bridge; unwrap it first`);
+  }
   const checks = verifyPlan(plan, { ...t, mode, ...wallet });
+  if (tokenExit) {
+    // What the bridge keeps as its fee (value - amount, refunded beyond the real fee to ZeroDust) may
+    // be at most LayerZero's own quote, read here, plus 10% and the rounding to shared decimals
+    const send = plan.txs.at(-1)!;
+    const { args } = decodeFunctionData({ abi: OFT_SEND_ABI, data: send.data as Hex });
+    const quoted = await rpc<string>(t.chainId, 'eth_call', [{ to: tokenExit.oft, data: encodeFunctionData({ abi: OFT_FEE_ABI, functionName: 'estimateSendFee', args: [tokenExit.lzChainId, args[2], args[3], false, tokenExit.adapterParams as Hex] }) }, 'latest']);
+    const [nativeFee] = decodeFunctionResult({ abi: OFT_FEE_ABI, functionName: 'estimateSendFee', data: quoted as Hex });
+    if (BigInt(send.value) - args[3] > (nativeFee * OFT_FEE_MARGIN_PERCENT) / 100n + tokenExit.dustRate) {
+      throw new Error('Plan refused: the bridge fee in it is above what the bridge quotes');
+    }
+  }
   // ZK-stack chains: the paymaster pays all gas, so the values adding up to the balance (checked
   // above) is the whole exact-zero argument; there is no EVM fork to replay them on
   if (ZK_PAYMASTERS[t.chainId]) return plan;
