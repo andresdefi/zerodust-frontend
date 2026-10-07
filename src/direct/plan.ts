@@ -23,6 +23,15 @@ export const LIFI_DIAMOND = '0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE';
 export const GASLIMIT_CHAINS: ReadonlySet<number> = new Set([143]);
 
 /**
+ * Chains that charge their own fixed network gas price whatever a transaction
+ * offers (the API's kind 'fixedprice'; Telos, 2026-10-07: a 1.1x offer was
+ * charged 1.0x). A plan priced above it would leave the difference as dust, so
+ * the page requires every transaction's price to equal the network price it
+ * reads itself. Pinned here; the page refuses a plan when /direct/chains disagrees.
+ */
+export const FIXED_PRICE_CHAINS: ReadonlySet<number> = new Set([40]);
+
+/**
  * ZK-stack chains (direct kind 'zk'): the ZeroDust paymaster pays all gas, so a
  * fee transaction plus a sweep whose values add up to the balance leave exactly
  * 0. Pinned here, not taken from the API: a plan naming another paymaster is
