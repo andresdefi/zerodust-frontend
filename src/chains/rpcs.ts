@@ -88,4 +88,6 @@ export const DIRECT_RPC_URLS: Record<number, string> = {
   143: 'https://rpc.monad.xyz',
   // Vana (direct, added 2026-10-07; probe-rpcs.mjs passed)
   1480: 'https://rpc.vana.org',
+  // Telos (direct, added 2026-10-07; probe-rpcs.mjs passed)
+  40: 'https://rpc.telos.net',
 };

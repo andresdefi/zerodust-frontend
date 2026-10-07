@@ -124,3 +124,41 @@ describe('broadcast on Monad', () => {
     expect(net.log.filter((m) => m === 'eth_sendRawTransaction')).toHaveLength(1);
   });
 });
+
+describe('planChecked: a fixed-price chain (Telos)', () => {
+  const TELOS = 40;
+  const NETWORK = 5_254_371_152_317n;
+  const telosTarget = { chainId: TELOS, toChainId: TELOS, from: FROM, recipient: OTHER };
+  const telosPlan = (price: bigint): DirectPlan => {
+    const bal = 80n * 10n ** 18n;
+    return {
+      chainId: TELOS, route: 'transfer', requestId: null, fee: '0', balance: bal.toString(), receive: (bal - 21_000n * price).toString(),
+      txs: [{ kind: 'sweep', to: OTHER, data: '0x', value: (bal - 21_000n * price).toString(), gas: '21000', gasPrice: price.toString(), nonce: 0 }],
+    };
+  };
+  const telosNet = (plan: DirectPlan, kind = 'fixedprice') => vi.fn(async (url: string, init?: RequestInit) => {
+    const reply = (result: unknown) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
+    if (url.includes('/direct/chains')) return new Response(JSON.stringify({ chains: [{ chainId: TELOS, name: 'Telos', token: 'TLOS', decimals: 18, explorerUrl: '', rpcUrl: '', kind }], prices: {} }));
+    if (url.includes('/direct/prepare')) return new Response(JSON.stringify(plan));
+    const { method } = JSON.parse(String(init!.body)) as { method: string };
+    if (method === 'eth_gasPrice') return reply(hex(NETWORK));
+    if (method === 'eth_getBalance') return reply(hex(80n * 10n ** 18n));
+    if (method === 'eth_getTransactionCount') return reply('0x0');
+    throw new Error(`stop after the price check: ${method}`);
+  });
+
+  it('refuses a plan priced above the network price (it would be charged less and leave dust)', async () => {
+    vi.stubGlobal('fetch', telosNet(telosPlan((NETWORK * 11n) / 10n)));
+    await expect(run.planChecked(telosTarget, 'route')).rejects.toThrow(/not the network gas price/);
+  });
+
+  it('passes the price check when the plan offers exactly the network price', async () => {
+    vi.stubGlobal('fetch', telosNet(telosPlan(NETWORK)));
+    await expect(run.planChecked(telosTarget, 'route')).rejects.not.toThrow(/gas price|disagree/);
+  });
+
+  it('refuses when the API does not call Telos a fixed-price chain', async () => {
+    vi.stubGlobal('fetch', telosNet(telosPlan(NETWORK), 'evm'));
+    await expect(run.planChecked(telosTarget, 'route')).rejects.toThrow(/disagree on how this chain prices gas/);
+  });
+});
