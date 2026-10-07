@@ -133,9 +133,6 @@ export async function requestPermissions(
 
 export interface PermissionQuote extends Omit<QuoteResponse, 'authNonce'> {
   signer?: string;
-  bridge?: { name: string; displayName: string; inputAmount?: string; expectedOutput?: string };
-  /** Relay routes: the one-time token POST /quote/:quoteId/relay-route requires */
-  relayRouteToken?: string;
   permission: { router: Address; delegationManager: string; domainVersion: string };
 }
 
