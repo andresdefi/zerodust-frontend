@@ -16,7 +16,7 @@ Limits are per client IP and per minute unless noted. With an [API key](#api-key
 | Group | Limit | Routes |
 |---|---|---|
 | Reads | 200 | `/chains`, `/chains/:chainId`, `/bridges/timing`, `/destinations`, `/balances/*`, `/prices`, `/prices/:symbol`, `GET /sweep/:sweepId`, `/sweeps/:address`, `/direct/chains`, `/direct/balances/:address`, `/direct/status` |
-| Quotes | 60 | `/quote`, `POST /authorization`, `POST /authorization/batch`, `/direct/route`, `/direct/prepare`, `/direct/exit` |
+| Quotes | 60 | `/quote`, `POST /quote/:quoteId/relay-route`, `POST /authorization`, `POST /authorization/batch`, `/direct/route`, `/direct/prepare`, `/direct/exit` |
 | Sweep submission | 60, and 60 per wallet address | `POST /sweep` |
 | Key registration | 5 per hour | `POST /agent/register` |
 | Everything else | 100 | |
@@ -59,8 +59,9 @@ A wallet that supports ERC-7715 Advanced Permissions (MetaMask 13.23 or later) c
 2. `GET /quote?signer=permission` per chain.
 3. `POST /authorization/batch` with the quote IDs: the EIP-712 `SweepBatch` for all of them.
 4. Sign it once (`eth_signTypedData_v4`). The domain has no chain id, so no network switch is needed.
-5. `POST /sweep` per quote, each with the same `signature`, that chain's `permissionContext`, and `batchQuoteIds` in the order of step 3.
-6. `GET /sweep/:sweepId` until `completed` or `failed`.
+5. For a quote routed through Relay, fetch the deposit from Relay yourself and bind it with [`POST /quote/:quoteId/relay-route`](#post-quotequoteidrelay-route): Relay keeps the recipient on its servers, so only a deposit you requested pays the address you set. Then check `intent.callData` is exactly that deposit.
+6. `POST /sweep` per quote, each with the same `signature`, that chain's `permissionContext`, and `batchQuoteIds` in the order of step 3.
+7. `GET /sweep/:sweepId` until `completed` or `failed`.
 
 The SDK does not support this flow yet. Differences from the key flow:
 
@@ -196,7 +197,7 @@ Prices a sweep and stores the quote. Nothing is signed or sent.
 | `destination` | Required. Where the funds go. |
 | `signer` | `key` (default): EIP-7702, signed with the wallet's key. `permission`: through MetaMask and the permission router ([With MetaMask](#with-metamask)). |
 
-ZeroDust always chooses the route. For a cross-chain sweep it asks Gas.zip, Relay and Across and keeps the highest expected output. Passing `callTarget` or `callData` is refused with `CUSTOM_ROUTE_UNSUPPORTED`.
+ZeroDust always chooses the route. For a cross-chain sweep it asks Gas.zip, Relay and Across and keeps the highest expected output. Every route delivers the destination's native gas (see [What arrives](/docs#what-arrives) for the two token exceptions): Across is asked only when both chains' gas is ETH, and only a plain deposit to a recipient with no contract code (or an EIP-7702 delegation) on the destination is accepted from it. Passing `callTarget` or `callData` is refused with `CUSTOM_ROUTE_UNSUPPORTED`.
 
 Response:
 
@@ -211,6 +212,7 @@ Response:
 | `autoRevoke` | `true` with `signer=key`; `false` with `signer=permission` (no revoke) |
 | `signer` | `key` or `permission`, as requested |
 | `permission` | `signer=permission` only: `router` (the permission's delegate, redeemer and payee, and the typed data's `verifyingContract`), `delegationManager` (MetaMask's) and `domainVersion` (`permission-2`) |
+| `receiveToken` | Mitosis and Endurance only: `{ symbol, address, decimals }` of the ERC-20 token that arrives on BNB Chain instead of gas. `estimatedReceive` and `intent.minReceive` are in this token. |
 | `bridge` | Cross-chain only: `name`, `displayName`, `inputAmount` (wei sent to the bridge), `expectedOutput` (wei the bridge expects to deliver) |
 | `intent` | Fields that go into the signed `SweepIntent`: `mode`, `destination`, `destinationChainId` (string), `callTarget` (zero address for same-chain), `routeHash`, `minReceive`, and `callData` for cross-chain. `keccak256(callData) == routeHash`, so the route can be decoded and checked before signing. |
 | `deadline` | Unix seconds. The contract accepts at most 60 seconds ahead. |
@@ -249,9 +251,23 @@ Errors (400 unless noted):
 | `CHAIN_CLOCK_LAG` | The chain's latest block is too far behind to leave time to sign |
 | `ADDRESS_TEMPORARILY_BLOCKED` | Two or more sweeps from this address failed for wallet-side reasons; try again later |
 | `CUSTOM_ROUTE_UNSUPPORTED` | `callTarget` or `callData` was passed |
+| `AMOUNT_TOO_LOW` | Below every bridge's minimum; `minimumBalanceWei` is the balance to top up to (an estimate) |
+| `OWN_WALLET_ONLY` | Endurance: its bridge pays only the sweeping wallet, so `destination` must be `userAddress` |
 | `PERMISSION_UNAVAILABLE` | `signer=permission` on a chain without the router, or one MetaMask does not offer permissions on |
 | `PERMISSION_ROUTE_UNAVAILABLE` | `signer=permission`, and only a bridge unsafe for the router (Gas.zip) serves this pair |
 | `INTERNAL_ERROR` (500) | The quote could not be stored |
+
+### POST /quote/:quoteId/relay-route
+
+Binds a Relay deposit you requested from Relay yourself into a `signer=permission` quote routed through Relay. Relay keeps a request's recipient on its own servers and the deposit only names an id, so a route someone else requested cannot be checked; one you requested can.
+
+Request the deposit with `POST https://api.relay.link/quote`: `user` and `refundTo` = the wallet, `recipient` = the destination, `originChainId` / `destinationChainId`, both currencies `0x0000000000000000000000000000000000000000`, `amount` = the quote's `bridge.inputAmount`, `tradeType` `EXACT_INPUT`. Check Relay's answer (one transaction on the source chain for exactly that amount, `details.recipient`, native `currencyOut` on the destination, at least `estimatedReceive`), then send its transaction here.
+
+Body: `{ "callTarget": "<tx.to>", "callData": "<tx.data>", "requestId": "<Relay's request id>" }`
+
+Returns `{ quoteId, intent }`, the quote's intent now carrying that deposit (`callTarget`, `callData`, `routeHash`). Sign only if `intent.callData` is the deposit Relay gave you.
+
+Errors (400): `NOT_RELAY_ROUTE`, `PERMISSION_ONLY` (key quotes keep their route), `ROUTE_ALREADY_BOUND` (one bind per quote), `QUOTE_EXPIRED`, `QUOTE_USED` (already swept), `INVALID_RELAY_ROUTE` (not a Relay contract on the source chain, a depository deposit crediting another wallet, a multicall refunding to a third party, or a deposit that would fail from the wallet), `ROUTE_GAS_CHANGED` (its gas no longer fits the quote's fee reserve: quote again). 404 when the quote does not exist.
 
 ### POST /authorization
 

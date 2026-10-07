@@ -51,5 +51,9 @@ describe('docs content', () => {
       expect(docSource('api')).toContain(text);
     }
     expect(docSource('index')).toMatch(/switch to smart account/);
+    // Delivery is native gas; the two token exceptions are named (owner, 2026-10-06)
+    expect(docSource('index')).toMatch(/## What arrives/);
+    for (const text of ['Mitosis', 'Endurance', 'receiveToken', 'OWN_WALLET_ONLY']) expect(docSource('index')).toContain(text);
+    for (const text of ['receiveToken', 'AMOUNT_TOO_LOW', 'OWN_WALLET_ONLY']) expect(docSource('api')).toContain(text);
   });
 });

@@ -34,7 +34,7 @@ To quote and run a sweep, the API (api.zerodust.xyz) receives your wallet addres
 
 - **Blockchains.** Every sweep is a public, permanent blockchain transaction. Anyone can see the addresses and amounts involved. This cannot be deleted by anyone.
 - **Chain RPC providers.** Your browser reads balances and sends transactions through each chain's public RPC endpoint. Those providers see your IP address and the requests you make.
-- **Bridges** (Gas.zip, Relay, Across, LI.FI). To quote and deliver a cross-chain sweep, the API sends them your wallet address, the destination address, the chains and the amount.
+- **Bridges** (Gas.zip, Relay, Across, LI.FI). To quote and deliver a cross-chain sweep, the API sends them your wallet address, the destination address, the chains and the amount. For a MetaMask sweep that Relay carries, your browser also asks Relay for the deposit directly (api.relay.link), with the same details, so Relay sees your IP address.
 - **Our providers.** The API runs on Render, its database on Supabase, and it sits behind Cloudflare. They process data only to run the service.
 
 ## Your rights

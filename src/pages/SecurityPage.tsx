@@ -52,6 +52,10 @@ export function SecurityPage({ build }: { build: BuildRecord }) {
           fixed in the page's Content-Security-Policy; the browser blocks anything else.
         </li>
         <li><strong>MetaMask</strong>, through the extension in your browser, when you connect it.</li>
+        <li>
+          <strong>api.relay.link</strong>: for a MetaMask sweep that Relay carries, to ask Relay for the deposit
+          itself. It receives your address, the destination address, the chains and the amount.
+        </li>
         <li>Nothing else: no analytics, no third-party scripts or fonts, no wallet SDKs, no tracking cookies.</li>
       </ul>
 
@@ -66,7 +70,9 @@ export function SecurityPage({ build }: { build: BuildRecord }) {
           With MetaMask: the router's address is fixed in the page, not taken from the API. Each chain's
           quote gets the same checks as a key sweep, and the one message you sign is built in the page from
           those checked quotes. A quote or message that names another contract or differs in any field is
-          refused before MetaMask is asked to sign.
+          refused before MetaMask is asked to sign. For a Relay route the page asks Relay for the deposit
+          itself, so Relay pays the address you set; an Across route must be a plain ETH deposit to a
+          wallet, checked on the destination chain.
         </li>
         <li>
           Chains without a sponsor: the page checks the plan the API sends (it spends your balance to the
