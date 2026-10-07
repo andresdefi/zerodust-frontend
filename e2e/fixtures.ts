@@ -18,6 +18,13 @@ const ZERO = '0x0000000000000000000000000000000000000000';
 const EMPTY_ROUTE = '0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470';
 const RELAY_DEPOSITORY = '0x4cd00e387622c35bddb9b4c962c136462338bc31';
 const RELAY_ROUTE_HASH = '0xaa06bfdcca59d50f8d38c5a0cb67f2741c49ecdf1bf80b495785cb86490c6932';
+const RELAY_API = 'https://api.relay.link';
+/** The one-time token a Relay-routed quote carries; the page/SDK must send it back to bind a route */
+const RELAY_ROUTE_TOKEN = 'c'.repeat(64);
+const relayDeposit = (depositor: string) => encodeFunctionData({
+  abi: parseAbi(['function depositNative(address depositor, bytes32 id)']),
+  args: [depositor as Address, `0x${'d2'.repeat(32)}`],
+});
 
 export const BALANCE = 532742721152083939n;
 const GAS_PRICE = 6_000_000n;
@@ -100,7 +107,11 @@ function quote(fromChainId: number, toChainId: number, destination: string) {
       revokeGasUnits: '50000',
     },
     autoRevoke: true,
-    ...(sameChain ? {} : { bridge: { name: 'relay', displayName: 'Relay' } }),
+    ...(sameChain ? {} : {
+      // What the contract routes: the balance less the reserve (the SDK recomputes and compares it)
+      bridge: { name: 'relay', displayName: 'Relay', inputAmount: (BALANCE - 188661272848240n).toString(), expectedOutput: '546220532909889397' },
+      relayRouteToken: RELAY_ROUTE_TOKEN,
+    }),
     intent: {
       mode: sameChain ? 0 : 1,
       destination: destination.toLowerCase(),
@@ -116,7 +127,7 @@ function quote(fromChainId: number, toChainId: number, destination: string) {
   };
 }
 
-function authorization(q: ReturnType<typeof quote>, fromChainId: number, user: Address) {
+function authorization(q: Pick<ReturnType<typeof quote>, 'mode' | 'intent' | 'fees' | 'deadline' | 'nonce'>, fromChainId: number, user: Address) {
   return {
     sweepType: q.mode === 0 ? 'same-chain' : 'cross-chain',
     typedData: buildSweepIntentTypedData(fromChainId, user, {
@@ -212,7 +223,14 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
   const directInfo = opts.monad
     ? { chainId: MONAD, name: 'Monad', token: 'MON', decimals: 18, explorerUrl: 'https://monadvision.com' }
     : { chainId: AVAX, name: 'Avalanche', token: 'AVAX', decimals: 18, explorerUrl: 'https://snowtrace.io' };
-  const quotes = new Map<string, ReturnType<typeof quote> & { from: number; to: number }>();
+  /** Stored quotes: Relay ones carry inputAmount and a route token; token-delivery ones a simpler bridge */
+  type StoredQuote = Omit<ReturnType<typeof quote>, 'bridge' | 'relayRouteToken'> & {
+    bridge?: { name: string; displayName: string; inputAmount?: string; expectedOutput?: string };
+    relayRouteToken?: string;
+    from: number;
+    to: number;
+  };
+  const quotes = new Map<string, StoredQuote>();
   const swept = new Set<number>();
   const sweeps = new Map<string, { fromChainId: number; toChainId: number }>();
   let mitosisQuotes = 0;
@@ -308,6 +326,15 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       quotes.set(q.quoteId, { ...q, from, to });
       return json(route, q);
     }
+    // A Relay deposit the page/SDK fetched from Relay itself: stored as the quote's route
+    if (path.startsWith('/quote/') && path.endsWith('/relay-route')) {
+      const quoteId = path.split('/')[2]!;
+      const body = route.request().postDataJSON() as { callTarget: string; callData: Hex; routeToken?: string };
+      const q = quotes.get(quoteId)!;
+      if (body.routeToken !== RELAY_ROUTE_TOKEN) return json(route, { error: 'routeToken does not match this quote', code: 'INVALID_ROUTE_TOKEN' }, 400);
+      q.intent = { ...q.intent, callTarget: body.callTarget.toLowerCase(), routeHash: keccak256(body.callData), callData: body.callData } as typeof q.intent;
+      return json(route, { quoteId, intent: q.intent });
+    }
     if (path === '/authorization') {
       const { quoteId } = route.request().postDataJSON() as { quoteId: string };
       const q = quotes.get(quoteId)!;
@@ -380,8 +407,18 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     return json(route, Array.isArray(body) ? body.map(answer) : answer(body));
   });
 
+  // Relay's API: the deposit the page/SDK asks for itself, paying the recipient it asked for
+  await page.route(`${RELAY_API}/quote`, async (route) => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type' } });
+    const b = route.request().postDataJSON() as { user: string; recipient: string; amount: string; originChainId: number; destinationChainId: number };
+    return json(route, {
+      steps: [{ kind: 'transaction', requestId: `0x${'17'.repeat(32)}`, items: [{ data: { to: RELAY_DEPOSITORY, data: relayDeposit(b.user), value: b.amount, chainId: b.originChainId } }] }],
+      details: { recipient: b.recipient, currencyOut: { amount: '546220532909889397', currency: { address: ZERO, chainId: b.destinationChainId } } },
+    });
+  });
+
   // Nothing else may be contacted
-  await page.route((url) => url.protocol !== 'file:' && url.protocol !== 'data:' && !url.origin.startsWith('http://localhost') && url.origin !== API && !rpcChains.has(url.origin), (route) =>
+  await page.route((url) => url.protocol !== 'file:' && url.protocol !== 'data:' && !url.origin.startsWith('http://localhost') && url.origin !== API && url.origin !== RELAY_API && !rpcChains.has(url.origin), (route) =>
     route.abort('blockedbyclient')
   );
 
