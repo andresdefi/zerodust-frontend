@@ -6,13 +6,14 @@ The planning endpoints are quote-only. They return unsigned transactions and nev
 
 ## Chains
 
-As of 7 October 2026, `GET /direct/chains` lists 18 chains:
+As of 7 October 2026, `GET /direct/chains` lists 19 chains:
 
 | Chain | ID | Token | `kind` |
 |---|---|---|---|
 | Flare | 14 | FLR | `evm` |
 | Cronos | 25 | CRO | `evm` |
 | Rootstock | 30 | RBTC | `evm` |
+| Telos | 40 | TLOS | `fixedprice` |
 | XDC | 50 | XDC | `evm` |
 | Fuse | 122 | FUSE | `evm` |
 | Monad | 143 | MON | `gaslimit` |
@@ -47,6 +48,8 @@ Chains with `kind: "zk"` (zkSync Era, Abstract, Lens) are swept with two EIP-712
 
 Some chains charge the whole gas limit (`gasLimit x gasPrice`) and refund nothing, whatever the transaction used. `GET /direct/chains` marks them with `kind: "gaslimit"` (Monad today). There any sufficient limit leaves exactly 0, so the planner never bisects: plain transfers use 21,000 and contract calls use the chain's `eth_estimateGas` plus 25%. When you check such a plan, require `sum(value) + sum(gas x gasPrice) == balance` exactly; a simulator that refunds unused gas will show a little left over, and that is expected.
 
+Some chains charge their own fixed network gas price, whatever price a transaction offers, and reject a lower one. `GET /direct/chains` marks them with `kind: "fixedprice"` (Telos today). A transaction priced above the network price is charged the network price, so the difference would stay in the wallet as dust; the receipt still reports the offered price. Plans for these chains offer exactly `eth_gasPrice`. When you check such a plan, read `eth_gasPrice` yourself and require every transaction's `gasPrice` to equal it.
+
 Monad also keeps a 10 MON reserve: a transaction that takes a wallet below it reverts (and still pays its gas) unless it is the wallet's only transaction in the last 3 blocks and the wallet is not EIP-7702 delegated. So:
 
 - A delegated wallet cannot be emptied there; the planner answers `INVALID_REQUEST`.
@@ -77,7 +80,7 @@ Rate limits: `/direct/chains`, `/direct/balances` and `/direct/status` are reads
 }
 ```
 
-`kind` is the chain's gas rule: `evm`, `arbitrum` (price must equal the base fee), `etherlink` (inclusion fee charged as gas) or `gaslimit` (the whole limit is charged). `prices` is USD per token, for display.
+`kind` is the chain's gas rule: `evm`, `arbitrum` (price must equal the base fee), `etherlink` (inclusion fee charged as gas), `gaslimit` (the whole limit is charged), `fixedprice` (the network's own price is charged, whatever the transaction offers) or `zk` (a paymaster pays the gas). `prices` is USD per token, for display.
 
 ### GET /direct/balances/:address
 
