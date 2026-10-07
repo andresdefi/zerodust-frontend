@@ -6,7 +6,7 @@ The planning endpoints are quote-only. They return unsigned transactions and nev
 
 ## Chains
 
-As of 6 October 2026, `GET /direct/chains` lists 17 chains:
+As of 7 October 2026, `GET /direct/chains` lists 18 chains:
 
 | Chain | ID | Token | `kind` |
 |---|---|---|---|
@@ -21,6 +21,7 @@ As of 6 October 2026, `GET /direct/chains` lists 17 chains:
 | Flow EVM | 747 | FLOW | `evm` |
 | HyperEVM | 999 | HYPE | `evm` |
 | Metis | 1088 | METIS | `evm` |
+| Vana | 1480 | VANA | `evm` |
 | Gravity | 1625 | G | `arbitrum` |
 | Abstract | 2741 | ETH | `zk` |
 | Immutable zkEVM | 13371 | IMX | `evm` |
