@@ -64,7 +64,11 @@ const quote = await zerodust.getQuote({
 
 `QuoteResponse` fields: `quoteId`, `version`, `userBalance`, `estimatedReceive`, `mode` (0 transfer, 1 bridge call), `fees` (`overheadGasUnits`, `protocolFeeGasUnits`, `extraFeeWei`, `reimbGasPriceCapWei`, `maxTotalFeeWei`, `revokeGasUnits`), `autoRevoke`, `intent` (`mode`, `destination`, `destinationChainId`, `callTarget`, `routeHash`, `minReceive`, and `callData` for cross-chain), `deadline`, `nonce`, `authNonce` and `validForSeconds`.
 
-A quote is valid for 55 seconds. The API also returns a `bridge` object for cross-chain quotes (see [REST API](/docs/api)); it is not part of the `QuoteResponse` type.
+A quote is valid for 55 seconds. Cross-chain quotes also carry `bridge` (`name`, `displayName`, `inputAmount`, `expectedOutput`), and Relay routes a one-time `relayRouteToken`.
+
+### bindRelayRoute(quoteId, route)
+
+`POST /quote/:quoteId/relay-route`. Binds a Relay deposit you fetched from Relay yourself (`requestRelayDeposit()` does that and checks Relay's answer) into a Relay-routed quote. `route` is `{ callTarget, callData, requestId, routeToken }`, with `routeToken` the quote's `relayRouteToken`. Returns `{ quoteId, intent }`; sign only if `intent.callData` is your deposit. `ZeroDustAgent` does all of this for every Relay route.
 
 ### createAuthorization(quoteId)
 
