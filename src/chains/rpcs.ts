@@ -52,6 +52,9 @@ export const RPC_URLS: Record<number, string> = {
   7777777: 'https://rpc.zora.energy/',
   // Doma (2026-10-02): CORS for the site and Origin: null
   97477: 'https://rpc.doma.xyz',
+  // Kaia and 0G (added 2026-10-07; probe-rpcs.mjs passed for both)
+  8217: 'https://public-en.node.kaia.io',
+  16661: 'https://evmrpc.0g.ai',
   124816: 'https://rpc.mitosis.org',
   648: 'https://rpc-endurance.fusionist.io',
 };
