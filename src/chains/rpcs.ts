@@ -57,6 +57,8 @@ export const RPC_URLS: Record<number, string> = {
   16661: 'https://evmrpc.0g.ai',
   // Arbitrum Nova (added 2026-10-07; probe-rpcs.mjs passed)
   42170: 'https://nova.arbitrum.io/rpc',
+  // Intuition (added 2026-10-07; probe-rpcs.mjs passed)
+  1155: 'https://rpc.intuition.systems',
   124816: 'https://rpc.mitosis.org',
   648: 'https://rpc-endurance.fusionist.io',
 };
