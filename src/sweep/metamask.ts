@@ -134,6 +134,8 @@ export async function requestPermissions(
 export interface PermissionQuote extends Omit<QuoteResponse, 'authNonce'> {
   signer?: string;
   bridge?: { name: string; displayName: string; inputAmount?: string; expectedOutput?: string };
+  /** Relay routes: the one-time token POST /quote/:quoteId/relay-route requires */
+  relayRouteToken?: string;
   permission: { router: Address; delegationManager: string; domainVersion: string };
 }
 
@@ -198,10 +200,16 @@ interface RelayQuoteAnswer {
  */
 export async function bindOwnRelayDeposit(
   quote: PermissionQuote,
-  want: { user: Address; fromChainId: number; toChainId: number; destination: Address }
+  want: { user: Address; fromChainId: number; toChainId: number; destination: Address; balance: bigint }
 ): Promise<PermissionQuote> {
   const stop = (why: string): never => { throw new Error(`Stopped before signing: ${why}`); };
-  const amount = quote.bridge?.inputAmount ?? stop('the Relay route has no amount to check');
+  // What the router will route: the balance read here less the signed fee reserve. The API's
+  // bridge.inputAmount must agree; Relay is asked for this amount, never the API's word.
+  const routed = want.balance - BigInt(quote.fees.maxTotalFeeWei);
+  if (routed <= 0n || quote.bridge?.inputAmount !== routed.toString()) {
+    stop(`the quote routes ${quote.bridge?.inputAmount ?? 'nothing'} into Relay, not the ${routed} wei the balance leaves after fees`);
+  }
+  const amount = routed.toString();
   const res = await fetch(`${RELAY_API}/quote`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -236,7 +244,7 @@ export async function bindOwnRelayDeposit(
 
   const bound = await api<{ intent: PermissionQuote['intent'] & { callData?: string } }>(`/quote/${quote.quoteId}/relay-route`, {
     method: 'POST',
-    body: JSON.stringify({ callTarget: tx.to, callData: tx.data, requestId }),
+    body: JSON.stringify({ callTarget: tx.to, callData: tx.data, requestId, ...(quote.relayRouteToken ? { routeToken: quote.relayRouteToken } : {}) }),
   });
   if (bound.intent?.callData?.toLowerCase() !== tx.data.toLowerCase() || bound.intent.callTarget.toLowerCase() !== tx.to.toLowerCase()) {
     stop('the API did not bind the deposit Relay gave this page');
@@ -474,14 +482,15 @@ export async function sweepBatchWithPermissions(
         let quote = await permissionQuote({ fromChainId: item.chainId, toChainId: item.toChainId, user: address, destination: item.destination });
         // A Relay route: the page asks Relay for the deposit itself, so Relay pays the recipient asked for here.
         // Known by the contract the route calls, not by the API's label (verifyPermissionQuote enforces it)
+        const balance = await item.readBalance();
         if (quote.bridge?.name === 'relay' || (quote.intent.callTarget && bridgeForCallTarget(item.chainId, quote.intent.callTarget) === 'relay')) {
           onStep(item.chainId, 'Asking Relay');
-          quote = await bindOwnRelayDeposit(quote, { user: address, fromChainId: item.chainId, toChainId: item.toChainId, destination: item.destination });
+          quote = await bindOwnRelayDeposit(quote, { user: address, fromChainId: item.chainId, toChainId: item.toChainId, destination: item.destination, balance });
         }
         onStep(item.chainId, 'Checking');
         const intent = await verifyPermissionQuote(
           quote,
-          { user: address, fromChainId: item.chainId, toChainId: item.toChainId, destination: item.destination, balance: await item.readBalance() },
+          { user: address, fromChainId: item.chainId, toChainId: item.toChainId, destination: item.destination, balance },
           reads
         );
         quoted.push({ item, quote, intent });
