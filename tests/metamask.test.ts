@@ -338,10 +338,12 @@ describe('bindOwnRelayDeposit: the Relay deposit comes from Relay, to this page'
   const RELAY = JSON.parse(readFileSync(new URL('./fixtures/relay-deposits-2026-10-06.json', import.meta.url), 'utf8')) as Record<string, { to: string; data: Hex; value: string; requestId: string; recipient: string; currencyOut: { address: string; chainId: number }; amountOut: string }>;
   const s = RELAY['8453-42161']!;
   const quote = {
-    quoteId: '33333333-3333-4333-8333-333333333333', estimatedReceive: '1', bridge: { name: 'relay', displayName: 'Relay', inputAmount: s.value },
+    quoteId: '33333333-3333-4333-8333-333333333333', estimatedReceive: '1', bridge: { name: 'relay', displayName: 'Relay', inputAmount: s.value }, relayRouteToken: 'b'.repeat(64),
+    fees: { maxTotalFeeWei: '100000000000000' },
     intent: { mode: 1, destination: OWNER.toLowerCase(), destinationChainId: '42161', callTarget: '0x4cd00e387622c35bddb9b4c962c136462338bc31', routeHash: '0x00', callData: '0xfeed', minReceive: '1' },
   } as unknown as PermissionQuote;
-  const want = { user: OWNER, fromChainId: 8453, toChainId: 42161, destination: OWNER };
+  /** The balance the page read: Relay's amount (s.value) plus the quote's 1e14 fee reserve */
+  const want = { user: OWNER, fromChainId: 8453, toChainId: 42161, destination: OWNER, balance: BigInt(s.value) + 100_000_000_000_000n };
 
   type Answer = {
     steps: Array<{ kind: string; requestId: string; items: Array<{ data: { to: string; data: string; value: string; chainId: number } }> }>;
@@ -376,7 +378,7 @@ describe('bindOwnRelayDeposit: the Relay deposit comes from Relay, to this page'
       originCurrency: '0x0000000000000000000000000000000000000000', destinationCurrency: '0x0000000000000000000000000000000000000000', amount: s.value, tradeType: 'EXACT_INPUT',
     } });
     expect(requests[1]!.url).toBe(`https://api.zerodust.xyz/quote/${quote.quoteId}/relay-route`);
-    expect(requests[1]!.body).toEqual({ callTarget: s.to, callData: s.data, requestId: s.requestId });
+    expect(requests[1]!.body).toEqual({ callTarget: s.to, callData: s.data, requestId: s.requestId, routeToken: 'b'.repeat(64) });
     expect(bound.intent.callData).toBe(s.data);
   });
 
@@ -390,7 +392,7 @@ describe('bindOwnRelayDeposit: the Relay deposit comes from Relay, to this page'
     deadline: Math.floor(Date.now() / 1000) + 50, nonce: 0, validForSeconds: 55,
   }) as unknown as PermissionQuote;
   const reads: ChainReads = { gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, code: async () => '0x' };
-  const verifyWant = { ...want, balance: 2_100_000_000_000_000n };
+  const verifyWant = want;
 
   it("refuses to sign a Relay deposit the page did not get from Relay, whatever the API's label says", async () => {
     for (const label of ['relay', 'gaszip', 'across']) {
@@ -411,6 +413,12 @@ describe('bindOwnRelayDeposit: the Relay deposit comes from Relay, to this page'
     await expect(bindOwnRelayDeposit(quote, want)).rejects.toThrow('Relay would not deliver native gas');
     stub();
     await expect(bindOwnRelayDeposit({ ...quote, estimatedReceive: (BigInt(s.amountOut) + 1n).toString() } as PermissionQuote, want)).rejects.toThrow('less than the amount shown');
+  });
+
+  it('stops before asking Relay when the quote routes another amount than the balance less the reserve', async () => {
+    const requests = stub();
+    await expect(bindOwnRelayDeposit(quote, { ...want, balance: want.balance + 1n })).rejects.toThrow(/not the \d+ wei the balance leaves after fees/);
+    expect(requests).toEqual([]);
   });
 
   it("stops when Relay's deposit is for another amount or chain, or the API binds something else", async () => {
