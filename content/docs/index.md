@@ -28,7 +28,7 @@ The website's main flow. MetaMask's Advanced Permissions (ERC-7715, MetaMask 13.
 How it differs from the key flow:
 
 - No revoke. The wallet keeps MetaMask's smart-account delegation, which is MetaMask's normal state. The allowance is used up by the sweep and expires anyway.
-- Cross-chain only through bridges that take the refund address and recipient as explicit parameters (Relay, Across, Hyperlane). The router is the bridge's caller, so Gas.zip, which refunds to its caller, is never used here.
+- Cross-chain only through bridges that take the refund address and recipient as explicit parameters (Relay, Across for ETH to ETH, Hyperlane). The router is the bridge's caller, so Gas.zip, which refunds to its caller, is never used here.
 - The router is on 16 chains: Ethereum, OP Mainnet, BNB Chain, Gnosis, Unichain, Polygon, Sonic, Robinhood Chain, Mantle, Arc, Base, Arbitrum, Celo, Linea, Berachain and Katana. Other chains need the key.
 - The SDK does not support this flow yet. The [REST API](/docs/api#with-metamask) does.
 
@@ -37,6 +37,24 @@ How it differs from the key flow:
 - The API never receives a private key. Keys sign locally and only signatures are sent.
 - The SDK treats the API as untrusted. `ZeroDustAgent` builds the typed data itself, delegates only to the ZeroDust contract, and checks the destination, route, fees and deadline of every quote before it signs anything. See [Agent](/docs/sdk-agent).
 - Chains without EIP-7702 support ("direct chains") are swept by the wallet itself with exact legacy transactions that the API plans but never signs. See [Direct chains](/docs/direct-chains).
+
+## What arrives
+
+A sweep delivers the destination chain's own gas token, never a wrapped token or a stablecoin: Avalanche to Base is AVAX in, ETH out; Base to BNB Chain is ETH in, BNB out.
+
+- Bridges that deliver native gas directly carry every pair: Gas.zip, Relay, and Across where both chains' gas is ETH.
+- Across is used only for ETH to ETH, as a plain deposit (no swap) to a wallet with no contract code or an EIP-7702 delegation. On other routes Across converts through USDC, USDT or WETH, and if that conversion fails or leaves a remainder it pays the remainder in that token; it also pays WETH instead of ETH to a contract. ZeroDust does not use it there.
+
+ZeroDust picks the route; the bridge does the delivery. If a bridge fails, it refunds under its own rules, usually to the sweeping wallet on the source chain, so that chain is no longer at 0.
+
+Two chains are the exception, because no bridge carries their gas token as gas:
+
+| Source | Arrives as | Bridge | Recipient |
+|---|---|---|---|
+| Mitosis (124816), MITO | MITO, an ERC-20 token on BNB Chain | Hyperlane | Any address |
+| Endurance (648), ACE | ACE, an ERC-20 token on BNB Chain | Endurance's bridge | The sweeping wallet only (`OWN_WALLET_ONLY` otherwise) |
+
+A quote for these routes carries `receiveToken` (symbol, address, decimals), and `estimatedReceive` is in that token. The site says plainly that a token arrives, before you confirm.
 
 ## Ways to use ZeroDust
 

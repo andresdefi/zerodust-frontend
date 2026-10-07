@@ -15,6 +15,7 @@ ZeroDust moves the native gas token left in a wallet on one or more chains to on
 ## Before you sweep
 
 - **A sweep cannot be undone.** Funds sent to a wrong address cannot be recovered.
+- **What arrives is native gas.** ZeroDust only uses routes that deliver the destination chain's own gas token, but the bridge does the delivery. If a bridge fails it may refund instead, usually to your wallet on the source chain, which then is not at 0. Two chains are the exception and the site says so before you confirm: Mitosis arrives as MITO and Endurance as ACE, both as tokens on BNB Chain (Endurance only to your own wallet).
 - **Burning destroys funds.** If you choose to burn a balance that no route can move, nobody receives it.
 - **Donating** sends a balance to ZeroDust. You receive nothing for it.
 - **Estimates can change.** Amounts shown before you confirm are estimates; each chain is quoted again when it is swept, and you receive what the route delivers.
