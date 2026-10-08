@@ -1,14 +1,28 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { IDLE_FLAG } from '../components/KeyEntry';
 import { isAddressEqual, type Address } from 'viem';
 import { ChainIcon } from '../components/ChainIcon';
 import { DestinationPicker } from '../components/DestinationPicker';
 import { formatAmount, formatUsd, shortAddress } from '../lib/format';
 import { groupChains, groupText, tokenRouteOf, type GroupKey } from './groups';
-import { resolveName, useAddressData, useEstimates, useResolved, type AddressRow, type Estimate } from './useAddress';
+import { resolveName, useAddressData, useEstimates, useResolved, type AddressRow, type ChainOption, type Estimate } from './useAddress';
+import { SweepSession, SweepWithDialog, type SweepPlan } from './SweepSession';
+import type { RowState, Wallet } from '../sweep/useSweep';
 
-// One address, read-only (redesign phase 2): every chain holding gas, in groups by how
-// it is swept and what arrives. Selecting works within one group (a sweep acts on one
-// group); signing arrives in phase 3, so the sweep buttons are not live yet.
+// One address: every chain holding gas, in groups by how it is swept and what arrives.
+// Reading needs nothing; sweeping a group asks how to sign (MetaMask or the key of this
+// address), checks every chain, confirms, and shows each chain's progress in its row.
+
+/** A loaded key left alone this long is forgotten (never during a sweep) */
+const IDLE_FORGET_MS = 15 * 60 * 1000;
+
+/** Forgetting the key: a reload clears this tab's memory (the account object lives nowhere else) */
+function forgetKey(idle: boolean) {
+  if (idle) {
+    try { sessionStorage.setItem(IDLE_FLAG, '1'); } catch { /* the reload still forgets the key */ }
+  }
+  window.location.reload();
+}
 
 /** A bridge keeping more than this share of a chain's value is flagged next to it */
 const BRIDGE_TAKES_FLAG = 0.5;
@@ -36,7 +50,8 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
   const [defaultDest, setDefaultDest] = useState<number | null>(null);
   const destination = chosenDest ?? defaultDest;
   const isDefault = chosenDest === null && destination !== null;
-  const data = useAddressData(address, destination, recipient);
+  const [version, setVersion] = useState(0);
+  const data = useAddressData(address, destination, recipient, version);
   // Default destination (owner, 2026-10-08): where most of the wallet's bridgeable gas already is,
   // so the most stays put; shown prominently as changeable. Base when nothing qualifies.
   if (data.state === 'ready' && defaultDest === null) {
@@ -60,7 +75,10 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
   const gasChains = groups.filter((g) => g.key === 'metamask' || g.key === 'key').flatMap((g) => g.chains);
   const estimates = useEstimates(address, gasChains, destination, recipient);
   // By default a group's chains are all selected, except those no bridge answered for or that failed to quote
-  const sweepable = (c: AddressRow) => !data.routesOf(c.chainId).unknown && !estimates[c.chainId]?.error;
+  const [progress, setProgress] = useState<{ states: Record<number, RowState>; bridgeOf: Record<number, string> }>({ states: {}, bridgeOf: {} });
+  // A chain swept to 0 is not offered again until the balances are read again
+  const finished = useMemo(() => new Set(Object.entries(progress.states).filter(([, st]) => st.phase === 'done').map(([id]) => Number(id))), [progress.states]);
+  const sweepable = (c: AddressRow) => !data.routesOf(c.chainId).unknown && !estimates[c.chainId]?.error && !finished.has(c.chainId);
   const selectedIds = selection?.ids ?? new Set(active?.chains.filter(sweepable).map((c) => c.chainId) ?? []);
 
   const toggle = (group: GroupKey, chainId: number) => {
@@ -74,8 +92,50 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
     setSelection({ group, ids: all ? new Set() : new Set(chains.map((c) => c.chainId)) });
   };
 
+  // Sweeping: the wallet chosen to sign (kept for the next group), the group waiting for one, the run
+  const [wallet, setWallet] = useState<Wallet | null>(null);
+  const [pending, setPending] = useState<SweepPlan | null>(null);
+  const [run, setRun] = useState<{ id: number; plan: SweepPlan; wallet: Wallet } | null>(null);
+  const [ownAddress, setOwnAddress] = useState<Address | null>(null);
+  const [elsewhereChain, setElsewhereChain] = useState<number | null>(null);
+  const [pickingElsewhere, setPickingElsewhere] = useState(false);
+  const onProgress = useCallback((states: Record<number, RowState>, bridgeOf: Record<number, string>) => {
+    setProgress((prev) => ({ states: { ...prev.states, ...states }, bridgeOf: { ...prev.bridgeOf, ...bridgeOf } }));
+  }, []);
+  const sweepingNow = Object.values(progress.states).some((st) => st.phase === 'sweeping');
+  // The key stays only while it is used: 15 minutes without activity forgets it (never mid-sweep),
+  // as on the old page; between groups too, not only while a sweep session is open
+  const keyLoaded = wallet?.kind === 'key';
+  useEffect(() => {
+    if (!keyLoaded || sweepingNow) return;
+    let timer = setTimeout(() => forgetKey(true), IDLE_FORGET_MS);
+    const reset = () => { clearTimeout(timer); timer = setTimeout(() => forgetKey(true), IDLE_FORGET_MS); };
+    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
+    for (const e of events) window.addEventListener(e, reset, { passive: true });
+    return () => { clearTimeout(timer); for (const e of events) window.removeEventListener(e, reset); };
+  }, [keyLoaded, sweepingNow]);
+  const anyResult = Object.values(progress.states).some((st) => st.phase === 'done' || st.phase === 'failed');
+  const runs = useRef(0);
+  const begin = (plan: SweepPlan, w: Wallet) => {
+    setWallet(w);
+    setPending(null);
+    runs.current += 1;
+    setRun({ id: runs.current, plan, wallet: w });
+  };
+  const startSweep = (group: GroupKey, chains: AddressRow[]) => {
+    if (destination === null || chains.length === 0 || sweepingNow) return;
+    if (group === 'own-chain' && !ownAddress) return;
+    if (group === 'elsewhere' && elsewhereChain === null) { setPickingElsewhere(true); return; }
+    setSelection({ group, ids: new Set(chains.map((c) => c.chainId)) });
+    const plan: SweepPlan = { group, chains, destination, recipient, ownChainAddress: ownAddress ?? undefined, elsewhereChain: elsewhereChain ?? undefined };
+    // A loaded key signs for every chain: no need to ask again
+    if (wallet?.kind === 'key') begin(plan, wallet);
+    else setPending(plan);
+  };
+  const optionOf = (chainId: number): ChainOption | undefined => data.chainOptions.find((o) => o.chainId === chainId);
+
   const total = data.rows.reduce((s, r) => s + (r.usd ?? 0), 0);
-  const selectedRows = active ? active.chains.filter((c) => selectedIds.has(c.chainId)) : [];
+  const selectedRows = active ? active.chains.filter((c) => selectedIds.has(c.chainId) && !finished.has(c.chainId)) : [];
   const quotedRows = selectedRows.filter((r) => estimates[r.chainId]?.receive !== undefined);
   const selectedReceive = quotedRows.reduce((s, r) => s + estimates[r.chainId]!.receive!, 0n);
 
@@ -86,7 +146,9 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
           <h1>{name ?? shortAddress(address)} <CopyButton text={address} /></h1>
           <p className="ap-badges">
             {name && <span className="tag">{shortAddress(address)}</span>}
-            <span className="tag">Not connected</span>
+            {keyLoaded
+              ? <span className="tag acc">Key loaded · <button type="button" className="linkbtn" onClick={() => forgetKey(false)} disabled={sweepingNow}>Forget it</button></span>
+              : wallet?.kind === 'metamask' ? <span className="tag ok">MetaMask</span> : <span className="tag">Not connected</span>}
           </p>
           <p className="ap-links">
             <a href={`https://etherscan.io/address/${address}`} target="_blank" rel="noreferrer">etherscan ↗</a>
@@ -107,9 +169,14 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
         onRecipient={(r) => { setRecipient(r); setSelection(null); }}
       />
 
-      <div className="ap-tabs" role="tablist">
-        <span role="tab" aria-selected="true" className="on">Balances</span>
-        <span role="tab" aria-selected="false" aria-disabled="true">Delegations</span>
+      <div className="ap-tabbar">
+        <div className="ap-tabs" role="tablist">
+          <span role="tab" aria-selected="true" className="on">Balances</span>
+          <span role="tab" aria-selected="false" aria-disabled="true">Delegations</span>
+        </div>
+        {anyResult && !sweepingNow && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setProgress({ states: {}, bridgeOf: {} }); setRun(null); setSelection(null); setVersion((v) => v + 1); }}>Refresh balances</button>
+        )}
       </div>
 
       {data.state === 'loading' && <div className="ap-state">Reading balances on every chain…</div>}
@@ -121,7 +188,7 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
       {groups.map((g) => {
         const text = groupText(g.key, destName);
         const isActive = g.key === activeGroup;
-        const chosen = isActive ? g.chains.filter((c) => selectedIds.has(c.chainId)) : [];
+        const chosen = isActive ? g.chains.filter((c) => selectedIds.has(c.chainId) && !finished.has(c.chainId)) : [];
         const subtotal = g.chains.reduce((s, c) => s + (c.usd ?? 0), 0);
         const mixedSigners = g.key !== 'metamask' && g.key !== 'key' && g.chains.some((c) => c.metamask) && g.chains.some((c) => !c.metamask);
         return (
@@ -136,10 +203,21 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
                 <b>{g.chains.length} {g.chains.length === 1 ? 'chain' : 'chains'}</b>
                 <small>{formatUsd(subtotal)}</small>
               </div>
-              <button type="button" className={`btn btn-sm ${isActive ? 'btn-primary' : 'btn-ghost'}`} disabled title="Sweeping arrives in the next step of the redesign">
-                Sweep {isActive ? chosen.length : g.chains.length} {(isActive ? chosen.length : g.chains.length) === 1 ? 'chain' : 'chains'}
+              {g.key === 'elsewhere' && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPickingElsewhere(true)}>
+                  {elsewhereChain === null ? 'Choose a chain' : `To ${optionOf(elsewhereChain)?.name ?? 'chain'} · change`}
+                </button>
+              )}
+              <button
+                type="button"
+                className={`btn btn-sm ${isActive ? 'btn-primary' : 'btn-ghost'}`}
+                disabled={sweepingNow || destination === null || (isActive && chosen.length === 0) || (g.key === 'own-chain' && !ownAddress)}
+                onClick={() => startSweep(g.key, isActive ? chosen : g.chains.filter(sweepable))}
+              >
+                Sweep {isActive ? chosen.length : g.chains.filter(sweepable).length} {(isActive ? chosen.length : g.chains.filter(sweepable).length) === 1 ? 'chain' : 'chains'}
               </button>
             </header>
+            {g.key === 'own-chain' && <OwnChainAddress value={ownAddress} onChange={setOwnAddress} />}
             <ul className="ap-rows">
               {g.chains.map((c) => (
                 <ChainRow
@@ -148,6 +226,10 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
                   destToken={destToken ?? null} estimate={estimates[c.chainId]}
                   destPrice={destToken ? data.priceOf(destToken.token) : undefined}
                   unknownRoute={data.routesOf(c.chainId).unknown === true}
+                  state={progress.states[c.chainId]}
+                  bridge={progress.bridgeOf[c.chainId]}
+                  arrivalExplorer={progress.states[c.chainId]?.toChainId !== undefined ? optionOf(progress.states[c.chainId]!.toChainId!)?.explorerUrl : undefined}
+                  running={run !== null}
                 />
               ))}
             </ul>
@@ -165,12 +247,28 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
                 : gasGroup && destination === null ? <span> · choose where it goes</span> : null}
               <small>One group at a time: each group has its own way of signing and its own destination</small>
             </p>
-            <button type="button" className="btn btn-primary" disabled title="Sweeping arrives in the next step of the redesign">
-              Sweep {selectedRows.length} {selectedRows.length === 1 ? 'chain' : 'chains'}
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={sweepingNow || destination === null || selectedRows.length === 0 || (active.key === 'own-chain' && !ownAddress)}
+              onClick={() => startSweep(active.key, selectedRows)}
+            >
+              {sweepingNow ? 'Sweeping…' : `Sweep ${selectedRows.length} ${selectedRows.length === 1 ? 'chain' : 'chains'}`}
             </button>
           </div>
         </div>
       )}
+
+      <DestinationPicker
+        open={pickingElsewhere}
+        dests={data.chainOptions.filter((c) => c.chainId !== destination).map((c) => ({ ...c, reachableFrom: 0 }))}
+        sourceCount={0}
+        current={elsewhereChain}
+        onPick={(id) => { setElsewhereChain(id); setPickingElsewhere(false); }}
+        onClose={() => setPickingElsewhere(false)}
+      />
+      <SweepWithDialog open={pending !== null} plan={pending} address={address} onWallet={(w) => pending && begin(pending, w)} onClose={() => setPending(null)} />
+      {run && <SweepSession key={run.id} wallet={run.wallet} plan={run.plan} onProgress={onProgress} onEnd={() => setRun(null)} />}
 
       <DestinationPicker
         open={picking}
@@ -247,7 +345,34 @@ function DestinationBar({ address, recipient, destination, destName, isDefault, 
   );
 }
 
-function ChainRow({ row, group, selected, keyOnly, onToggle, destination, destName, destToken, estimate, destPrice, unknownRoute }: {
+/** The address the 'Stays on its own chain' group sends to, on each of its chains */
+function OwnChainAddress({ value, onChange }: { value: Address | null; onChange: (a: Address | null) => void }) {
+  const [input, setInput] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const res = await resolveName(input.trim());
+    if ('error' in res) { setError(res.error); return; }
+    setError(null);
+    onChange(res.address);
+  };
+  if (value) {
+    return (
+      <p className="ap-own">Each chain's gas goes to <b>{value}</b> on that same chain. <button type="button" className="linkbtn" onClick={() => onChange(null)}>Change</button></p>
+    );
+  }
+  return (
+    <form className="ap-own" onSubmit={(e) => void submit(e)}>
+      <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Address to send to on each chain (0x… or name.eth)" aria-label="Address on each chain" autoComplete="off" spellCheck={false} />
+      <button type="submit" className="btn btn-ghost btn-sm" disabled={!input.trim()}>Use this address</button>
+      {error && <span className="ap-dest-err" role="alert">{error}</span>}
+    </form>
+  );
+}
+
+const SHOWN_PHASES = new Set(['sweeping', 'done', 'failed']);
+
+function ChainRow({ row, group, selected, keyOnly, onToggle, destination, destName, destToken, estimate, destPrice, unknownRoute, state, bridge, arrivalExplorer, running }: {
   row: AddressRow;
   group: GroupKey;
   selected: boolean;
@@ -259,7 +384,13 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, destination, destNa
   estimate: Estimate | undefined;
   destPrice: number | undefined;
   unknownRoute: boolean;
+  state: RowState | undefined;
+  bridge: string | undefined;
+  arrivalExplorer: string | undefined;
+  running: boolean;
 }) {
+  const shown = state && (SHOWN_PHASES.has(state.phase) || (running && state.phase === 'quoting'));
+  if (shown) return <ProgressRow row={row} state={state!} bridge={bridge} arrivalExplorer={arrivalExplorer} />;
   const token = tokenRouteOf(row.chainId);
   let route: { text: string; tone: 'ok' | 'warn' | 'acc' | 'plain'; title?: string };
   let receive: string = '';
@@ -296,6 +427,26 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, destination, destNa
       <span className="ap-route"><span className={`tag ${route.tone}`} title={route.title}>{route.text}</span></span>
       <span className="ap-recv">{receive}</span>
       <button type="button" className="btn btn-ghost btn-xs" disabled title="Sweeping arrives in the next step of the redesign">Sweep</button>
+    </li>
+  );
+}
+
+/** A chain while and after it is swept: its state, and links to what was sent and what arrived */
+function ProgressRow({ row, state, bridge, arrivalExplorer }: { row: AddressRow; state: RowState; bridge: string | undefined; arrivalExplorer: string | undefined }) {
+  const tone = state.phase === 'done' ? 'ok' : state.phase === 'failed' ? 'warn' : 'plain';
+  const label = state.phase === 'done' ? 'Done · 0 left' : state.phase === 'failed' ? 'Failed' : state.phase === 'quoting' ? 'Checking…' : 'Sweeping…';
+  const tx = (base: string, hash: string) => `${base.replace(/\/$/, '')}/tx/${hash}`;
+  return (
+    <li className={`ap-row ap-prog ${state.phase}`}>
+      <span className="ap-cb" aria-hidden="true" />
+      <span className="ap-chain"><ChainIcon chainId={row.chainId} name={row.name} size={28} /><span>{row.name}</span></span>
+      <span className="ap-bal">{formatAmount(row.balance, row.decimals)} {row.token}{bridge && <small>via {bridge}</small>}</span>
+      <span className="ap-route"><span className={`tag ${tone}`}>{label}</span></span>
+      <span className="ap-prog-detail">{state.detail}</span>
+      <span className="ap-links-tx">
+        {state.txHash && row.explorerUrl && <a href={tx(row.explorerUrl, state.txHash)} target="_blank" rel="noreferrer">Sent ↗</a>}
+        {state.arrivalTx && arrivalExplorer && <a href={tx(arrivalExplorer, state.arrivalTx)} target="_blank" rel="noreferrer">Arrived ↗</a>}
+      </span>
     </li>
   );
 }

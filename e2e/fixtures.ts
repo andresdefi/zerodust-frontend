@@ -490,3 +490,34 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
 
   return { swept, sent, reports, quoted };
 }
+
+/** Watches a page for the key anywhere it must never be: requests, the console, the DOM, input values, storage */
+export async function watchForKey(page: Page, key: string) {
+  const bare = key.slice(2).toLowerCase();
+  const leaks: string[] = [];
+  page.on('request', (r) => {
+    const text = `${r.url()} ${r.postData() ?? ''}`.toLowerCase();
+    if (text.includes(bare)) leaks.push(`request to ${r.url()}`);
+  });
+  page.on('console', (m) => {
+    if (m.text().toLowerCase().includes(bare)) leaks.push('console');
+  });
+  const cspViolations: string[] = [];
+  page.on('console', (m) => {
+    if (/Content Security Policy|Refused to/.test(m.text())) cspViolations.push(m.text());
+  });
+  return {
+    leaks,
+    cspViolations,
+    async checkPage() {
+      const found = await page.evaluate((k) => {
+        const html = document.documentElement.outerHTML.toLowerCase();
+        const inputs = [...document.querySelectorAll('input')].map((i) => i.value.toLowerCase()).join(' ');
+        const storage = JSON.stringify({ ...localStorage, ...sessionStorage }).toLowerCase();
+        return [html.includes(k) && 'DOM', inputs.includes(k) && 'input value', storage.includes(k) && 'storage'].filter(Boolean);
+      }, bare);
+      leaks.push(...(found as string[]));
+    },
+  };
+}
+
