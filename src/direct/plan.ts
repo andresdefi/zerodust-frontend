@@ -12,6 +12,21 @@ export const BURN_ADDRESS = '0x000000000000000000000000000000000000dEaD';
 export const GASZIP_DEPOSIT = '0x391E7C679d29bD940d63be94AD22A25d25b5A604';
 /** Relay depository's depositNative(address depositor, bytes32 id) */
 export const RELAY_DEPOSIT_NATIVE = '0x49290c1c';
+/**
+ * Relay's depository, the only contract a Relay deposit may go to: its standard address, except
+ * where Relay's own quotes name another (read from live quotes on every direct chain, 2026-10-08:
+ * Cronos uses its own; Avalanche and Metis route through a router call, which the API refuses).
+ * A plan naming any other contract is refused.
+ */
+export const RELAY_DEPOSITORY = '0x4cd00e387622c35bddb9b4c962c136462338bc31';
+const RELAY_DEPOSITORY_BY_CHAIN: Readonly<Record<number, string>> = { 25: '0x59916da825d2d2ec1bf878d71c88826f6633ecca' };
+export const relayDepositoryFor = (chainId: number): string => RELAY_DEPOSITORY_BY_CHAIN[chainId] ?? RELAY_DEPOSITORY;
+/**
+ * The most a plan may offer over the chain's own eth_gasPrice. The planner offers 1x-1.1x
+ * (2026-10-08, every direct chain); a higher price would only burn the wallet's money, or on
+ * ZK-stack chains prepay it to the paymaster.
+ */
+export const MAX_GAS_PRICE_FACTOR = 2n;
 /** LI.FI's contract (the same address on the chains it serves) */
 export const LIFI_DIAMOND = '0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE';
 
@@ -69,8 +84,6 @@ export const GUARD_CHAINS: Readonly<Record<number, L1Formula>> = { 81457: 'ecoto
 export const ZERODUST_GUARD = '0x2f95e6ED90a7dD67fc3Fae5c5628647E6A83e48e';
 /** keccak256 of its runtime code: the page checks the code at the address before signing */
 export const ZERODUST_GUARD_CODEHASH = '0x0e00b07c95af7e18d655633d521d110ce6e95ff3c330ff3a4ac2d1b44fed685e';
-/** Relay's depository on the guard chains: the only bridge target a guard plan may name */
-export const GUARD_RELAY_DEPOSITORY = '0x4cd00e387622c35bddb9b4c962c136462338bc31';
 
 /** Headroom the page allows on the LayerZero fee it reads itself (the planner adds 10%) */
 export const OFT_FEE_MARGIN_PERCENT = 110n;

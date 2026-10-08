@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { encodeFunctionData, parseAbi } from 'viem';
-import { BURN_ADDRESS, GASZIP_DEPOSIT, LIFI_DIAMOND, ZERODUST_ADDRESS, type DirectPlan, type PlanTx } from '../src/direct/plan';
+import { BURN_ADDRESS, GASZIP_DEPOSIT, LIFI_DIAMOND, relayDepositoryFor, ZERODUST_ADDRESS, type DirectPlan, type PlanTx } from '../src/direct/plan';
 import { totalSpend, verifyPlan, type PlanContext } from '../src/direct/verify';
 import { ACROSS, acrossDepositData, transferCall } from './fixtures/across-direct';
 
@@ -64,11 +64,20 @@ describe('verifyPlan', () => {
     expect(() => verifyPlan(big, ctx())).toThrow(/above 5%/);
   });
 
-  it('Relay: only a depositNative crediting this wallet', () => {
+  it("Relay: only a depositNative to Relay's pinned depository, crediting this wallet", () => {
     const data = (depositor: string) => `0x49290c1c000000000000000000000000${depositor.slice(2)}${'ee'.repeat(32)}`;
-    expect(() => verifyPlan(routePlan({ to: OTHER, data: data(FROM), gas: '24830' }, 'relay'), ctx())).not.toThrow();
-    expect(() => verifyPlan(routePlan({ to: OTHER, data: data(OTHER), gas: '24830' }, 'relay'), ctx())).toThrow(/credit this wallet/);
-    expect(() => verifyPlan(routePlan({ to: OTHER, data: '0xdeadbeef', gas: '24830' }, 'relay'), ctx())).toThrow(/plain deposit/);
+    const DEPOSITORY = '0x4cd00e387622c35bddb9b4c962c136462338bc31';
+    expect(() => verifyPlan(routePlan({ to: DEPOSITORY, data: data(FROM), gas: '24830' }, 'relay'), ctx())).not.toThrow();
+    // Any other contract could take the deposit and credit no one
+    expect(() => verifyPlan(routePlan({ to: OTHER, data: data(FROM), gas: '24830' }, 'relay'), ctx())).toThrow(/Relay's depository/);
+    expect(() => verifyPlan(routePlan({ to: DEPOSITORY, data: data(OTHER), gas: '24830' }, 'relay'), ctx())).toThrow(/credit this wallet/);
+    expect(() => verifyPlan(routePlan({ to: DEPOSITORY, data: '0xdeadbeef', gas: '24830' }, 'relay'), ctx())).toThrow(/plain deposit/);
+    expect(() => verifyPlan(routePlan({ to: DEPOSITORY, data: `${data(FROM)}00`, gas: '24830' }, 'relay'), ctx())).toThrow(/plain deposit/);
+  });
+
+  it("Relay on Cronos: its own depository, as Relay's quotes name it", () => {
+    expect(relayDepositoryFor(25)).toBe('0x59916da825d2d2ec1bf878d71c88826f6633ecca');
+    expect(relayDepositoryFor(999)).toBe('0x4cd00e387622c35bddb9b4c962c136462338bc31');
   });
 
   it('same chain: a plain transfer to the address set, never to the wallet itself', () => {
