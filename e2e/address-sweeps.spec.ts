@@ -342,3 +342,40 @@ test('one gas group: the key sweeps a MetaMask chain and a key-only chain togeth
   expect([...swept].sort()).toEqual([10, 43114].sort());
   expect(sent).toHaveLength(2);
 });
+
+test('a recipient on the scam list is said plainly and used only after a second step; a down check blocks nothing', async ({ page }) => {
+  const SCAM = '0x101ce0cedd142f199c9ef61739ae59b6611a0fc0';
+  await openAddress(page, { scam: [SCAM] });
+  const dest = page.getByRole('region', { name: 'Where swept gas goes' });
+  await dest.getByRole('button', { name: 'Send to another address' }).click();
+  await dest.getByRole('textbox', { name: 'Send to address' }).fill(SCAM);
+  await dest.getByRole('button', { name: 'Use this address' }).click();
+  const warning = dest.getByRole('alert').filter({ hasText: "ScamSniffer's list of scam addresses" });
+  await expect(warning).toBeVisible();
+  // Nothing changed yet
+  await expect(dest).toContainText('(this wallet)');
+  await warning.getByRole('button', { name: "Don't use it" }).click();
+  await expect(warning).toHaveCount(0);
+  await expect(dest).toContainText('(this wallet)');
+  // Asked again, and this time used on purpose
+  await dest.getByRole('button', { name: 'Use this address' }).click();
+  await dest.getByRole('alert').getByRole('button', { name: 'Use it anyway' }).click();
+  await expect(dest).toContainText('(another address)');
+
+  // The same-chain address gets the same check
+  const own = group(page, 'Stays on its own chain');
+  await own.getByRole('textbox', { name: 'Address on each chain' }).fill(SCAM);
+  await own.getByRole('button', { name: 'Use this address' }).click();
+  await expect(own.getByRole('alert')).toContainText("ScamSniffer's list");
+  await own.getByRole('button', { name: 'Use it anyway' }).click();
+  await expect(own).toContainText("Each chain's gas goes to");
+
+  // The check down: an address is used straight away, no warning
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  await openAddress(page, { scam: [SCAM], scamCheckDown: true });
+  const dest2 = page.getByRole('region', { name: 'Where swept gas goes' });
+  await dest2.getByRole('button', { name: 'Send to another address' }).click();
+  await dest2.getByRole('textbox', { name: 'Send to address' }).fill(SCAM);
+  await dest2.getByRole('button', { name: 'Use this address' }).click();
+  await expect(dest2).toContainText('(another address)');
+});
