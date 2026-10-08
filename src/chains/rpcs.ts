@@ -92,4 +92,7 @@ export const DIRECT_RPC_URLS: Record<number, string> = {
   1480: 'https://rpc.vana.org',
   // Telos (direct, added 2026-10-07; probe-rpcs.mjs passed)
   40: 'https://rpc.telos.net',
+  // Blast and Boba (direct through ZeroDustGuard, added 2026-10-08; probe-rpcs.mjs passed)
+  81457: 'https://rpc.blast.io',
+  288: 'https://mainnet.boba.network',
 };

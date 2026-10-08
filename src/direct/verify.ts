@@ -1,12 +1,16 @@
 import { verifyAcrossDeposit } from './across';
 import { decodeFunctionData, parseAbi } from 'viem';
 import { tokenExitFor } from './plan';
-import { BURN_ADDRESS, GASLIMIT_CHAINS, GASZIP_DEPOSIT, LIFI_DIAMOND, PAYMASTER_GENERAL, RELAY_DEPOSIT_NATIVE, ZERODUST_ADDRESS, ZK_PAYMASTERS, type DirectPlan, type PlanMode } from './plan';
+import {
+  BURN_ADDRESS, GASLIMIT_CHAINS, GASZIP_DEPOSIT, GUARD_CHAINS, GUARD_RELAY_DEPOSITORY, LIFI_DIAMOND, PAYMASTER_GENERAL, RELAY_DEPOSIT_NATIVE,
+  ZERODUST_ADDRESS, ZERODUST_GUARD, ZK_PAYMASTERS, type DirectPlan, type PlanMode,
+} from './plan';
 
 /** Etherlink charges its inclusion fee as gas: 0.000004 XTZ per byte of (150 + calldata) */
 const ETHERLINK_CHAIN_ID = 42793;
 const ETHERLINK_FEE_PER_BYTE = 4_000_000_000_000n;
 
+export const GUARD_SWEEP = parseAbi(['function sweep(address target, uint256 fee, bytes data) payable']);
 const OFT_SEND = parseAbi(['function sendFrom(address from, uint16 dstChainId, bytes32 toAddress, uint256 amount, (address refundAddress, address zroPaymentAddress, bytes adapterParams) callParams) payable']);
 
 // The API is untrusted input: before anything is signed, the page checks the
@@ -40,14 +44,82 @@ export interface PlanChecks {
   across?: { settler: string; expiresAt: number };
 }
 
+/**
+ * Guard chains: one legacy transaction to ZeroDustGuard, sweep(target, fee, data), whose value
+ * and the API's L1 fee estimate spend the balance with the gas. The page recomputes the L1 fee
+ * when it signs (run.ts signPlan) and moves the difference as `absorb` says, which it decides
+ * here: into the fee for a bridge deposit (the deposit must carry the quoted amount), into the
+ * amount otherwise.
+ */
+function verifyGuardPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
+  const fail = (why: string): never => { throw new Error(`Plan refused: ${why}`); };
+  const g = plan.guard;
+  if (!g) return fail('it does not go through ZeroDust\'s guard');
+  if (ctx.mode === 'exit') fail('this chain has no swap exit');
+  if (plan.txs.length !== 1) fail('expected one transaction');
+  const tx = plan.txs[0]!;
+  if (tx.nonce !== ctx.nonce) fail('the nonce is stale; check again');
+  if (tx.kind !== 'sweep' || !eq(tx.to, ZERODUST_GUARD) || !eq(g.address, ZERODUST_GUARD)) fail('the sweep does not go to ZeroDust\'s guard');
+  if (tx.paymaster !== undefined || tx.paymasterInput !== undefined) fail('a paymaster appears on a chain that does not use one');
+  if (g.l1Formula !== GUARD_CHAINS[ctx.chainId]) fail('it prices the L1 fee with another formula');
+  let args: readonly [string, bigint, string];
+  try {
+    args = decodeFunctionData({ abi: GUARD_SWEEP, data: tx.data as `0x${string}` }).args as typeof args;
+  } catch {
+    return fail('the guard call is not a sweep');
+  }
+  const [target, fee, data] = args;
+  if (!eq(target, g.target) || data.toLowerCase() !== g.data.toLowerCase()) fail('the guard call does not match the plan');
+  if (BigInt(plan.fee) !== fee) fail('the fee shown is not the fee paid');
+  const value = BigInt(tx.value);
+  const forwarded = BigInt(g.forwarded);
+  const l1Fee = BigInt(g.l1Fee);
+  const gas = BigInt(tx.gas);
+  const price = BigInt(tx.gasPrice);
+  if (gas < 21_000n || price <= 0n || l1Fee < 0n || forwarded <= 0n || fee < 0n) fail('it has impossible gas, value or fee');
+  if (fee + forwarded !== value) fail('the fee and the amount forwarded do not add up to the value');
+  if (value + gas * price + l1Fee !== ctx.balance) fail('it would not leave exactly 0');
+  // The service fee is at most 5%; on a bridge route it also takes the L1 fee's difference from
+  // the estimate, which is at most the estimate itself
+  if (fee > ctx.balance / MAX_FEE_SHARE + l1Fee) fail('the fee is above 5% of the balance');
+  const bridge = ctx.mode === 'route' && ctx.toChainId !== ctx.chainId;
+  if (g.absorb !== (bridge ? 'fee' : 'amount')) fail('it moves the L1 fee difference into the wrong amount');
+
+  switch (ctx.mode) {
+    case 'burn':
+    case 'donate': {
+      const to = ctx.mode === 'burn' ? BURN_ADDRESS : ZERODUST_ADDRESS;
+      if (plan.route !== ctx.mode || !eq(target, to) || data !== '0x') fail(`the ${ctx.mode === 'burn' ? 'burn does not go to the burn address' : 'donation does not go to ZeroDust'}`);
+      if (fee !== 0n) fail('burn and donate carry no fee');
+      return {};
+    }
+    default:
+      break;
+  }
+  if (!bridge) {
+    if (plan.route !== 'transfer' || !eq(target, ctx.recipient) || data !== '0x') fail('the transfer does not go to the address you set');
+    if (eq(ctx.recipient, ctx.from)) fail('a same-chain sweep needs another address');
+    if (BigInt(plan.receive) !== forwarded) fail('the amount shown is not the amount sent');
+    return {};
+  }
+  // Relay only: Gas.zip and LI.FI pay refunds to msg.sender, which would be the guard
+  if (plan.route !== 'relay' || !eq(target, GUARD_RELAY_DEPOSITORY)) fail('the deposit does not go to Relay\'s depository');
+  if (!data.toLowerCase().startsWith(RELAY_DEPOSIT_NATIVE) || data.length !== 2 + 8 + 128) fail('the Relay call is not a plain deposit');
+  if (data.slice(34, 74).toLowerCase() !== ctx.from.slice(2).toLowerCase()) fail('the Relay deposit does not credit this wallet');
+  if (fee === 0n) fail('a bridge plan needs a fee to take the L1 fee difference');
+  return {};
+}
+
 export function verifyPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
   const fail = (why: string): never => { throw new Error(`Plan refused: ${why}`); };
+  if (plan.chainId !== ctx.chainId) fail('it is for another chain');
+  if (BigInt(plan.balance) !== ctx.balance) fail('the balance changed since it was planned; check again');
+  if (GUARD_CHAINS[ctx.chainId]) return verifyGuardPlan(plan, ctx);
+  if (plan.guard !== undefined) fail('a guard plan on a chain that does not use one');
   const gasLimitChain = GASLIMIT_CHAINS.has(ctx.chainId);
   // ZK-stack chains: the paymaster pays the gas, so only values leave the wallet
   const paymaster = ZK_PAYMASTERS[ctx.chainId];
-  if (plan.chainId !== ctx.chainId) fail('it is for another chain');
   if (plan.txs.length < 1 || plan.txs.length > 2) fail('expected one or two transactions');
-  if (BigInt(plan.balance) !== ctx.balance) fail('the balance changed since it was planned; check again');
 
   const price = BigInt(plan.txs[0]!.gasPrice);
   plan.txs.forEach((t, i) => {

@@ -1,10 +1,14 @@
 import { chainConfig as zkChainConfig } from 'viem/zksync';
-import { decodeFunctionData, decodeFunctionResult, encodeFunctionData, parseAbi, type Hex, type LocalAccount } from 'viem';
+import { bytesToHex, decodeFunctionData, decodeFunctionResult, encodeFunctionData, keccak256, parseAbi, type Hex, type LocalAccount } from 'viem';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { isRegisteredSettler, ZEROX_DEPLOYER, ZEROX_REGISTRY_CALLS } from './across';
-import { directChains, FIXED_PRICE_CHAINS, GASLIMIT_CHAINS, OFT_FEE_MARGIN_PERCENT, tokenExitFor, ZK_PAYMASTERS, prepareExit, preparePlan, TX_GAP_BLOCKS, type DirectPlan, type PlanMode, type Target } from './plan';
+import { hexToBytes, OP_GAS_PRICE_ORACLE, settleL1Value, type L1Params } from './l1fee';
+import {
+  directChains, FIXED_PRICE_CHAINS, GASLIMIT_CHAINS, GUARD_CHAINS, OFT_FEE_MARGIN_PERCENT, tokenExitFor, ZERODUST_GUARD, ZERODUST_GUARD_CODEHASH, ZK_PAYMASTERS,
+  prepareExit, preparePlan, TX_GAP_BLOCKS, type DirectPlan, type PlanMode, type Target,
+} from './plan';
 import { checkReplay, replay } from './replay';
-import { verifyPlan } from './verify';
+import { GUARD_SWEEP, MAX_FEE_SHARE, verifyPlan } from './verify';
 
 /** An Across deposit must still have this long to live when the page signs it, and when it sends it */
 export const ACROSS_SIGN_MARGIN_S = 10;
@@ -70,6 +74,7 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string)
   if ((kinds[t.chainId] === 'gaslimit') !== GASLIMIT_CHAINS.has(t.chainId)) throw new Error('Plan refused: the API and this page disagree on how this chain charges gas');
   if ((kinds[t.chainId] === 'zk') !== (ZK_PAYMASTERS[t.chainId] !== undefined)) throw new Error('Plan refused: the API and this page disagree on how this chain pays gas');
   if ((kinds[t.chainId] === 'fixedprice') !== FIXED_PRICE_CHAINS.has(t.chainId)) throw new Error('Plan refused: the API and this page disagree on how this chain prices gas');
+  if ((kinds[t.chainId] === 'opguard') !== (GUARD_CHAINS[t.chainId] !== undefined)) throw new Error('Plan refused: the API and this page disagree on how this chain charges its L1 fee');
   if (FIXED_PRICE_CHAINS.has(t.chainId)) {
     // The chain charges its network price whatever is offered: any other price leaves dust
     const network = BigInt(await rpc<string>(t.chainId, 'eth_gasPrice', []));
@@ -96,6 +101,17 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string)
   // ZK-stack chains: the paymaster pays all gas, so the values adding up to the balance (checked
   // above) is the whole exact-zero argument; there is no EVM fork to replay them on
   if (ZK_PAYMASTERS[t.chainId]) return plan;
+  if (GUARD_CHAINS[t.chainId]) {
+    // The guard is what makes exact zero hold: its code must be the audited one
+    const code = await rpc<Hex>(t.chainId, 'eth_getCode', [ZERODUST_GUARD, 'latest']);
+    if (code === '0x' || keccak256(code) !== ZERODUST_GUARD_CODEHASH) throw new Error('Plan refused: ZeroDust\'s guard is not deployed on this chain as expected');
+    // The fork charges no L1 fee: replay with the planned L1 fee added to the value, so the wallet
+    // is at 0 while the guard runs, as on-chain; the guard must then burn every unit of its gas
+    const l1Fee = BigInt(plan.guard!.l1Fee);
+    const txs = plan.txs.map((tx) => ({ ...tx, value: (BigInt(tx.value) + l1Fee).toString() }));
+    checkReplay(t.chainId, txs, await replay(t.chainId, t.from, txs), null);
+    return plan;
+  }
   // Never the API's expiry: the one in the deposit itself (or none)
   delete plan.expiresAt;
   if (checks.across) {
@@ -123,8 +139,107 @@ async function signZkTransaction(account: LocalAccount, chainId: number, t: Dire
   return zkChainConfig.serializers.transaction({ ...tx, customSignature }, { r: '0x0', s: '0x0', v: 0n }) as Hex;
 }
 
+const ORACLE_ABI = parseAbi([
+  'function isFjord() view returns (bool)',
+  'function isIsthmus() view returns (bool)',
+  'function l1BaseFee() view returns (uint256)',
+  'function blobBaseFee() view returns (uint256)',
+  'function baseFeeScalar() view returns (uint32)',
+  'function blobBaseFeeScalar() view returns (uint32)',
+]);
+
+/** OP-stack L1Block predeploy: sequenceNumber() is 0 in the first L2 block of each L1 origin */
+const L1_BLOCK = '0x4200000000000000000000000000000000000015';
+const L1_SEQUENCE_NUMBER = '0x64ca23ef';
+/** How long the page waits for a fresh L1 origin before signing anyway */
+const L1_ORIGIN_WAIT_TRIES = 20;
+const L1_ORIGIN_POLL_MS = 750;
+
+/**
+ * The block to price the L1 fee at: the first or second of an L1 origin. The fee's parameters
+ * change only when the origin moves (every L1 block, ~6 L2 blocks on Blast and Boba), and a
+ * transaction priced against one origin and included under the next is refused by the guard
+ * (Boba, 2026-10-08: signed two blocks before an 8% L1 base fee drop). Signing right after a
+ * change leaves the rest of the origin's blocks for inclusion.
+ */
+async function freshL1OriginBlock(chainId: number): Promise<string> {
+  let tag = 'latest';
+  for (let i = 0; i < L1_ORIGIN_WAIT_TRIES; i++) {
+    tag = await rpc<string>(chainId, 'eth_blockNumber', []);
+    const seq = await rpc<Hex>(chainId, 'eth_call', [{ to: L1_BLOCK, data: L1_SEQUENCE_NUMBER }, tag]).then(BigInt).catch(() => null);
+    if (seq !== null && seq <= 1n) return tag;
+    await sleep(L1_ORIGIN_POLL_MS);
+  }
+  return tag;
+}
+
+/** The chain's L1 fee parameters at a block, after checking its oracle reports the formula the page computes */
+async function readL1Params(chainId: number, tag: string): Promise<L1Params> {
+  type Fn = 'isFjord' | 'isIsthmus' | 'l1BaseFee' | 'blobBaseFee' | 'baseFeeScalar' | 'blobBaseFeeScalar';
+  const read = async (functionName: Fn): Promise<bigint | boolean | null> => {
+    const out = await rpc<Hex>(chainId, 'eth_call', [{ to: OP_GAS_PRICE_ORACLE, data: encodeFunctionData({ abi: ORACLE_ABI, functionName }) }, tag])
+      // A flag the oracle does not have yet reverts: the upgrade has not happened
+      .catch(() => null);
+    if (out === null) return null;
+    const v = decodeFunctionResult({ abi: ORACLE_ABI, functionName, data: out }) as bigint | number | boolean;
+    // uint32 scalars decode as numbers
+    return typeof v === 'number' ? BigInt(v) : v;
+  };
+  const [fjord, isthmus, l1BaseFee, blobBaseFee, baseFeeScalar, blobBaseFeeScalar] = await Promise.all(
+    (['isFjord', 'isIsthmus', 'l1BaseFee', 'blobBaseFee', 'baseFeeScalar', 'blobBaseFeeScalar'] as const).map(read)
+  );
+  if ((fjord === true) !== (GUARD_CHAINS[chainId] === 'fjord')) throw new Error('This chain changed how it charges its L1 fee; ZeroDust cannot sweep it to exactly 0 until it is updated');
+  // Isthmus adds an operator fee the page does not compute
+  if (isthmus === true) throw new Error('This chain added an operator fee; ZeroDust cannot sweep it to exactly 0 until it is updated');
+  if ([l1BaseFee, blobBaseFee, baseFeeScalar, blobBaseFeeScalar].some((v) => typeof v !== 'bigint')) throw new Error('The chain\'s L1 fee oracle did not answer; try again');
+  return { l1BaseFee: l1BaseFee as bigint, blobBaseFee: blobBaseFee as bigint, baseFeeScalar: baseFeeScalar as bigint, blobBaseFeeScalar: blobBaseFeeScalar as bigint };
+}
+
+/**
+ * Guard chains: the one transaction, signed with value = balance - gas x price - its exact L1
+ * fee (l1fee.ts settleL1Value; the gas limit may go up a few units for a fresh signature, all of
+ * it burned). The difference from the API's estimate moves into ZeroDust's fee
+ * (a bridge deposit keeps its quoted amount) or into the amount forwarded, bounded: the fee stays
+ * within 5% of the balance plus the planned L1 fee, and nothing goes below 0. The plan's transaction is updated to what
+ * was signed.
+ */
+async function signGuardTransaction(account: LocalAccount, plan: DirectPlan): Promise<Hex[]> {
+  const g = plan.guard!;
+  const tx = plan.txs[0]!;
+  const params = await readL1Params(plan.chainId, await freshL1OriginBlock(plan.chainId));
+  const balance = BigInt(plan.balance);
+  const fee0 = BigInt(plan.fee);
+  const forwarded0 = BigInt(g.forwarded);
+  const split = (value: bigint) => {
+    const extra = value - (fee0 + forwarded0);
+    const s = g.absorb === 'fee' ? { fee: fee0 + extra, forwarded: forwarded0 } : { fee: fee0, forwarded: forwarded0 + extra };
+    if (s.fee < 0n || s.forwarded <= 0n || s.fee > balance / MAX_FEE_SHARE + BigInt(g.l1Fee)) throw new Error('The L1 fee is far from what was planned; check again');
+    return s;
+  };
+  const build = (value: bigint, gas: bigint) => {
+    const { fee } = split(value);
+    return {
+      type: 'legacy' as const, chainId: plan.chainId, nonce: tx.nonce, to: ZERODUST_GUARD as `0x${string}`, value,
+      data: encodeFunctionData({ abi: GUARD_SWEEP, functionName: 'sweep', args: [g.target as `0x${string}`, fee, g.data as Hex] }),
+      gas, gasPrice: BigInt(tx.gasPrice),
+    };
+  };
+  const settled = await settleL1Value({
+    balance, gas: BigInt(tx.gas), gasPrice: BigInt(tx.gasPrice), formula: g.l1Formula, params, firstValue: BigInt(tx.value),
+    sign: async (value, gas) => hexToBytes(await account.signTransaction(build(value, gas))),
+  });
+  const final = build(settled.value, settled.gas);
+  const { fee, forwarded } = split(settled.value);
+  plan.txs[0] = { ...tx, value: settled.value.toString(), data: final.data, gas: settled.gas.toString() };
+  plan.guard = { ...g, l1Fee: settled.l1Fee.toString(), forwarded: forwarded.toString() };
+  plan.fee = fee.toString();
+  if (plan.route === 'transfer') plan.receive = forwarded.toString();
+  return [bytesToHex(settled.signed)];
+}
+
 export function signPlan(account: LocalAccount, plan: DirectPlan): Promise<Hex[]> {
   if (ZK_PAYMASTERS[plan.chainId]) return Promise.all(plan.txs.map((t) => signZkTransaction(account, plan.chainId, t)));
+  if (GUARD_CHAINS[plan.chainId]) return signGuardTransaction(account, plan);
   return Promise.all(plan.txs.map((t) => account.signTransaction({
     type: 'legacy',
     chainId: plan.chainId,
@@ -183,6 +298,9 @@ export async function broadcast(plan: DirectPlan, raws: Hex[], onSent?: (hash: s
       if (!receipt) await sleep(TX_GAP_BLOCKS[plan.chainId] ? 500 : 2000);
     }
     if (receipt?.blockNumber) lastBlock[plan.chainId] = BigInt(receipt.blockNumber);
+    if (receipt && receipt.status !== '0x1' && GUARD_CHAINS[plan.chainId]) {
+      return { ...out, ok: false, reason: 'The L1 fee changed between signing and inclusion, so ZeroDust\'s guard refused the sweep. Only this attempt\'s gas was spent; sweep again' };
+    }
     if (!receipt || receipt.status !== '0x1') return { ...out, ok: false };
     if (plan.txs[i]!.kind === 'fee') out.feePaidTx = hash;
   }

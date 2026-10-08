@@ -6,7 +6,7 @@ The planning endpoints are quote-only. They return unsigned transactions and nev
 
 ## Chains
 
-As of 7 October 2026, `GET /direct/chains` lists 19 chains:
+As of 8 October 2026, `GET /direct/chains` lists 21 chains:
 
 | Chain | ID | Token | `kind` |
 |---|---|---|---|
@@ -18,6 +18,7 @@ As of 7 October 2026, `GET /direct/chains` lists 19 chains:
 | Fuse | 122 | FUSE | `evm` |
 | Monad | 143 | MON | `gaslimit` |
 | Lens | 232 | GHO | `zk` |
+| Boba | 288 | ETH | `opguard` |
 | zkSync Era | 324 | ETH | `zk` |
 | Flow EVM | 747 | FLOW | `evm` |
 | HyperEVM | 999 | HYPE | `evm` |
@@ -28,9 +29,10 @@ As of 7 October 2026, `GET /direct/chains` lists 19 chains:
 | Immutable zkEVM | 13371 | IMX | `evm` |
 | Etherlink | 42793 | XTZ | `etherlink` |
 | Avalanche | 43114 | AVAX | `evm` |
+| Blast | 81457 | ETH | `opguard` |
 | Ethereal | 5064014 | USDe | `arbitrum` |
 
-Read the list from the API rather than hardcoding it. Chains that charge an L1 data fee cannot be swept to exactly 0 this way and are not listed.
+Read the list from the API rather than hardcoding it. Blast is shutting down (standard withdrawals end on 26 October 2026) and leaves the list when it does.
 
 ## How exact zero works
 
@@ -49,6 +51,17 @@ Chains with `kind: "zk"` (zkSync Era, Abstract, Lens) are swept with two EIP-712
 Some chains charge the whole gas limit (`gasLimit x gasPrice`) and refund nothing, whatever the transaction used. `GET /direct/chains` marks them with `kind: "gaslimit"` (Monad today). There any sufficient limit leaves exactly 0, so the planner never bisects: plain transfers use 21,000 and contract calls use the chain's `eth_estimateGas` plus 25%. When you check such a plan, require `sum(value) + sum(gas x gasPrice) == balance` exactly; a simulator that refunds unused gas will show a little left over, and that is expected.
 
 Some chains charge their own fixed network gas price, whatever price a transaction offers, and reject a lower one. `GET /direct/chains` marks them with `kind: "fixedprice"` (Telos today). A transaction priced above the network price is charged the network price, so the difference would stay in the wallet as dust; the receipt still reports the offered price. Plans for these chains offer exactly `eth_gasPrice`. When you check such a plan, read `eth_gasPrice` yourself and require every transaction's `gasPrice` to equal it.
+
+### Guard chains (OP stack)
+
+On OP-stack chains every transaction also pays an L1 data fee, which depends on the signed bytes and on L1 prices, so a plain transfer cannot be sized to leave exactly 0. `GET /direct/chains` marks these chains `kind: "opguard"` with their fee formula in `l1Formula` (`ecotone` on Blast, `fjord` on Boba). They are swept with one legacy transaction through ZeroDustGuard (`0x2f95e6ED90a7dD67fc3Fae5c5628647E6A83e48e` on both, runtime keccak `0x0e00b07c95af7e18d655633d521d110ce6e95ff3c330ff3a4ac2d1b44fed685e`), a contract with no owner and no storage:
+
+- The call is `sweep(address target, uint256 fee, bytes data)` with `value = balance - gas x gasPrice - L1 fee`. The chain takes the gas and the L1 fee before any code runs.
+- The guard reverts unless the wallet is then at exactly 0, pays `fee` to ZeroDust, sends the rest to `target` with `data`, reverts if anything came back to the wallet, and burns every unit of gas left so none is refunded. A transaction either leaves exactly 0 or changes nothing but its own fee.
+- The plan carries `guard`: `target`, `data`, `forwarded`, the API's `l1Fee` estimate, `l1Formula` and `absorb`. Before signing, compute the L1 fee from the signed transaction's own bytes (Ecotone: 4 gas per zero byte and 16 per other byte; Fjord: the FastLZ-compressed length, at least 100 bytes) with the `GasPriceOracle` values (`l1BaseFee`, `blobBaseFee`, `baseFeeScalar`, `blobBaseFeeScalar`), set the value from it, and move the difference from the estimate into the fee (`absorb: "fee"`: a bridge deposit must carry the quoted amount) or into what is forwarded (`absorb: "amount"`). Re-signing changes the bytes, so search near the first signature's size until the value holds.
+- The L1 fee's inputs change when the chain's L1 origin moves (about every 12 seconds). Price the transaction at the first block of an origin (`sequenceNumber()` on `0x4200000000000000000000000000000000000015` is 0 or 1) and send it at once. If the origin moves before inclusion, the guard reverts and only that attempt's gas is spent: plan again.
+- Cross-chain goes through Relay only: Gas.zip and LI.FI pay refunds to the sender, which would be the guard. There is no swap exit.
+- `eth_estimateGas` cannot size a call that burns its gas (it answers the block gas limit); the planner finds the smallest limit `eth_call` accepts and adds 25%.
 
 Monad also keeps a 10 MON reserve: a transaction that takes a wallet below it reverts (and still pays its gas) unless it is the wallet's only transaction in the last 3 blocks and the wallet is not EIP-7702 delegated. So:
 
@@ -80,7 +93,7 @@ Rate limits: `/direct/chains`, `/direct/balances` and `/direct/status` are reads
 }
 ```
 
-`kind` is the chain's gas rule: `evm`, `arbitrum` (price must equal the base fee), `etherlink` (inclusion fee charged as gas), `gaslimit` (the whole limit is charged), `fixedprice` (the network's own price is charged, whatever the transaction offers) or `zk` (a paymaster pays the gas). `prices` is USD per token, for display.
+`kind` is the chain's gas rule: `evm`, `arbitrum` (price must equal the base fee), `etherlink` (inclusion fee charged as gas), `gaslimit` (the whole limit is charged), `fixedprice` (the network's own price is charged, whatever the transaction offers), `zk` (a paymaster pays the gas) or `opguard` (an L1 data fee; one transaction through ZeroDustGuard, with `l1Formula`). `prices` is USD per token, for display.
 
 ### GET /direct/balances/:address
 
@@ -131,12 +144,13 @@ Response:
 | `balance` | The balance this plan spends |
 | `txGapBlocks` | Gas-limit chains with a reserve rule (Monad): blocks to wait after each transaction's block before sending the next |
 | `expiresAt` | Across only: unix seconds after which the deposit reverts on-chain. Across quotes live about 30 seconds; never send the sweep after this |
+| `guard` | Guard chains only: how the one transaction through ZeroDustGuard is built (see [Guard chains](#guard-chains-op-stack)) |
 
 #### Across (not offered at the moment)
 
 The API does not currently plan Across routes: Across moves these tokens through swaps on both ends, and a failed destination swap refunds USDC rather than the native token. If it is turned on, it is used only on gas-limit chains: its deposit runs a swap that would refund gas elsewhere. The sweep is one `swapAndBridge` call to Across's SpokePoolPeriphery (`0x97CCDBea4632140639aD5eA9b944aa034eb15fD4`): the native token is swapped and bridged, and on the destination Across's MulticallHandler swaps into the native gas token and sends it to `recipient`. Before signing, decode it and check at least: the SpokePool is Across's for the source chain, the depositor is `from`, the destination chain is `toChainId`, there is no submission fee, the deposit goes to Across's handler for the destination, the message's fallback recipient and every drain is `recipient`, no destination call carries value or moves a token except approving 0x's AllowanceHolder, the 0x swap pays the handler at least `receive`, and its Settler is 0x's registered one (`ownerOf(2)` or `prev(2)` on `0x00000000000004533Fe15556B1E086BB1A72cEae`). If the destination swap fails, Across refunds the deposit to `from` on the source chain (as USDC, not the native token).
 
-Before signing, check that the plan is what you asked for and that the sum of `value + gas x gasPrice` over `txs` equals `balance` and the wallet's current balance. Then sign and broadcast the transactions in order to the chain's RPC. If the balance changed, request a new plan.
+Before signing, check that the plan is what you asked for and that the sum of `value + gas x gasPrice` over `txs` (plus `guard.l1Fee` on guard chains) equals `balance` and the wallet's current balance. Then sign and broadcast the transactions in order to the chain's RPC. If the balance changed, request a new plan.
 
 ### GET /direct/exit
 
