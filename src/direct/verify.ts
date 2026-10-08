@@ -10,6 +10,12 @@ import {
 const ETHERLINK_CHAIN_ID = 42793;
 const ETHERLINK_FEE_PER_BYTE = 4_000_000_000_000n;
 
+/**
+ * Guard chains: the most gas a plan may ask for. The guard burns every unit it gets, so a replay
+ * cannot tell a sane limit from one that burns the balance; the planner's limit is the smallest
+ * that works + 25% (56k-88k on Blast and Boba, 2026-10-08), under its 300,000 probe ceiling.
+ */
+export const GUARD_MAX_GAS = 300_000n;
 export const GUARD_SWEEP = parseAbi(['function sweep(address target, uint256 fee, bytes data) payable']);
 const OFT_SEND = parseAbi(['function sendFrom(address from, uint16 dstChainId, bytes32 toAddress, uint256 amount, (address refundAddress, address zroPaymentAddress, bytes adapterParams) callParams) payable']);
 
@@ -77,6 +83,7 @@ function verifyGuardPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
   const gas = BigInt(tx.gas);
   const price = BigInt(tx.gasPrice);
   if (gas < 21_000n || price <= 0n || l1Fee < 0n || forwarded <= 0n || fee < 0n) fail('it has impossible gas, value or fee');
+  if (gas > GUARD_MAX_GAS) fail('it asks for more gas than a guard sweep needs (the guard burns all of it)');
   if (fee + forwarded !== value) fail('the fee and the amount forwarded do not add up to the value');
   if (value + gas * price + l1Fee !== ctx.balance) fail('it would not leave exactly 0');
   // The service fee is at most 5%; on a bridge route it also takes the L1 fee's difference from

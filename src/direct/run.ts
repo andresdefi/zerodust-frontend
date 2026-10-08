@@ -103,8 +103,14 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string)
   if (ZK_PAYMASTERS[t.chainId]) return plan;
   if (GUARD_CHAINS[t.chainId]) {
     // The guard is what makes exact zero hold: its code must be the audited one
-    const code = await rpc<Hex>(t.chainId, 'eth_getCode', [ZERODUST_GUARD, 'latest']);
+    const [code, network] = await Promise.all([
+      rpc<Hex>(t.chainId, 'eth_getCode', [ZERODUST_GUARD, 'latest']),
+      rpc<string>(t.chainId, 'eth_gasPrice', []).then(BigInt),
+    ]);
     if (code === '0x' || keccak256(code) !== ZERODUST_GUARD_CODEHASH) throw new Error('Plan refused: ZeroDust\'s guard is not deployed on this chain as expected');
+    // Every unit of gas is charged, so the price is the other half of the cost: the planner
+    // offers 1.1x the network price; more than 2x would only burn the wallet's money
+    if (BigInt(plan.txs[0]!.gasPrice) > GUARD_MAX_PRICE_FACTOR * network) throw new Error('Plan refused: its gas price is far above the network\'s');
     // The fork charges no L1 fee: replay with the planned L1 fee added to the value, so the wallet
     // is at 0 while the guard runs, as on-chain; the guard must then burn every unit of its gas
     const l1Fee = BigInt(plan.guard!.l1Fee);
@@ -147,6 +153,9 @@ const ORACLE_ABI = parseAbi([
   'function baseFeeScalar() view returns (uint32)',
   'function blobBaseFeeScalar() view returns (uint32)',
 ]);
+
+/** Guard chains: the most a plan may offer over the network gas price */
+const GUARD_MAX_PRICE_FACTOR = 2n;
 
 /** OP-stack L1Block predeploy: sequenceNumber() is 0 in the first L2 block of each L1 origin */
 const L1_BLOCK = '0x4200000000000000000000000000000000000015';
@@ -213,7 +222,7 @@ async function signGuardTransaction(account: LocalAccount, plan: DirectPlan): Pr
   const split = (value: bigint) => {
     const extra = value - (fee0 + forwarded0);
     const s = g.absorb === 'fee' ? { fee: fee0 + extra, forwarded: forwarded0 } : { fee: fee0, forwarded: forwarded0 + extra };
-    if (s.fee < 0n || s.forwarded <= 0n || s.fee > balance / MAX_FEE_SHARE + BigInt(g.l1Fee)) throw new Error('The L1 fee is far from what was planned; check again');
+    if (s.fee < 0n || s.forwarded <= 0n) throw new Error('The L1 fee is far from what was planned; check again');
     return s;
   };
   const build = (value: bigint, gas: bigint) => {
@@ -230,6 +239,9 @@ async function signGuardTransaction(account: LocalAccount, plan: DirectPlan): Pr
   });
   const final = build(settled.value, settled.gas);
   const { fee, forwarded } = split(settled.value);
+  // The fee may exceed 5% only by the L1 fee the page computed itself, never by the API's
+  // estimate: an inflated estimate would otherwise move into ZeroDust's fee
+  if (fee > balance / MAX_FEE_SHARE + settled.l1Fee) throw new Error('Plan refused: with the real L1 fee, ZeroDust\'s fee would be above 5% of the balance');
   plan.txs[0] = { ...tx, value: settled.value.toString(), data: final.data, gas: settled.gas.toString() };
   plan.guard = { ...g, l1Fee: settled.l1Fee.toString(), forwarded: forwarded.toString() };
   plan.fee = fee.toString();

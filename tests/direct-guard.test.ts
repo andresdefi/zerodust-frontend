@@ -136,6 +136,16 @@ describe('verifyPlan: guard chains', () => {
     ['another L1 formula', () => { const p = guardPlan(); p.guard!.l1Formula = 'fjord'; return p; }],
     ['two transactions', () => { const p = guardPlan(); p.txs.push({ ...p.txs[0]!, nonce: 1 }); return p; }],
     ['a stale nonce', () => guardPlan(), { nonce: 3 }],
+    ['more gas than a guard sweep needs (all of it burned)', () => {
+      const p = guardPlan();
+      const tx = p.txs[0]!;
+      const extra = 300_001n - BigInt(tx.gas);
+      tx.gas = '300001';
+      // Still spends the balance exactly: the extra gas comes out of the value and the forwarded amount
+      tx.value = (BigInt(tx.value) - extra * PRICE).toString();
+      p.guard!.forwarded = (BigInt(p.guard!.forwarded) - extra * PRICE).toString();
+      return p;
+    }],
     ['a swap exit', () => guardPlan(), { mode: 'exit' }],
     ['a burn that pays a fee', () => guardPlan({ target: '0x000000000000000000000000000000000000dEaD', data: '0x', route: 'burn', absorb: 'amount' }), { mode: 'burn' }],
   ];
@@ -151,7 +161,7 @@ describe('verifyPlan: guard chains', () => {
 const ORACLE = parseAbi(['function isFjord() view returns (bool)', 'function isIsthmus() view returns (bool)', 'function l1BaseFee() view returns (uint256)', 'function blobBaseFee() view returns (uint256)', 'function baseFeeScalar() view returns (uint32)', 'function blobBaseFeeScalar() view returns (uint32)']);
 const selector = (functionName: 'isFjord' | 'isIsthmus' | 'l1BaseFee' | 'blobBaseFee' | 'baseFeeScalar' | 'blobBaseFeeScalar') => encodeFunctionData({ abi: ORACLE, functionName });
 
-interface Net { plan: DirectPlan; kind?: string; guardCode?: string; fjord?: boolean | 'revert'; isthmus?: boolean | 'revert'; balance?: bigint; head?: number; tags?: string[] }
+interface Net { plan: DirectPlan; kind?: string; guardCode?: string; fjord?: boolean | 'revert'; isthmus?: boolean | 'revert'; balance?: bigint; head?: number; tags?: string[]; networkPrice?: bigint }
 
 function network(net: Net, account: string) {
   return vi.fn(async (url: string, init?: RequestInit) => {
@@ -167,6 +177,7 @@ function network(net: Net, account: string) {
       case 'eth_getTransactionCount': return reply(hex(0));
       case 'eth_getCode': return reply(who === GUARD.toLowerCase() ? (net.guardCode ?? GUARD_CODE) : '0x');
       case 'eth_getStorageAt': return reply(hex(0));
+      case 'eth_gasPrice': return reply(hex(net.networkPrice ?? 1_000_307n));
       case 'eth_getBlockByNumber': return reply({ number: hex(1000), timestamp: hex(1_800_000_000), gasLimit: hex(30_000_000) });
       case 'eth_blockNumber': net.head = (net.head ?? 1000) + 1; return reply(hex(net.head));
       case 'eth_call': {
@@ -209,6 +220,23 @@ describe('planChecked and signPlan on Blast (the real guard bytecode on a fork)'
   it('refuses code at the guard address that is not the guard', async () => {
     vi.stubGlobal('fetch', network({ plan: planFor(), guardCode: `${GUARD_CODE}00` }, account.address));
     await expect(run.planChecked(t, 'route')).rejects.toThrow(/guard is not deployed/);
+  });
+
+  it('refuses a gas price far above the network price (every unit is charged)', async () => {
+    vi.stubGlobal('fetch', network({ plan: planFor(), networkPrice: PRICE / 2n - 1n }, account.address));
+    await expect(run.planChecked(t, 'route')).rejects.toThrow(/gas price is far above/);
+  });
+
+  it("refuses to sign when an inflated L1 estimate would move into ZeroDust's fee past 5%", async () => {
+    // The API claims a huge L1 fee: the value is lower by it, and the real (small) fee would put
+    // the difference into ZeroDust's fee
+    const p = planFor();
+    const inflate = BAL / 10n;
+    p.guard!.l1Fee = (L1 + inflate).toString();
+    p.txs[0]!.value = (BigInt(p.txs[0]!.value) - inflate).toString();
+    p.guard!.forwarded = (BigInt(p.guard!.forwarded) - inflate).toString();
+    vi.stubGlobal('fetch', network({ plan: p }, account.address));
+    await expect(run.signPlan(account, await run.planChecked(t, 'route'))).rejects.toThrow(/above 5%/);
   });
 
   it('refuses when the API does not call Blast a guard chain', async () => {
