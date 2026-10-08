@@ -13,13 +13,28 @@ const LOGOS: Array<[number, string]> = [
   [5000, 'Mantle'], [80094, 'Berachain'], [999, 'HyperEVM'], [143, 'Monad'], [324, 'zkSync Era'], [81457, 'Blast'],
 ];
 
-/** Example only: what one sweep does to a wallet */
+/** Example only: what one sweep does to a wallet (all of it to Base, $30.95 at ~$2,690 per ETH) */
+const EXAMPLE_DEST = 8453;
+const EXAMPLE_ARRIVED = '0.0115 ETH';
 const EXAMPLE: Array<[number, string, string]> = [
   [8453, 'Base', '0.0042 ETH'], [42161, 'Arbitrum', '0.0019 ETH'], [43114, 'Avalanche', '0.41 AVAX'], [137, 'Polygon', '3.21 POL'],
 ];
 
-export function Home({ chainCount, onMetaMask, metaMaskError }: { chainCount: number; onMetaMask: () => void; metaMaskError: string | null }) {
+/** Live numbers for the page (App reads them from the API) */
+export interface SiteCounts {
+  /** Chains ZeroDust pays the gas on */
+  sponsored: number;
+  /** Of those, the ones MetaMask can sweep without the key */
+  metamask: number;
+  /** Chains swept by the wallet's own exact transactions */
+  direct: number;
+  /** Chains a sweep can land on */
+  destinations: number;
+}
+
+export function Home({ counts, onMetaMask, metaMaskError }: { counts: SiteCounts; onMetaMask: () => void; metaMaskError: string | null }) {
   const { query, setQuery, submit } = useAddressSearch();
+  const chainCount = counts.sponsored + counts.direct;
   return (
     <main className="hm">
       <section className="hm-hero">
@@ -28,7 +43,7 @@ export function Home({ chainCount, onMetaMask, metaMaskError }: { chainCount: nu
         </p>
         <p className="hm-ledger-cap"><span className="hm-dot" />What every chain reads after a sweep. Not "about zero": zero.</p>
         <h1>Leave nothing behind.</h1>
-        <p className="hm-lede">The gas stuck on every chain, found for any address and moved to one place. Each chain ends at exactly 0 wei.</p>
+        <p className="hm-lede">Find the gas left on every chain for any address, and move it all to one place. Every chain ends at exactly zero.</p>
         <form className="hm-search" onSubmit={submit} role="search">
           <label className="hm-search-field">
             <SearchIcon />
@@ -63,9 +78,10 @@ export function Home({ chainCount, onMetaMask, metaMaskError }: { chainCount: nu
           <div className="hm-panel">
             <h4>After the sweep</h4>
             <p className="hm-big">$30.95 <small>on Base</small></p>
-            <p className="hm-cap">and every source chain reads exactly 0</p>
+            <p className="hm-cap">and every other chain reads exactly 0</p>
+            {/* Base is where everything lands: it holds the total; every other chain reads 0 */}
             {EXAMPLE.map(([id, name]) => (
-              <div className="hm-prow" key={id}><ChainIcon chainId={id} name={name} size={22} /><span>{name}</span><span className="hm-zero">0</span></div>
+              <div className="hm-prow" key={id}><ChainIcon chainId={id} name={name} size={22} /><span>{name}</span>{id === EXAMPLE_DEST ? <span className="hm-arrived">{EXAMPLE_ARRIVED}</span> : <span className="hm-zero">0</span>}</div>
             ))}
             <div className="hm-prow hm-more"><span>+3 more at 0</span></div>
           </div>
@@ -77,9 +93,9 @@ export function Home({ chainCount, onMetaMask, metaMaskError }: { chainCount: nu
           <p className="hm-eyebrow">Why it works where a "max" send doesn't</p>
           <h2>Three ways to reach zero</h2>
           <div className="hm-ways">
-            <div className="hm-way"><p className="hm-count">52<small>chains</small></p><b>ZeroDust pays the gas</b><p>Your wallet delegates to ZeroDust's contract for one sweep (EIP-7702). The gas comes out of the fee, so the whole balance can leave.</p><p className="hm-tags"><span className="tag">Key</span><span className="tag ok">MetaMask on 16</span></p></div>
-            <div className="hm-way"><p className="hm-count">21<small>chains</small></p><b>Worked out to the wei</b><p>Where ZeroDust can't pay the gas, it calculates the exact gas and fee, so your one signed transaction spends the balance to the last wei. A wallet's "max" guesses the gas and leaves the rest behind.</p><p className="hm-tags"><span className="tag">Key</span></p></div>
-            <div className="hm-way"><p className="hm-count">107<small>destinations</small></p><b>It lands where you want</b><p>Same chain or another one: the bridge with the best quote carries it, and the page shows both transactions.</p><p className="hm-tags"><span className="tag">Gas.zip</span><span className="tag">Relay</span><span className="tag">Stargate</span></p></div>
+            <div className="hm-way"><p className="hm-count">{counts.sponsored}<small>chains</small></p><b>ZeroDust pays the gas</b><p>For one sweep, your wallet lets ZeroDust's contract move its balance and pay the gas. The gas comes out of the fee, so nothing is left behind, and the permission is removed right after.</p><p className="hm-tags"><span className="tag">Key</span><span className="tag ok">MetaMask on {counts.metamask}</span></p></div>
+            <div className="hm-way"><p className="hm-count">{counts.direct}<small>chains</small></p><b>Worked out to the wei</b><p>Where ZeroDust can't pay the gas, it calculates the exact gas and fee, so your one signed transaction spends the balance to the last wei. A wallet's "max" guesses the gas and leaves the rest behind.</p><p className="hm-tags"><span className="tag">Key</span></p></div>
+            <div className="hm-way"><p className="hm-count">{counts.destinations}<small>destinations</small></p><b>It lands where you want</b><p>Same chain or another one: the bridge with the best quote carries it, and you get links to both: the one that left and the one that arrived.</p><p className="hm-tags"><span className="tag">Relay</span><span className="tag">Gas.zip</span><span className="tag">Across</span><span className="tag">Stargate</span></p></div>
           </div>
         </div>
       </section>
@@ -87,7 +103,7 @@ export function Home({ chainCount, onMetaMask, metaMaskError }: { chainCount: nu
       <section className="hm-block">
         <h2>Built to be trusted with a key</h2>
         <div className="hm-safe">
-          {!OFFLINE && <p><ShieldIcon /><span><b>No key needed on 16 chains.</b> MetaMask grants a one-time permission per chain; the key never leaves it.</span></p>}
+          {!OFFLINE && <p><ShieldIcon /><span><b>No key needed on {counts.metamask} chains.</b> MetaMask grants a one-time permission per chain; the key never leaves it.</span></p>}
           {OFFLINE
             ? <p><ShieldIcon /><span><b>The key stays in this file.</b> Never sent, never stored. Only signatures leave it.</span></p>
             : <p><ShieldIcon /><span><b>The key stays on this page.</b> Never sent, never stored. Or download the <a href={`${SITE}/offline`}>offline page</a> and run it yourself.</span></p>}

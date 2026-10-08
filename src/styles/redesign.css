@@ -59,6 +59,7 @@
 .hm-prow { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); font-size: 14.5px; }
 .hm-more { grid-template-columns: 1fr; color: var(--muted); }
 .hm-zero { font-family: ui-monospace, Menlo, monospace; font-weight: 600; }
+.hm-arrived { font-weight: 700; color: var(--ok); }
 .hm-band { background: var(--surface); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 0 -32px; padding: 0 32px; }
 .hm-ways { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .hm-way { padding: 24px; display: flex; flex-direction: column; gap: 10px; background: var(--bg); border-radius: var(--radius-card); }

@@ -3,7 +3,8 @@ import { ZeroDust } from '@zerodust/sdk';
 import { isAddressEqual, type Address } from 'viem';
 import { SiteHeader } from './components/SiteHeader';
 import { AddressPage } from './address/AddressPage';
-import { Home } from './home/Home';
+import { Home, type SiteCounts } from './home/Home';
+import { SiteFooter } from './components/SiteFooter';
 import { directChains } from './direct/plan';
 import { addressHref, navigate, useView } from './lib/route';
 import { API_URL } from './sweep/constants';
@@ -11,20 +12,31 @@ import { connectMetaMask, findMetaMask, type MetaMaskSession } from './sweep/met
 
 const client = new ZeroDust({ environment: 'mainnet', baseUrl: API_URL });
 
-/** How many chains ZeroDust sweeps (sponsored + direct), for the home page */
-function useChainCount(): number {
-  const [count, setCount] = useState(73);
+/** The home page's numbers, read live (the defaults are the counts on 2026-10-08, shown until the API answers) */
+function useSiteCounts(): SiteCounts {
+  const [counts, setCounts] = useState<SiteCounts>({ sponsored: 52, metamask: 16, direct: 21, destinations: 109 });
   useEffect(() => {
-    void Promise.all([client.getChains().catch(() => null), directChains().catch(() => null)]).then(([s, d]) => {
-      if (s && d) setCount(s.length + d.chains.length);
+    void Promise.all([
+      client.getChains().catch(() => null),
+      directChains().catch(() => null),
+      client.getDestinations(8453).catch(() => null),
+    ]).then(([s, d, dests]) => {
+      setCounts((prev) => ({
+        sponsored: s?.length ?? prev.sponsored,
+        // GET /chains marks the chains a MetaMask permission can sweep
+        metamask: s ? s.filter((c) => (c as { metamask?: boolean }).metamask).length : prev.metamask,
+        direct: d?.chains.length ?? prev.direct,
+        // Every chain a sweep can land on, counted from Base (the destination itself included)
+        destinations: dests ? dests.length + 1 : prev.destinations,
+      }));
     });
   }, []);
-  return count;
+  return counts;
 }
 
 function Site() {
   const view = useView();
-  const chainCount = useChainCount();
+  const counts = useSiteCounts();
   // One MetaMask session for the whole site: the header shows it, the address page signs with it
   const [session, setSession] = useState<MetaMaskSession | null>(null);
   const [mmBusy, setMmBusy] = useState(false);
@@ -72,13 +84,14 @@ function Site() {
     <>
       <SiteHeader search={view.kind !== 'home'} onMetaMask={() => void onMetaMask()} metaMaskBusy={mmBusy} account={session?.address ?? null} />
       {view.kind === 'home'
-        ? <Home chainCount={chainCount} onMetaMask={() => void onMetaMask()} metaMaskError={mmError} />
+        ? <Home counts={counts} onMetaMask={() => void onMetaMask()} metaMaskError={mmError} />
         : (
           <>
             {mmError && <p className="hdr-error" role="alert">{mmError}</p>}
             <AddressPage key={view.query} query={view.query} session={session} onSession={setSession} />
           </>
         )}
+      <SiteFooter />
     </>
   );
 }
