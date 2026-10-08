@@ -75,9 +75,11 @@ test('the offline file matches its published hash and runs the address page from
   await page.getByRole('button', { name: 'Find my dust' }).click();
   await expect(page).toHaveURL(new RegExp(`#/address/${user}$`));
   await expect(page.getByText('Offline page', { exact: true }).first()).toBeVisible();
-  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'With the key' }) });
+  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'Arrives as gas on Base' }) });
   await expect(group).toContainText('Optimism');
-  await expect(page.getByRole('heading', { name: 'MetaMask or key' })).toHaveCount(0);
+  await expect(group).toContainText('which stays in this file');
+  // Every chain is swept with the key here: no row is singled out as "Key only"
+  await expect(group.getByText('Key only')).toHaveCount(0);
   // Logos travel inside the file
   expect(await page.locator('img.ci').first().getAttribute('src')).toMatch(/^data:image\/svg\+xml/);
 
