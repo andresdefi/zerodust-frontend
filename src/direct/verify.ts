@@ -2,8 +2,8 @@ import { verifyAcrossDeposit } from './across';
 import { decodeFunctionData, parseAbi } from 'viem';
 import { tokenExitFor } from './plan';
 import {
-  BURN_ADDRESS, GASLIMIT_CHAINS, GASZIP_DEPOSIT, GUARD_CHAINS, GUARD_RELAY_DEPOSITORY, LIFI_DIAMOND, PAYMASTER_GENERAL, RELAY_DEPOSIT_NATIVE,
-  ZERODUST_ADDRESS, ZERODUST_GUARD, ZK_PAYMASTERS, type DirectPlan, type PlanMode,
+  BURN_ADDRESS, GASLIMIT_CHAINS, GASZIP_DEPOSIT, GUARD_CHAINS, LIFI_DIAMOND, PAYMASTER_GENERAL, RELAY_DEPOSIT_NATIVE,
+  relayDepositoryFor, ZERODUST_ADDRESS, ZERODUST_GUARD, ZK_PAYMASTERS, type DirectPlan, type PlanMode,
 } from './plan';
 
 /** Etherlink charges its inclusion fee as gas: 0.000004 XTZ per byte of (150 + calldata) */
@@ -110,7 +110,7 @@ function verifyGuardPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
     return {};
   }
   // Relay only: Gas.zip and LI.FI pay refunds to msg.sender, which would be the guard
-  if (plan.route !== 'relay' || !eq(target, GUARD_RELAY_DEPOSITORY)) fail('the deposit does not go to Relay\'s depository');
+  if (plan.route !== 'relay' || !eq(target, relayDepositoryFor(ctx.chainId))) fail('the deposit does not go to Relay\'s depository');
   if (!data.toLowerCase().startsWith(RELAY_DEPOSIT_NATIVE) || data.length !== 2 + 8 + 128) fail('the Relay call is not a plain deposit');
   if (data.slice(34, 74).toLowerCase() !== ctx.from.slice(2).toLowerCase()) fail('the Relay deposit does not credit this wallet');
   if (fee === 0n) fail('a bridge plan needs a fee to take the L1 fee difference');
@@ -235,7 +235,8 @@ export function verifyPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
     return {};
   }
   if (plan.route === 'relay') {
-    if (!last.data.toLowerCase().startsWith(RELAY_DEPOSIT_NATIVE)) fail('the Relay call is not a plain deposit');
+    if (!eq(last.to, relayDepositoryFor(ctx.chainId))) fail('the deposit does not go to Relay\'s depository');
+    if (!last.data.toLowerCase().startsWith(RELAY_DEPOSIT_NATIVE) || last.data.length !== 2 + 8 + 128) fail('the Relay call is not a plain deposit');
     if (!eq(`0x${last.data.slice(34, 74)}`, ctx.from)) fail('the Relay deposit does not credit this wallet');
     return {};
   }

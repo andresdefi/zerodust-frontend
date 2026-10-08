@@ -4,7 +4,7 @@ import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { isRegisteredSettler, ZEROX_DEPLOYER, ZEROX_REGISTRY_CALLS } from './across';
 import { hexToBytes, OP_GAS_PRICE_ORACLE, settleL1Value, type L1Params } from './l1fee';
 import {
-  directChains, FIXED_PRICE_CHAINS, GASLIMIT_CHAINS, GUARD_CHAINS, OFT_FEE_MARGIN_PERCENT, tokenExitFor, ZERODUST_GUARD, ZERODUST_GUARD_CODEHASH, ZK_PAYMASTERS,
+  directChains, FIXED_PRICE_CHAINS, GASLIMIT_CHAINS, GUARD_CHAINS, MAX_GAS_PRICE_FACTOR, OFT_FEE_MARGIN_PERCENT, tokenExitFor, ZERODUST_GUARD, ZERODUST_GUARD_CODEHASH, ZK_PAYMASTERS,
   prepareExit, preparePlan, TX_GAP_BLOCKS, type DirectPlan, type PlanMode, type Target,
 } from './plan';
 import { checkReplay, replay } from './replay';
@@ -75,11 +75,13 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string)
   if ((kinds[t.chainId] === 'zk') !== (ZK_PAYMASTERS[t.chainId] !== undefined)) throw new Error('Plan refused: the API and this page disagree on how this chain pays gas');
   if ((kinds[t.chainId] === 'fixedprice') !== FIXED_PRICE_CHAINS.has(t.chainId)) throw new Error('Plan refused: the API and this page disagree on how this chain prices gas');
   if ((kinds[t.chainId] === 'opguard') !== (GUARD_CHAINS[t.chainId] !== undefined)) throw new Error('Plan refused: the API and this page disagree on how this chain charges its L1 fee');
+  const network = BigInt(await rpc<string>(t.chainId, 'eth_gasPrice', []));
   if (FIXED_PRICE_CHAINS.has(t.chainId)) {
     // The chain charges its network price whatever is offered: any other price leaves dust
-    const network = BigInt(await rpc<string>(t.chainId, 'eth_gasPrice', []));
     if (plan.txs.some((tx) => BigInt(tx.gasPrice) !== network)) throw new Error('Plan refused: its gas price is not the network gas price, so the sweep would leave dust');
   }
+  // Gas is the one cost the API sets: a price far above the chain's own would spend the balance on it
+  if (plan.txs.some((tx) => BigInt(tx.gasPrice) > MAX_GAS_PRICE_FACTOR * network)) throw new Error('Plan refused: its gas price is far above the network\'s');
   const tokenExit = mode === 'exit' ? tokenExitFor(t.chainId, t.toChainId) : undefined;
   if (tokenExit) {
     // The OFT spends a wrapped balance first and would keep the native value as its fee
@@ -103,14 +105,8 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string)
   if (ZK_PAYMASTERS[t.chainId]) return plan;
   if (GUARD_CHAINS[t.chainId]) {
     // The guard is what makes exact zero hold: its code must be the audited one
-    const [code, network] = await Promise.all([
-      rpc<Hex>(t.chainId, 'eth_getCode', [ZERODUST_GUARD, 'latest']),
-      rpc<string>(t.chainId, 'eth_gasPrice', []).then(BigInt),
-    ]);
+    const code = await rpc<Hex>(t.chainId, 'eth_getCode', [ZERODUST_GUARD, 'latest']);
     if (code === '0x' || keccak256(code) !== ZERODUST_GUARD_CODEHASH) throw new Error('Plan refused: ZeroDust\'s guard is not deployed on this chain as expected');
-    // Every unit of gas is charged, so the price is the other half of the cost: the planner
-    // offers 1.1x the network price; more than 2x would only burn the wallet's money
-    if (BigInt(plan.txs[0]!.gasPrice) > GUARD_MAX_PRICE_FACTOR * network) throw new Error('Plan refused: its gas price is far above the network\'s');
     // The fork charges no L1 fee: replay with the planned L1 fee added to the value, so the wallet
     // is at 0 while the guard runs, as on-chain; the guard must then burn every unit of its gas
     const l1Fee = BigInt(plan.guard!.l1Fee);
@@ -153,9 +149,6 @@ const ORACLE_ABI = parseAbi([
   'function baseFeeScalar() view returns (uint32)',
   'function blobBaseFeeScalar() view returns (uint32)',
 ]);
-
-/** Guard chains: the most a plan may offer over the network gas price */
-const GUARD_MAX_PRICE_FACTOR = 2n;
 
 /** OP-stack L1Block predeploy: sequenceNumber() is 0 in the first L2 block of each L1 origin */
 const L1_BLOCK = '0x4200000000000000000000000000000000000015';
