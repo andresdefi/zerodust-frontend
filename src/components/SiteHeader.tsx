@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from 'react';
+import type { Address } from 'viem';
 import { Mark, MoonIcon, SunIcon } from './icons';
 import { applyTheme, storedTheme, systemTheme, type Theme } from '../lib/theme';
 import { SITE } from '../lib/env';
+import { shortAddress } from '../lib/format';
 import { addressHref, homeHref, navigate } from '../lib/route';
 
 /** Sends an address or ENS name to its address page */
@@ -28,7 +30,7 @@ export { SearchIcon };
  * Logo, links, theme, the MetaMask button, and (on every page but home, whose hero is the
  * search) a full-width bar to look up any address
  */
-export function SiteHeader({ search = true, onMetaMask, metaMaskBusy = false }: { search?: boolean; onMetaMask: () => void; metaMaskBusy?: boolean }) {
+export function SiteHeader({ search = true, onMetaMask, metaMaskBusy = false, account = null }: { search?: boolean; onMetaMask: () => void; metaMaskBusy?: boolean; account?: Address | null }) {
   const [theme, setTheme] = useState<Theme>(() => storedTheme() ?? systemTheme());
   const next: Theme = theme === 'dark' ? 'light' : 'dark';
   const { query, setQuery, submit } = useAddressSearch();
@@ -49,10 +51,17 @@ export function SiteHeader({ search = true, onMetaMask, metaMaskBusy = false }: 
         <button type="button" className="iconbtn" onClick={() => { applyTheme(next); setTheme(next); }} aria-label={`Switch to ${next} mode`}>
           {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
         </button>
-        <button type="button" className="btn btn-ink hdr-mm" onClick={onMetaMask} disabled={metaMaskBusy}>
-          <span className="hdr-mm-long">Connect MetaMask</span>
-          <span className="hdr-mm-short">Connect</span>
-        </button>
+        {account ? (
+          <a className="btn btn-ghost hdr-mm hdr-acct" href={addressHref(account)} onClick={(e) => { e.preventDefault(); onMetaMask(); }} title="MetaMask connected: open this wallet's page">
+            <span className="hdr-dot" aria-hidden="true" />
+            <span className="mono">{shortAddress(account)}</span>
+          </a>
+        ) : (
+          <button type="button" className="btn btn-ink hdr-mm" onClick={onMetaMask} disabled={metaMaskBusy}>
+            <span className="hdr-mm-long">{metaMaskBusy ? 'Connecting…' : 'Connect MetaMask'}</span>
+            <span className="hdr-mm-short">{metaMaskBusy ? '…' : 'Connect'}</span>
+          </button>
+        )}
       </nav>
       {search && (
         <form className="hdr-search" onSubmit={submit} role="search">

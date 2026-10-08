@@ -4,7 +4,7 @@ import { KeyEntry } from '../components/KeyEntry';
 import { ChainIcon } from '../components/ChainIcon';
 import { TOKEN_EXITS } from '../direct/plan';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
-import { connectMetaMask, findMetaMask } from '../sweep/metamask';
+import { connectMetaMask, findMetaMask, type MetaMaskSession } from '../sweep/metamask';
 import { isPaused, useServiceStatus } from '../sweep/status';
 import { useSweep, type Row, type RowState, type SweepModel, type Wallet } from '../sweep/useSweep';
 import { tokenRouteOf, type GroupKey } from './groups';
@@ -43,10 +43,12 @@ function useDialog(open: boolean) {
 }
 
 /** "Sweep with": MetaMask (the chains it covers, no key) or the key (every chain) */
-export function SweepWithDialog({ open, plan, address, onWallet, onClose }: {
+export function SweepWithDialog({ open, plan, address, session, onWallet, onClose }: {
   open: boolean;
   plan: SweepPlan | null;
   address: Address;
+  /** MetaMask already connected on this address: used as is, no second connect */
+  session: MetaMaskSession | null;
   onWallet: (wallet: Wallet) => void;
   onClose: () => void;
 }) {
@@ -63,6 +65,10 @@ export function SweepWithDialog({ open, plan, address, onWallet, onClose }: {
 
   const close = () => { setMode('choose'); setError(null); onClose(); };
   const connectWithMetaMask = async () => {
+    if (session) {
+      onWallet({ kind: 'metamask', session });
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -94,7 +100,7 @@ export function SweepWithDialog({ open, plan, address, onWallet, onClose }: {
               <button type="button" className="zd-opt" onClick={() => void connectWithMetaMask()} disabled={busy || paused}>
                 <span className="zd-opt-ic" aria-hidden="true">🦊</span>
                 <span className="zd-opt-t"><b>MetaMask</b><span>Covers {covered.length === n ? (n === 1 ? 'it' : `all ${n}`) : `${covered.length} of ${n}`} · the key never leaves MetaMask</span></span>
-                <span className="tag ok">{busy ? 'Connecting…' : 'Recommended'}</span>
+                <span className="tag ok">{busy ? 'Connecting…' : session ? 'Connected' : 'Recommended'}</span>
               </button>
             )}
             <button type="button" className="zd-opt" onClick={() => setMode('key')} disabled={paused}>
