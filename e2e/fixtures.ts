@@ -160,6 +160,9 @@ const json = (route: Route, data: unknown, status = 200) =>
   });
 
 /** A direct chain (Avalanche) holding AVAX_BALANCE when `direct` is on */
+/** MetaMask's EIP-7702 smart-account delegate (EIP7702StatelessDeleGator) */
+export const METAMASK_DELEGATE = '0x63c0c19a282a1b52b07dd5a65b58948a07dae32b';
+
 export const AVAX = 43114;
 export const AVAX_BALANCE = 10n ** 17n;
 const AVAX_PRICE = 27_500_000_000n;
@@ -251,7 +254,7 @@ function telosLeftoverPlan(nonce: number) {
  * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base);
  * `hiccups`: the first route checks answer "unknown", then the real answer
  */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown } = {}) {
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean } = {}) {
   const chains = [...CHAINS, ...(opts.mitosis ? [MITOSIS_CHAIN] : []), ...(opts.endurance ? [ENDURANCE_CHAIN] : [])];
   const funded = [...FUNDED, ...(opts.mitosis ? [MITOSIS] : []), ...(opts.endurance ? [ENDURANCE] : [])];
   let hiccups = opts.hiccups ?? 0;
@@ -280,6 +283,8 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
   const reports: Array<Record<string, unknown>> = [];
   /** GET /quote requests, in order */
   const quoted: Array<{ from: number; to: number; destination: string }> = [];
+  /** POST /sweep bodies' closing authorization targets, in order */
+  const closings: string[] = [];
 
   await page.route(`${API}/**`, async (route) => {
     const url = new URL(route.request().url());
@@ -395,7 +400,8 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       return json(route, authorization(q, q.from, user));
     }
     if (path === '/sweep' && route.request().method() === 'POST') {
-      const { quoteId } = route.request().postDataJSON() as { quoteId: string };
+      const { quoteId, revokeAuthorization } = route.request().postDataJSON() as { quoteId: string; revokeAuthorization?: { contractAddress: string } };
+      if (revokeAuthorization) closings.push(revokeAuthorization.contractAddress.toLowerCase());
       const { from, to } = quotes.get(quoteId)!;
       const sweepId = crypto.randomUUID();
       sweeps.set(sweepId, { fromChainId: from, toChainId: to });
@@ -463,7 +469,8 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
         eth_getTransactionCount: direct ? `0x${(isUser ? directNonce : 0).toString(16)}` : `0x${AUTH_NONCE.toString(16)}`,
         // Each chain's own price: the page refuses a plan priced over twice it
         eth_gasPrice: `0x${(chainId === 43114 ? AVAX_PRICE : chainId === 143 ? MONAD_PRICE : GAS_PRICE).toString(16)}`,
-        eth_getCode: '0x',
+        // A MetaMask smart account stays one: the sweep's closing authorization puts it back
+        eth_getCode: opts.metamaskSmartAccount && isUser ? `0xef0100${METAMASK_DELEGATE.slice(2)}` : '0x',
         eth_getStorageAt: `0x${'0'.repeat(64)}`,
         eth_getBlockByNumber: { number: '0x3e8', timestamp: `0x${Math.floor(Date.now() / 1000).toString(16)}`, gasLimit: '0x1c9c380' },
         eth_getTransactionReceipt: { status: '0x1', blockNumber: `0x${head.toString(16)}` },
@@ -488,7 +495,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     route.abort('blockedbyclient')
   );
 
-  return { swept, sent, reports, quoted };
+  return { swept, sent, reports, quoted, closings };
 }
 
 /** Watches a page for the key anywhere it must never be: requests, the console, the DOM, input values, storage */
