@@ -45,7 +45,7 @@ test('the offline file matches its published hash and runs from disk under its o
 
 test('How it works: MetaMask on the site, the key on the offline page', async ({ page }) => {
   await mockNetwork(page, privateKeyToAccount(generatePrivateKey()).address);
-  await page.goto('/');
+  await page.goto('/sweep');
   await page.getByText('How it works').click();
   await expect(page.getByText('Connect MetaMask', { exact: true }).first()).toBeVisible();
   await page.getByText('What MetaMask shows').click();

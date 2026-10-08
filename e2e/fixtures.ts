@@ -285,7 +285,14 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     const url = new URL(route.request().url());
     const path = url.pathname;
     if (path === '/chains') {
-      return json(route, { chains: chains.map((c) => ({ ...c, nativeTokenDecimals: 18, minBalance: '0', contractAddress: ZERODUST, enabled: true, crossChain: { available: c.available } })) });
+      return json(route, {
+        chains: chains.map((c) => ({
+          ...c, nativeTokenDecimals: 18, minBalance: '0', contractAddress: ZERODUST, enabled: true,
+          crossChain: { available: c.available, bridges: c.chainId === MITOSIS ? ['hyperlane'] : c.chainId === ENDURANCE ? ['endurance'] : c.available ? ['relay'] : [] },
+          // MetaMask permission sweeps: Base and Optimism here
+          metamask: c.chainId === 8453 || c.chainId === 10,
+        })),
+      });
     }
     if (path === `/balances/${user}` || path.toLowerCase() === `/balances/${user.toLowerCase()}`) {
       return json(route, {
