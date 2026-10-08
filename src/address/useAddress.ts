@@ -34,6 +34,7 @@ export interface ChainOption {
   name: string;
   token: string;
   decimals: number;
+  explorerUrl: string;
 }
 
 export type Resolution =
@@ -104,7 +105,7 @@ export interface AddressData {
 }
 
 /** Balances, prices and what can move each chain's gas, for any address */
-export function useAddressData(address: Address | null, destination: number | null, recipient: Address | null): AddressData {
+export function useAddressData(address: Address | null, destination: number | null, recipient: Address | null, version = 0): AddressData {
   const [base, setBase] = useState<{ address: Address; rows: AddressRow[]; info: Map<number, ChainInfo>; chainOptions: ChainOption[]; prices: Record<string, number> } | { address: Address; error: string } | null>(null);
   // Per destination: sponsored sources that cannot reach it, direct routes
   const [destRoutes, setDestRoutes] = useState<{ key: string; unreachable: Set<number>; direct: Record<number, boolean | null> } | null>(null);
@@ -146,8 +147,8 @@ export function useAddressData(address: Address | null, destination: number | nu
           .filter((r) => r.balance > 0n)
           .sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0) || a.name.localeCompare(b.name));
         const chainOptions = [
-          ...chains.map((c) => ({ chainId: c.chainId, name: c.name, token: c.nativeToken, decimals: c.nativeTokenDecimals })),
-          ...directInfo.chains.map((c) => ({ chainId: c.chainId, name: c.name, token: c.token, decimals: c.decimals })),
+          ...chains.map((c) => ({ chainId: c.chainId, name: c.name, token: c.nativeToken, decimals: c.nativeTokenDecimals, explorerUrl: c.explorerUrl })),
+          ...directInfo.chains.map((c) => ({ chainId: c.chainId, name: c.name, token: c.token, decimals: c.decimals, explorerUrl: c.explorerUrl })),
         ].sort((a, b) => a.name.localeCompare(b.name));
         if (!cancelled) setBase({ address, rows, info, chainOptions, prices: { ...directInfo.prices, ...prices } });
       } catch (error) {
@@ -155,7 +156,7 @@ export function useAddressData(address: Address | null, destination: number | nu
       }
     })();
     return () => { cancelled = true; };
-  }, [address]);
+  }, [address, version]);
 
   const ready = base && base.address === address && 'rows' in base ? base : null;
   const destKey = `${address}:${destination}:${recipient}`;
