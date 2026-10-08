@@ -12,6 +12,7 @@
 .tag.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
 .tag.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .tag.acc { background: var(--accent-soft); color: var(--accent-text); border-color: transparent; }
+.tag.danger { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
 
 /* Header */
 .hdr { max-width: 1240px; margin: 0 auto; padding: 0 32px; }
@@ -175,6 +176,8 @@
 .ap-own b { color: var(--ink); font-weight: 600; }
 .ap-own input { flex: 1; min-width: 240px; height: 36px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 0 12px; font: inherit; font-size: 14px; color: var(--ink); }
 .ap-prog-detail { font-size: 13px; color: var(--muted); line-height: 1.4; }
+.ap-report { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; font-size: 12.5px; }
+.ap-report a { color: var(--accent-text); }
 .ap-links-tx { display: flex; gap: 12px; justify-content: flex-end; font-size: 13.5px; font-weight: 600; white-space: nowrap; }
 .ap-links-tx a { text-decoration: none; color: var(--accent-text); }
 .ap-prog.done { background: color-mix(in srgb, var(--ok-soft) 45%, transparent); }

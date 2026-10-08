@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { IDLE_FLAG } from '../components/KeyEntry';
 import { isAddressEqual, type Address } from 'viem';
+import { deliversOnlyToSender } from '@zerodust/sdk';
 import { ChainIcon } from '../components/ChainIcon';
 import { DestinationPicker } from '../components/DestinationPicker';
 import { formatAmount, formatUsd, shortAddress } from '../lib/format';
 import { groupChains, groupText, tokenRouteOf, type GroupKey } from './groups';
 import { resolveName, useAddressData, useEstimates, useResolved, type AddressRow, type ChainOption, type Estimate } from './useAddress';
 import { SweepSession, SweepWithDialog, type SweepPlan } from './SweepSession';
-import type { RowState, Wallet } from '../sweep/useSweep';
+import { FAILURE_LABEL, failureKind, minimumOf, tooSmallText, type RowState, type Wallet } from '../sweep/useSweep';
+import { reportText } from '../sweep/report';
 import type { MetaMaskSession } from '../sweep/metamask';
 import { OFFLINE } from '../lib/env';
 
@@ -80,7 +82,9 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
   const [progress, setProgress] = useState<{ states: Record<number, RowState>; bridgeOf: Record<number, string> }>({ states: {}, bridgeOf: {} });
   // A chain swept to 0 is not offered again until the balances are read again
   const finished = useMemo(() => new Set(Object.entries(progress.states).filter(([, st]) => st.phase === 'done').map(([id]) => Number(id))), [progress.states]);
-  const sweepable = (c: AddressRow) => !data.routesOf(c.chainId).unknown && !estimates[c.chainId]?.error && !finished.has(c.chainId);
+  // A token route whose bridge pays only the sending wallet (Endurance) cannot reach another recipient
+  const senderOnly = (c: AddressRow) => { const t = tokenRouteOf(c.chainId); return !toSelf && t !== null && deliversOnlyToSender(c.chainId, t.toChainId); };
+  const sweepable = (c: AddressRow) => { const r = data.routesOf(c.chainId); return !r.unknown && r.minimum === undefined && !senderOnly(c) && !estimates[c.chainId]?.error && !finished.has(c.chainId); };
   const selectedIds = selection?.ids ?? new Set(active?.chains.filter(sweepable).map((c) => c.chainId) ?? []);
 
   const toggle = (group: GroupKey, chainId: number) => {
@@ -224,12 +228,16 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
                 <ChainRow
                   key={c.chainId} row={c} group={g.key} selected={isActive && selectedIds.has(c.chainId)} keyOnly={mixedSigners && !c.metamask}
                   onToggle={() => toggle(g.key, c.chainId)} destination={destination} destName={destName}
+                  onSweep={sweepable(c) && !sweepingNow && destination !== null && !(g.key === 'own-chain' && !ownAddress) ? () => startSweep(g.key, [c]) : undefined}
                   destToken={destToken ?? null} estimate={estimates[c.chainId]}
                   destPrice={destToken ? data.priceOf(destToken.token) : undefined}
                   unknownRoute={data.routesOf(c.chainId).unknown === true}
+                  minimum={data.routesOf(c.chainId).minimum}
+                  senderOnly={senderOnly(c)}
                   state={progress.states[c.chainId]}
                   bridge={progress.bridgeOf[c.chainId]}
                   arrivalExplorer={progress.states[c.chainId]?.toChainId !== undefined ? optionOf(progress.states[c.chainId]!.toChainId!)?.explorerUrl : undefined}
+                  arrivalName={progress.states[c.chainId]?.toChainId !== undefined ? optionOf(progress.states[c.chainId]!.toChainId!)?.name : undefined}
                   running={run !== null}
                 />
               ))}
@@ -383,32 +391,45 @@ function OwnChainAddress({ value, onChange }: { value: Address | null; onChange:
 
 const SHOWN_PHASES = new Set(['sweeping', 'done', 'failed']);
 
-function ChainRow({ row, group, selected, keyOnly, onToggle, destination, destName, destToken, estimate, destPrice, unknownRoute, state, bridge, arrivalExplorer, running }: {
+function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destination, destName, destToken, estimate, destPrice, unknownRoute, minimum, senderOnly, state, bridge, arrivalExplorer, arrivalName, running }: {
   row: AddressRow;
   group: GroupKey;
   selected: boolean;
   keyOnly: boolean;
   onToggle: () => void;
+  /** Sweep just this chain; absent while it cannot be swept */
+  onSweep: (() => void) | undefined;
   destination: number | null;
   destName: string | null;
   destToken: { token: string; decimals: number } | null;
   estimate: Estimate | undefined;
   destPrice: number | undefined;
   unknownRoute: boolean;
+  /** Below every bridge's minimum (direct chains: known before any quote) */
+  minimum: bigint | undefined;
+  /** Its bridge pays only the sending wallet, and the gas is set to go elsewhere */
+  senderOnly: boolean;
   state: RowState | undefined;
   bridge: string | undefined;
   arrivalExplorer: string | undefined;
+  arrivalName: string | undefined;
   running: boolean;
 }) {
   const shown = state && (SHOWN_PHASES.has(state.phase) || (running && state.phase === 'quoting'));
-  if (shown) return <ProgressRow row={row} state={state!} bridge={bridge} arrivalExplorer={arrivalExplorer} />;
+  if (shown) return <ProgressRow row={row} state={state!} bridge={bridge} arrivalExplorer={arrivalExplorer} arrivalName={arrivalName} />;
   const token = tokenRouteOf(row.chainId);
   let route: { text: string; tone: 'ok' | 'warn' | 'acc' | 'plain'; title?: string };
   let receive: string = '';
   if (group === 'metamask' || group === 'key') {
     if (destination === null) route = { text: 'Choose a chain', tone: 'plain' };
+    else if (minimum !== undefined) route = { text: 'Below the minimum', tone: 'warn', title: tooSmallText(minimum, row) };
     else if (unknownRoute && !estimate?.receive) route = { text: 'Bridges not answering', tone: 'warn', title: 'No bridge confirmed or refused a route just now. Try again in a few minutes.' };
-    else if (estimate?.error) route = { text: /too (small|low)|minimum/i.test(estimate.error) ? 'Below the minimum' : 'No quote right now', tone: 'warn', title: estimate.error };
+    else if (estimate?.error) {
+      const least = minimumOf(estimate.error, row.decimals);
+      route = least !== null || /too (small|low)|minimum/i.test(estimate.error)
+        ? { text: 'Below the minimum', tone: 'warn', title: least !== null ? tooSmallText(least, row) : estimate.error }
+        : { text: 'No quote right now', tone: 'warn', title: estimate.error };
+    }
     else if (estimate?.route) {
       // Flag a bridge that keeps most of the value (owner, 2026-10-08)
       const arrivesUsd = estimate.receive !== undefined && destToken && destPrice ? (Number(estimate.receive) / 10 ** destToken.decimals) * destPrice : null;
@@ -416,9 +437,11 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, destination, destNa
       route = takes > BRIDGE_TAKES_FLAG ? { text: `Bridge takes ${Math.round(takes * 100)}%`, tone: 'warn' } : { text: estimate.route, tone: 'ok' };
     }
     else route = { text: row.chainId === destination ? 'Same chain' : 'Checking…', tone: 'plain' };
-    if (estimate?.receive !== undefined && destToken) receive = `${formatAmount(estimate.receive, destToken.decimals)} ${destToken.token}`;
+    if (estimate?.receive !== undefined && destToken && minimum === undefined) receive = `${formatAmount(estimate.receive, destToken.decimals)} ${destToken.token}`;
   } else if (group === 'token' && token) {
-    route = { text: `${token.symbol} on ${token.toChainName}`, tone: 'acc' };
+    route = senderOnly
+      ? { text: 'Your wallet only', tone: 'warn', title: `${row.name} can only be swept to your own wallet: its bridge pays only the wallet that sends` }
+      : { text: `${token.symbol} on ${token.toChainName}`, tone: 'acc' };
     receive = `as ${token.symbol}`;
   } else if (group === 'elsewhere') {
     route = { text: `Not to ${destName}`, tone: 'warn' };
@@ -437,15 +460,37 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, destination, destNa
       <span className="ap-bal">{formatAmount(row.balance, row.decimals)} {row.token}<small>{formatUsd(row.usd)}</small></span>
       <span className="ap-route"><span className={`tag ${route.tone}`} title={route.title}>{route.text}</span></span>
       <span className="ap-recv">{receive}</span>
-      <button type="button" className="btn btn-ghost btn-xs" disabled title="Sweeping arrives in the next step of the redesign">Sweep</button>
+      <button type="button" className="btn btn-ghost btn-xs" disabled={!onSweep} onClick={onSweep} aria-label={`Sweep ${row.name}`}>Sweep</button>
     </li>
   );
 }
 
-/** A chain while and after it is swept: its state, and links to what was sent and what arrived */
-function ProgressRow({ row, state, bridge, arrivalExplorer }: { row: AddressRow; state: RowState; bridge: string | undefined; arrivalExplorer: string | undefined }) {
-  const tone = state.phase === 'done' ? 'ok' : state.phase === 'failed' ? 'warn' : 'plain';
-  const label = state.phase === 'done' ? 'Done · 0 left' : state.phase === 'failed' ? 'Failed' : state.phase === 'quoting' ? 'Checking…' : 'Sweeping…';
+/**
+ * A chain while and after it is swept: its state, and links to what was sent and what arrived.
+ * A failure says what kind it is in plain words; one that was reported carries its reference
+ * and the details to copy (they hold no key).
+ */
+function ProgressRow({ row, state, bridge, arrivalExplorer, arrivalName }: { row: AddressRow; state: RowState; bridge: string | undefined; arrivalExplorer: string | undefined; arrivalName: string | undefined }) {
+  const [copied, setCopied] = useState(false);
+  const kind = state.phase === 'failed' ? failureKind(state, row.decimals) : null;
+  const tone = state.phase === 'done' ? 'ok' : kind === 'check' ? 'danger' : kind ? 'warn' : 'plain';
+  const label = state.phase === 'done' ? 'Done · 0 left' : kind ? FAILURE_LABEL[kind] : state.phase === 'quoting' ? 'Checking…' : 'Sweeping…';
+  // Only a failure after something was sent needs checking; otherwise say what to do
+  const least = kind === 'too-small' ? minimumOf(state.detail, row.decimals) : null;
+  const detail = least !== null ? tooSmallText(least, row) : kind && kind !== 'check' ? `${state.detail} Nothing was sent.` : state.detail;
+  const copy = async () => {
+    if (!kind || !state.report) return;
+    try {
+      await navigator.clipboard.writeText(reportText({
+        ...state.report, chainName: row.name, toChainName: arrivalName, label: FAILURE_LABEL[kind], reference: state.reference,
+        explorerUrl: row.explorerUrl, at: new Date(),
+      }));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard refused (permissions): the reference is still on screen
+    }
+  };
   const tx = (base: string, hash: string) => `${base.replace(/\/$/, '')}/tx/${hash}`;
   return (
     <li className={`ap-row ap-prog ${state.phase}`}>
@@ -453,7 +498,16 @@ function ProgressRow({ row, state, bridge, arrivalExplorer }: { row: AddressRow;
       <span className="ap-chain"><ChainIcon chainId={row.chainId} name={row.name} size={28} /><span>{row.name}</span></span>
       <span className="ap-bal">{formatAmount(row.balance, row.decimals)} {row.token}{bridge && <small>via {bridge}</small>}</span>
       <span className="ap-route"><span className={`tag ${tone}`}>{label}</span></span>
-      <span className="ap-prog-detail">{state.detail}</span>
+      <span className="ap-prog-detail">
+        {detail}
+        {kind && state.report && (
+          <span className="ap-report">
+            {state.reference && <span>Ref {state.reference}</span>}
+            <button type="button" className="linkbtn" onClick={() => void copy()}>{copied ? 'Copied' : 'Copy details'}</button>
+            <span>Send them to <a href="https://x.com/andresdefi" target="_blank" rel="noreferrer noopener">@andresdefi on X</a>. They hold no key.</span>
+          </span>
+        )}
+      </span>
       <span className="ap-links-tx">
         {state.txHash && row.explorerUrl && <a href={tx(row.explorerUrl, state.txHash)} target="_blank" rel="noreferrer">Sent ↗</a>}
         {state.arrivalTx && arrivalExplorer && <a href={tx(arrivalExplorer, state.arrivalTx)} target="_blank" rel="noreferrer">Arrived ↗</a>}
