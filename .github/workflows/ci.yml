@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # redesign: the integration branch for the site redesign (phases merge there first)
+    branches: [main, redesign]
 
 concurrency:
   group: ci-${{ github.ref }}
