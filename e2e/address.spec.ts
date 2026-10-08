@@ -176,3 +176,46 @@ test('"Forget it" drops a loaded key at once', async ({ page }) => {
   await page.locator('.ap-acct').getByRole('button', { name: 'Forget it' }).click();
   await expect(page.locator('.ap-acct')).toContainText('Not connected', { timeout: 10_000 });
 });
+
+test('MetaMask: one session for the site, shown in the header and reused by the sweep dialog', async ({ page }) => {
+  const user = privateKeyToAccount(generatePrivateKey()).address;
+  await mockNetwork(page, user);
+  // A stand-in MetaMask on window.ethereum: shares `user`, and lets the test switch accounts
+  await page.addInitScript((account) => {
+    const listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
+    const provider = {
+      isMetaMask: true,
+      async request({ method }: { method: string }) {
+        if (method === 'eth_requestAccounts' || method === 'eth_accounts') return [account];
+        if (method === 'wallet_getSupportedExecutionPermissions') return { 'native-token-allowance': { chainIds: ['0xa', '0x2105'] } };
+        throw new Error(`unexpected ${method}`);
+      },
+      on(event: string, fn: (...args: unknown[]) => void) { (listeners[event] ??= []).push(fn); },
+      removeListener(event: string, fn: (...args: unknown[]) => void) { listeners[event] = (listeners[event] ?? []).filter((f) => f !== fn); },
+    };
+    (window as unknown as { ethereum: unknown }).ethereum = provider;
+    (window as unknown as { switchAccount: (a: string) => void }).switchAccount = (a) => { for (const fn of listeners.accountsChanged ?? []) fn([a]); };
+  }, user);
+  await page.goto('/');
+
+  const header = page.getByRole('navigation', { name: 'Main' });
+  await header.getByRole('button', { name: 'Connect MetaMask' }).click();
+  await expect(page).toHaveURL(new RegExp(`/address/${user}$`));
+  // Connected: the header names the account instead of offering to connect again
+  const chip = header.getByRole('link', { name: `${user.slice(0, 6)}…${user.slice(-4)}` });
+  await expect(chip).toBeVisible();
+  await expect(header.getByRole('button', { name: 'Connect MetaMask' })).toHaveCount(0);
+  await expect(page.locator('.ap-badges')).toContainText('MetaMask connected');
+
+  // The sweep dialog uses the same session: no second connect
+  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'MetaMask or key' }) });
+  await group.getByRole('button', { name: 'Sweep 1 chain' }).click();
+  const withDialog = page.getByRole('dialog', { name: /Sweep 1 chain with/ });
+  await expect(withDialog.locator('.zd-opt', { hasText: 'MetaMask' })).toContainText('Connected');
+  await withDialog.getByRole('button', { name: 'Close' }).click();
+
+  // Switching accounts in MetaMask ends the session
+  await page.evaluate(() => (window as unknown as { switchAccount: (a: string) => void }).switchAccount('0x000000000000000000000000000000000000bEEF'));
+  await expect(header.getByRole('button', { name: 'Connect MetaMask' })).toBeVisible();
+  await expect(page.locator('.ap-badges')).toContainText('Not connected');
+});

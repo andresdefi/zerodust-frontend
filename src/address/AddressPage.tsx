@@ -8,6 +8,7 @@ import { groupChains, groupText, tokenRouteOf, type GroupKey } from './groups';
 import { resolveName, useAddressData, useEstimates, useResolved, type AddressRow, type ChainOption, type Estimate } from './useAddress';
 import { SweepSession, SweepWithDialog, type SweepPlan } from './SweepSession';
 import type { RowState, Wallet } from '../sweep/useSweep';
+import type { MetaMaskSession } from '../sweep/metamask';
 
 // One address: every chain holding gas, in groups by how it is swept and what arrives.
 // Reading needs nothing; sweeping a group asks how to sign (MetaMask or the key of this
@@ -36,14 +37,14 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-export function AddressPage({ query }: { query: string }) {
+export function AddressPage({ query, session, onSession }: { query: string; session: MetaMaskSession | null; onSession: (s: MetaMaskSession) => void }) {
   const resolved = useResolved(query);
   if (resolved.state === 'loading') return <main className="ap"><div className="ap-state">Looking up {query}…</div></main>;
   if (resolved.state === 'error') return <main className="ap"><div className="ap-state" role="alert">{resolved.message}</div></main>;
-  return <Loaded address={resolved.address} name={resolved.name} />;
+  return <Loaded address={resolved.address} name={resolved.name} session={session} onSession={onSession} />;
 }
 
-function Loaded({ address, name }: { address: Address; name: string | null }) {
+function Loaded({ address, name, session, onSession }: { address: Address; name: string | null; session: MetaMaskSession | null; onSession: (s: MetaMaskSession) => void }) {
   const [chosenDest, setChosenDest] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
   const [recipient, setRecipient] = useState<Address>(address);
@@ -106,6 +107,8 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
   // The key stays only while it is used: 15 minutes without activity forgets it (never mid-sweep),
   // as on the old page; between groups too, not only while a sweep session is open
   const keyLoaded = wallet?.kind === 'key';
+  // MetaMask connected (here or from the header) on this page's address
+  const mmHere = session !== null && isAddressEqual(session.address, address) ? session : null;
   useEffect(() => {
     if (!keyLoaded || sweepingNow) return;
     let timer = setTimeout(() => forgetKey(true), IDLE_FORGET_MS);
@@ -148,7 +151,7 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
             {name && <span className="tag">{shortAddress(address)}</span>}
             {keyLoaded
               ? <span className="tag acc">Key loaded · <button type="button" className="linkbtn" onClick={() => forgetKey(false)} disabled={sweepingNow}>Forget it</button></span>
-              : wallet?.kind === 'metamask' ? <span className="tag ok">MetaMask</span> : <span className="tag">Not connected</span>}
+              : mmHere ? <span className="tag ok">MetaMask connected</span> : <span className="tag">Not connected</span>}
           </p>
           <p className="ap-links">
             <a href={`https://etherscan.io/address/${address}`} target="_blank" rel="noreferrer">etherscan ↗</a>
@@ -267,7 +270,17 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
         onPick={(id) => { setElsewhereChain(id); setPickingElsewhere(false); }}
         onClose={() => setPickingElsewhere(false)}
       />
-      <SweepWithDialog open={pending !== null} plan={pending} address={address} onWallet={(w) => pending && begin(pending, w)} onClose={() => setPending(null)} />
+      <SweepWithDialog
+        open={pending !== null}
+        plan={pending}
+        address={address}
+        session={mmHere}
+        onWallet={(w) => {
+          if (w.kind === 'metamask') onSession(w.session);
+          if (pending) begin(pending, w);
+        }}
+        onClose={() => setPending(null)}
+      />
       {run && <SweepSession key={run.id} wallet={run.wallet} plan={run.plan} onProgress={onProgress} onEnd={() => setRun(null)} />}
 
       <DestinationPicker
