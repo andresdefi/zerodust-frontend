@@ -42,6 +42,15 @@ test('home: the numbers come from the API, and the footer links the legal pages'
   await expect(page.locator('footer.foot').getByRole('link', { name: 'Privacy' })).toBeVisible();
 });
 
+test('privacy: sweeps have an end date, and the legal basis and transfers are stated', async ({ page }) => {
+  await page.goto('/privacy.html');
+  const sweeps = page.locator('tr', { hasText: 'Sweeps: wallet address' });
+  await expect(sweeps).toContainText('Deleted 400 days after the sweep');
+  await expect(page.getByRole('heading', { name: 'Why we use your data' })).toBeVisible();
+  await expect(page.getByText('Transfers outside the EEA.')).toBeVisible();
+  await expect(page.getByText(/through Alchemy and Infura/)).toBeVisible();
+});
+
 test('the offline file matches its published hash and runs the address page from disk, key only, under its own CSP', async ({ page }) => {
   const record = JSON.parse(readFileSync('dist/.well-known/zerodust-build.json', 'utf8')) as { offlineSha256: string };
   const file = readFileSync('dist/download/zerodust-offline.html');
