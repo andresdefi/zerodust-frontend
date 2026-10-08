@@ -23,6 +23,17 @@ const QUOTE_POOL = 3;
 /** A route a bridge could not confirm ("try again") is asked this many more times */
 const ROUTE_RETRIES = 2;
 const ROUTE_RETRY_MS = 3000;
+/** Chains a direct chain is tried on when no bridge takes it to the chosen one (as useSweep's alternatives) */
+const ALT_CANDIDATES = [8453, 10, 42161, 1, 56, 137];
+
+/** A direct chain's bridge reach to the chosen destination */
+interface DirectReach {
+  available: boolean | null;
+  /** No bridge to the destination, but one to another chain */
+  elsewhere?: boolean;
+  /** Below every bridge's minimum: the least that would go */
+  minimum?: bigint;
+}
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export interface AddressRow extends AddressChain {
@@ -108,7 +119,7 @@ export interface AddressData {
 export function useAddressData(address: Address | null, destination: number | null, recipient: Address | null, version = 0): AddressData {
   const [base, setBase] = useState<{ address: Address; rows: AddressRow[]; info: Map<number, ChainInfo>; chainOptions: ChainOption[]; prices: Record<string, number> } | { address: Address; error: string } | null>(null);
   // Per destination: sponsored sources that cannot reach it, direct routes
-  const [destRoutes, setDestRoutes] = useState<{ key: string; unreachable: Set<number>; direct: Record<number, boolean | null> } | null>(null);
+  const [destRoutes, setDestRoutes] = useState<{ key: string; unreachable: Set<number>; direct: Record<number, DirectReach> } | null>(null);
 
   useEffect(() => {
     if (!address) return;
@@ -172,15 +183,29 @@ export function useAddressData(address: Address | null, destination: number | nu
         const list = lists[i];
         if (list && !list.some((d) => d.chainId === destination)) unreachable.add(r.chainId);
       });
-      const direct: Record<number, boolean | null> = {};
+      const direct: Record<number, DirectReach> = {};
       await inPool(ready.rows.filter((r) => r.direct && r.chainId !== destination), QUOTE_POOL, async (r) => {
-        const probe = () => directRoute({ chainId: r.chainId, toChainId: destination, from: ready.address, recipient }).catch(() => ({ available: null }));
-        let res = await probe();
+        const probe = (toChainId: number) => directRoute({ chainId: r.chainId, toChainId, from: ready.address, recipient }).catch(() => ({ available: null } as Awaited<ReturnType<typeof directRoute>>));
+        let res = await probe(destination);
         for (let i = 0; i < ROUTE_RETRIES && res.available === null && !cancelled; i++) {
           await wait(ROUTE_RETRY_MS);
-          res = await probe();
+          res = await probe(destination);
         }
-        direct[r.chainId] = res.available;
+        // Too small for every bridge: says how much is needed rather than looking unroutable
+        if (res.available === false && res.minimumBalanceWei) {
+          direct[r.chainId] = { available: false, minimum: BigInt(res.minimumBalanceWei) };
+          return;
+        }
+        // No bridge to the chosen chain, or none answering after the retries: does one take it
+        // somewhere else? Unconfirmed counts as blocked only when another chain is confirmed instead
+        let elsewhere = false;
+        if (res.available !== true) {
+          for (const alt of ALT_CANDIDATES.filter((id) => id !== destination && id !== r.chainId)) {
+            if (cancelled) break;
+            if ((await probe(alt)).available === true) { elsewhere = true; break; }
+          }
+        }
+        direct[r.chainId] = { available: res.available, elsewhere };
       });
       if (!cancelled) setDestRoutes({ key: destKey, unreachable, direct });
     })();
@@ -194,7 +219,10 @@ export function useAddressData(address: Address | null, destination: number | nu
     if (row.direct) {
       if (destination === null) return { gas: null };
       if (!routes) return { gas: null };
-      const gas = routes.direct[chainId] ?? null;
+      const reach = routes.direct[chainId];
+      const gas = reach?.available ?? null;
+      if (reach?.minimum !== undefined) return { gas: false, minimum: reach.minimum };
+      if (reach?.elsewhere) return { gas: false, notToDestination: true };
       return gas === null ? { gas: null, unknown: true } : { gas };
     }
     const c = ready.info.get(chainId);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { groupChains, groupOf, groupText, tokenRouteOf, type AddressChain } from '../src/address/groups';
+import { readFileSync } from 'node:fs';
 import { parseView } from '../src/lib/route';
 
 const chain = (chainId: number, over: Partial<AddressChain> = {}): AddressChain => ({
@@ -24,6 +25,10 @@ describe('groupOf: one group per way of sweeping and what arrives', () => {
     expect(tokenRouteOf(124816)).toEqual({ symbol: 'MITO', toChainId: 56, toChainName: 'BNB Chain' });
     expect(tokenRouteOf(648)).toEqual({ symbol: 'ACE', toChainId: 56, toChainName: 'BNB Chain' });
     expect(tokenRouteOf(40)).toEqual({ symbol: 'TLOS', toChainId: 8453, toChainName: 'Base' });
+  });
+
+  it('below every bridge minimum: stays in its gas group (the row says how much is needed), not "stays on its own chain"', () => {
+    expect(groupOf(chain(143, { direct: true }), { gas: false, minimum: 64n * 10n ** 18n }, BASE)).toBe('key');
   });
 
   it('no bridge at all: stays on its own chain; bridges but not to the destination: its own group', () => {
@@ -53,11 +58,20 @@ describe('groupChains', () => {
 });
 
 describe('parseView', () => {
-  it('home, an address page (address or ENS name), and the sweep flow kept at /sweep', () => {
+  it('home and an address page (address or ENS name); the old /sweep page is gone', () => {
     expect(parseView('/', '')).toEqual({ kind: 'home' });
     expect(parseView('/address/0x820653ccE8a755edbb52eC1bc5829D2a60CD5cc5', '')).toEqual({ kind: 'address', query: '0x820653ccE8a755edbb52eC1bc5829D2a60CD5cc5' });
     expect(parseView('/address/vitalik.eth', '')).toEqual({ kind: 'address', query: 'vitalik.eth' });
     expect(parseView('/address/', '')).toEqual({ kind: 'home' });
-    expect(parseView('/sweep', '')).toEqual({ kind: 'sweep' });
+    // Vercel redirects /sweep to the home page; the app treats it as home either way
+    expect(parseView('/sweep', '')).toEqual({ kind: 'home' });
+  });
+});
+
+describe('vercel.json', () => {
+  it('sends old /sweep links to the home page, permanently', () => {
+    const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8')) as { redirects?: Array<{ source: string; destination: string; permanent?: boolean }>; rewrites?: Array<{ source: string }> };
+    expect(vercel.redirects).toContainEqual({ source: '/sweep', destination: '/', permanent: true });
+    expect(vercel.rewrites?.some((r) => r.source === '/sweep')).toBe(false);
   });
 });
