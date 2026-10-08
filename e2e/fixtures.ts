@@ -254,7 +254,7 @@ function telosLeftoverPlan(nonce: number) {
  * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base);
  * `hiccups`: the first route checks answer "unknown", then the real answer
  */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean } = {}) {
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean; scam?: string[]; scamCheckDown?: boolean } = {}) {
   const chains = [...CHAINS, ...(opts.mitosis ? [MITOSIS_CHAIN] : []), ...(opts.endurance ? [ENDURANCE_CHAIN] : [])];
   const funded = [...FUNDED, ...(opts.mitosis ? [MITOSIS] : []), ...(opts.endurance ? [ENDURANCE] : [])];
   let hiccups = opts.hiccups ?? 0;
@@ -321,6 +321,12 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     }
     if (path === '/bridges/timing') return json(route, opts.timings ?? { routes: {}, pairs: {} });
     if (path === '/prices') return json(route, { prices: { ETH: 2697.86, MITO: 0.0158, ACE: 0.18 } });
+    if (path.startsWith('/address-check/')) {
+      if (opts.scamCheckDown) return json(route, { error: 'down' }, 503);
+      const address = path.split('/')[2]!;
+      const listed = (opts.scam ?? []).some((a) => a.toLowerCase() === address.toLowerCase());
+      return json(route, { address, listed, available: true, source: 'ScamSniffer', updatedAt: '2026-10-08T00:00:00.000Z' });
+    }
     if (path === '/direct/chains') {
       return json(route, {
         chains: [

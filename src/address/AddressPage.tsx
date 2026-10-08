@@ -6,7 +6,7 @@ import { ChainIcon } from '../components/ChainIcon';
 import { DestinationPicker } from '../components/DestinationPicker';
 import { formatAmount, formatUsd, shortAddress } from '../lib/format';
 import { groupChains, groupText, tokenRouteOf, type GroupKey } from './groups';
-import { resolveName, useAddressData, useEstimates, useResolved, type AddressRow, type ChainOption, type Estimate } from './useAddress';
+import { isListedScam, resolveName, useAddressData, useEstimates, useResolved, type AddressRow, type ChainOption, type Estimate } from './useAddress';
 import { SweepSession, SweepWithDialog, type SweepPlan } from './SweepSession';
 import { FAILURE_LABEL, failureKind, minimumOf, tooSmallText, type RowState, type Wallet } from '../sweep/useSweep';
 import { reportText } from '../sweep/report';
@@ -327,16 +327,24 @@ function DestinationBar({ address, recipient, destination, destName, isDefault, 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const toSelf = isAddressEqual(recipient, address);
+  const [flagged, setFlagged] = useState<Address | null>(null);
+  const applyRecipient = (a: Address) => {
+    onRecipient(a);
+    setFlagged(null);
+    setEditing(false);
+    setInput('');
+  };
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     const res = await resolveName(input.trim());
+    if ('error' in res) { setBusy(false); setError(res.error); return; }
+    const listed = await isListedScam(res.address);
     setBusy(false);
-    if ('error' in res) { setError(res.error); return; }
-    onRecipient(res.address);
-    setEditing(false);
-    setInput('');
+    // A known scam address takes an explicit second step
+    if (listed) { setFlagged(res.address); return; }
+    applyRecipient(res.address);
   };
   return (
     <section className={`ap-card ap-dest${isDefault ? ' is-default' : ''}`} aria-label="Where swept gas goes">
@@ -362,12 +370,26 @@ function DestinationBar({ address, recipient, destination, destName, isDefault, 
       )}
       {editing && (
         <form className="ap-dest-edit" onSubmit={(e) => void submit(e)}>
-          <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="0x… or name.eth" aria-label="Send to address" autoComplete="off" spellCheck={false} autoFocus />
+          <input value={input} onChange={(e) => { setInput(e.target.value); setFlagged(null); }} placeholder="0x… or name.eth" aria-label="Send to address" autoComplete="off" spellCheck={false} autoFocus />
           <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !input.trim()}>Use this address</button>
           {error && <span className="ap-dest-err" role="alert">{error}</span>}
         </form>
       )}
+      {flagged && <ScamWarning address={flagged} onUse={() => applyRecipient(flagged)} onCancel={() => setFlagged(null)} />}
     </section>
+  );
+}
+
+/** A typed address that ScamSniffer lists: said plainly, used only after a second, explicit step */
+function ScamWarning({ address, onUse, onCancel }: { address: Address; onUse: () => void; onCancel: () => void }) {
+  return (
+    <div className="ap-scam" role="alert">
+      <p><b>{shortAddress(address)} is on ScamSniffer's list of scam addresses.</b> Anything sent there is gone for good. If someone asked you to send your gas to this address, it is most likely a scam.</p>
+      <p className="ap-scam-btns">
+        <button type="button" className="btn btn-primary btn-sm" onClick={onCancel}>Don't use it</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onUse}>Use it anyway</button>
+      </p>
+    </div>
   );
 }
 
@@ -375,13 +397,19 @@ function DestinationBar({ address, recipient, destination, destName, isDefault, 
 function OwnChainAddress({ value, onChange }: { value: Address | null; onChange: (a: Address | null) => void }) {
   const [input, setInput] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [flagged, setFlagged] = useState<Address | null>(null);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const res = await resolveName(input.trim());
     if ('error' in res) { setError(res.error); return; }
     setError(null);
+    // A known scam address takes an explicit second step
+    if (await isListedScam(res.address)) { setFlagged(res.address); return; }
     onChange(res.address);
   };
+  if (flagged) {
+    return <ScamWarning address={flagged} onUse={() => { onChange(flagged); setFlagged(null); }} onCancel={() => setFlagged(null)} />;
+  }
   if (value) {
     return (
       <p className="ap-own">Each chain's gas goes to <b>{value}</b> on that same chain. <button type="button" className="linkbtn" onClick={() => onChange(null)}>Change</button></p>
