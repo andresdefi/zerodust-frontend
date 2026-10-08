@@ -6,10 +6,10 @@ import { OFFLINE } from '../lib/env';
 // what arrives (owner, 2026-10-08). A sweep acts on one group only: groups differ in
 // who can sign or where the funds go, so mixing them in one confirmation would conflict.
 
-export type GroupKey = 'metamask' | 'key' | 'token' | 'elsewhere' | 'own-chain' | 'claim';
+export type GroupKey = 'gas' | 'token' | 'elsewhere' | 'own-chain' | 'claim';
 
 /** Order on the page: the easiest sweeps first */
-export const GROUP_ORDER: readonly GroupKey[] = ['metamask', 'key', 'token', 'elsewhere', 'own-chain', 'claim'];
+export const GROUP_ORDER: readonly GroupKey[] = ['gas', 'token', 'elsewhere', 'own-chain', 'claim'];
 
 export interface AddressChain {
   chainId: number;
@@ -65,8 +65,9 @@ export function tokenRouteOf(chainId: number): TokenRoute | null {
  * picked (then only what the chain can do at all counts).
  */
 export function groupOf(chain: AddressChain, routes: ChainRoutes, destination: number | null): GroupKey {
-  // The offline file is key-only, so every gas chain is in the key group there
-  const signer: GroupKey = chain.metamask && !chain.direct && !OFFLINE ? 'metamask' : 'key';
+  // One gas group whoever signs (owner, 2026-10-08): the key sweeps all of it in one go, MetaMask
+  // the chains it covers (the rest are tagged "Key only" and stay for the key)
+  const signer: GroupKey = 'gas';
   // Staying on the same chain is always a plain transfer
   if (destination !== null && chain.chainId === destination) return signer;
   if (routes.gas === true || routes.minimum !== undefined) return signer;
@@ -93,15 +94,15 @@ export function groupChains<T extends AddressChain>(chains: T[], routesOf: (chai
 }
 
 /** Copy for each group (provisional, rewritten with the rest of the site's copy) */
-export function groupText(key: GroupKey, destinationName: string | null): { title: string; detail: string; tag?: string } {
-  const to = destinationName ? `on ${destinationName}` : 'on the chain you choose';
+export function groupText(key: GroupKey, destinationName: string | null, opts: { keyOnly?: number } = {}): { title: string; detail: string; tag?: string } {
   switch (key) {
-    case 'metamask':
-      return { title: 'MetaMask or key', tag: destinationName ? `Gas ${to}` : undefined, detail: `Sign with MetaMask (no key needed) or with the key. Arrives as gas ${to}.` };
-    case 'key':
-      return OFFLINE
-        ? { title: 'With the key', tag: destinationName ? `Gas ${to}` : undefined, detail: `Swept with this wallet's key, which stays in this file. Arrives as gas ${to}.` }
-        : { title: 'Key only', tag: destinationName ? `Gas ${to}` : undefined, detail: `MetaMask can't sweep these yet, so they need the key. Arrives as gas ${to}.` };
+    case 'gas':
+      return {
+        title: destinationName ? `Arrives as gas on ${destinationName}` : 'Arrives as gas',
+        detail: OFFLINE ? 'Swept with this wallet\'s key, which stays in this file.'
+          : opts.keyOnly ? 'Sign with the key for all of them, or with MetaMask (no key needed) for the ones it covers. Chains tagged Key only need the key.'
+          : 'Sign with MetaMask (no key needed) or with the key.',
+      };
     case 'token':
       return { title: 'Arrives as a token', tag: 'Not gas', detail: 'No bridge carries these out as gas. Each chain\'s own bridge sends its token to your wallet on another chain.' };
     case 'elsewhere':

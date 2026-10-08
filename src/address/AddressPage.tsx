@@ -73,11 +73,11 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
 
   // One group at a time: picking a chain in another group starts a new selection there
   const [selection, setSelection] = useState<{ group: GroupKey; ids: Set<number> } | null>(null);
-  const activeGroup = selection?.group ?? groups.find((g) => g.key === 'metamask' || g.key === 'key')?.key ?? null;
+  const activeGroup = selection?.group ?? groups.find((g) => g.key === 'gas')?.key ?? null;
   const active = groups.find((g) => g.key === activeGroup);
-  const gasGroup = activeGroup === 'metamask' || activeGroup === 'key';
+  const gasGroup = activeGroup === 'gas';
   // Both gas groups share the destination: quote them together
-  const gasChains = groups.filter((g) => g.key === 'metamask' || g.key === 'key').flatMap((g) => g.chains);
+  const gasChains = groups.filter((g) => g.key === 'gas').flatMap((g) => g.chains);
   const estimates = useEstimates(address, gasChains, destination, recipient);
   // How long each bridge usually takes (GET /bridges/timing), to set expectations on each row
   const [timings, setTimings] = useState<BridgeTimings>(NO_TIMINGS);
@@ -146,7 +146,8 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
   };
   const optionOf = (chainId: number): ChainOption | undefined => data.chainOptions.find((o) => o.chainId === chainId);
 
-  const total = data.rows.reduce((s, r) => s + (r.usd ?? 0), 0);
+  // What a sweep moves: the destination chain's own balance (to this same wallet) is already there
+  const toSweepUsd = movable.reduce((s, r) => s + (r.usd ?? 0), 0);
   const selectedRows = active ? active.chains.filter((c) => selectedIds.has(c.chainId) && !finished.has(c.chainId)) : [];
   const quotedRows = selectedRows.filter((r) => estimates[r.chainId]?.receive !== undefined);
   const selectedReceive = quotedRows.reduce((s, r) => s + estimates[r.chainId]!.receive!, 0n);
@@ -169,8 +170,8 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
           </p>
         </div>
         <dl className="ap-kpis">
-          <div><dt>Chains with gas</dt><dd>{data.state === 'ready' ? data.rows.length : '…'}</dd></div>
-          <div><dt>Total value</dt><dd>{data.state === 'ready' ? formatUsd(total) || '$0.00' : '…'}</dd></div>
+          <div><dt>Chains to sweep</dt><dd>{data.state === 'ready' ? movable.length : '…'}</dd></div>
+          <div><dt>To sweep</dt><dd>{data.state === 'ready' ? formatUsd(toSweepUsd) || '$0.00' : '…'}</dd></div>
           <div><dt>Groups</dt><dd>{data.state === 'ready' ? groups.length : '…'}</dd></div>
         </dl>
       </section>
@@ -195,11 +196,12 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
       )}
 
       {groups.map((g) => {
-        const text = groupText(g.key, destName);
+        const text = groupText(g.key, destName, { keyOnly: g.chains.filter((c) => !OFFLINE && (!c.metamask || c.direct)).length });
         const isActive = g.key === activeGroup;
         const chosen = isActive ? g.chains.filter((c) => selectedIds.has(c.chainId) && !finished.has(c.chainId)) : [];
         const subtotal = g.chains.reduce((s, c) => s + (c.usd ?? 0), 0);
-        const mixedSigners = g.key !== 'metamask' && g.key !== 'key' && g.chains.some((c) => c.metamask) && g.chains.some((c) => !c.metamask);
+        // Rows MetaMask cannot sweep say so where both kinds share a group (never offline: all key there)
+        const keyOnlyRow = (c: AddressRow) => !OFFLINE && (!c.metamask || c.direct) && g.chains.some((o) => o.metamask && !o.direct);
         return (
           <section key={g.key} className={`ap-card ap-grp${isActive ? ' active' : ' dim'}`} aria-label={text.title}>
             <header className="ap-grp-h">
@@ -230,7 +232,7 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
             <ul className="ap-rows">
               {g.chains.map((c) => (
                 <ChainRow
-                  key={c.chainId} row={c} group={g.key} selected={isActive && selectedIds.has(c.chainId)} keyOnly={mixedSigners && !c.metamask}
+                  key={c.chainId} row={c} group={g.key} selected={isActive && selectedIds.has(c.chainId)} keyOnly={keyOnlyRow(c)}
                   onToggle={() => toggle(g.key, c.chainId)} destination={destination} destName={destName}
                   onSweep={sweepable(c) && !sweepingNow && destination !== null && !(g.key === 'own-chain' && !ownAddress) ? () => startSweep(g.key, [c]) : undefined}
                   destToken={destToken ?? null} estimate={estimates[c.chainId]}
@@ -427,7 +429,7 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
   const token = tokenRouteOf(row.chainId);
   let route: { text: string; tone: 'ok' | 'warn' | 'acc' | 'plain'; title?: string };
   let receive: string = '';
-  if (group === 'metamask' || group === 'key') {
+  if (group === 'gas') {
     if (destination === null) route = { text: 'Choose a chain', tone: 'plain' };
     else if (minimum !== undefined) route = { text: 'Below the minimum', tone: 'warn', title: tooSmallText(minimum, row) };
     else if (unknownRoute && !estimate?.receive) route = { text: 'Bridges not answering', tone: 'warn', title: 'No bridge confirmed or refused a route just now. Try again in a few minutes.' };
