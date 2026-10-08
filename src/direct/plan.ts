@@ -1,4 +1,5 @@
 import { API_URL } from '../sweep/constants';
+import type { L1Formula } from './l1fee';
 
 // Direct chains: no EIP-7702 in ZeroDust, swept by the wallet itself with
 // exact legacy transactions. The API plans (/direct/*, quote-only); this page
@@ -54,6 +55,22 @@ export const TOKEN_EXITS: Readonly<Record<number, {
     token: { symbol: 'TLOS', address: '0x7252c865c05378Ffc15120F428dd65804dD0CE63', decimals: 18 },
   },
 };
+
+/**
+ * OP-stack chains without EIP-7702 (the API's kind 'opguard'), with the L1 fee formula each one
+ * charges. Every transaction there also pays an L1 data fee, so the wallet sweeps in one
+ * transaction through ZeroDustGuard, which reverts unless the wallet is at exactly 0 once gas and
+ * the L1 fee are taken, and burns the gas left. The page computes the L1 fee exactly from what it
+ * signs (l1fee.ts). Pinned here; the page refuses a plan when /direct/chains disagrees, and refuses
+ * to sign when the chain's own oracle reports another formula.
+ */
+export const GUARD_CHAINS: Readonly<Record<number, L1Formula>> = { 81457: 'ecotone', 288: 'fjord' };
+/** ZeroDustGuard (zerodust contracts/src/ZeroDustGuard.yul): CREATE2, the same address on every guard chain */
+export const ZERODUST_GUARD = '0x2f95e6ED90a7dD67fc3Fae5c5628647E6A83e48e';
+/** keccak256 of its runtime code: the page checks the code at the address before signing */
+export const ZERODUST_GUARD_CODEHASH = '0x0e00b07c95af7e18d655633d521d110ce6e95ff3c330ff3a4ac2d1b44fed685e';
+/** Relay's depository on the guard chains: the only bridge target a guard plan may name */
+export const GUARD_RELAY_DEPOSITORY = '0x4cd00e387622c35bddb9b4c962c136462338bc31';
 
 /** Headroom the page allows on the LayerZero fee it reads itself (the planner adds 10%) */
 export const OFT_FEE_MARGIN_PERCENT = 110n;
@@ -119,6 +136,22 @@ export interface DirectPlan {
   expiresAt?: number;
   /** Token exits: what arrives is this token, not gas (the page uses its own pinned TOKEN_EXITS) */
   receiveToken?: { chainId: number; symbol: string; address: string; decimals: number };
+  /** Guard chains: the one transaction through ZeroDustGuard (sweep(target, fee, data)) */
+  guard?: GuardPlan;
+}
+
+export interface GuardPlan {
+  address: string;
+  /** What the guard calls with what is left after the fee, and the calldata */
+  target: string;
+  data: string;
+  /** The value the guard forwards to the target, as planned */
+  forwarded: string;
+  /** The API's L1 fee estimate; the page computes the real one when it signs */
+  l1Fee: string;
+  /** Where the difference between the two goes: ZeroDust's fee (bridge deposits keep the quoted amount) or the amount forwarded */
+  absorb: 'fee' | 'amount';
+  l1Formula: L1Formula;
 }
 
 export interface DirectChainInfo {
@@ -128,8 +161,10 @@ export interface DirectChainInfo {
   decimals: number;
   explorerUrl: string;
   rpcUrl: string;
-  /** The chain's gas rule: evm, arbitrum, etherlink or gaslimit */
+  /** The chain's gas rule: evm, arbitrum, etherlink, gaslimit, fixedprice, zk or opguard */
   kind?: string;
+  /** Guard chains: the OP-stack L1 fee formula */
+  l1Formula?: string;
   txGapBlocks?: number;
 }
 

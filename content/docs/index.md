@@ -69,10 +69,10 @@ A quote for these routes carries `receiveToken` (symbol, address, decimals), and
 
 ## Supported chains
 
-As of 7 October 2026 ZeroDust sweeps 71 chains:
+As of 8 October 2026 ZeroDust sweeps 73 chains:
 
 - 52 EIP-7702 chains, swept by the sponsor (`GET /chains`). Each entry's `crossChain.available` says whether a bridge currently accepts it as a cross-chain source.
-- 19 direct chains, swept by the wallet itself (`GET /direct/chains`).
+- 21 direct chains, swept by the wallet itself (`GET /direct/chains`).
 - 16 of the EIP-7702 chains can also be swept with MetaMask, without the key.
 - Cross-chain destinations are not limited to ZeroDust chains: any EVM chain a bridge delivers native gas to qualifies. From Base there are 107 (`GET /destinations?fromChainId=8453`).
 
