@@ -5,6 +5,16 @@
   "outputDirectory": "dist",
   "cleanUrls": true,
   "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/address/:path*",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/sweep",
+      "destination": "/index.html"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
