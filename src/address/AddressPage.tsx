@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { IDLE_FLAG } from '../components/KeyEntry';
 import { isAddressEqual, type Address } from 'viem';
 import { ChainIcon } from '../components/ChainIcon';
 import { DestinationPicker } from '../components/DestinationPicker';
@@ -11,6 +12,17 @@ import type { RowState, Wallet } from '../sweep/useSweep';
 // One address: every chain holding gas, in groups by how it is swept and what arrives.
 // Reading needs nothing; sweeping a group asks how to sign (MetaMask or the key of this
 // address), checks every chain, confirms, and shows each chain's progress in its row.
+
+/** A loaded key left alone this long is forgotten (never during a sweep) */
+const IDLE_FORGET_MS = 15 * 60 * 1000;
+
+/** Forgetting the key: a reload clears this tab's memory (the account object lives nowhere else) */
+function forgetKey(idle: boolean) {
+  if (idle) {
+    try { sessionStorage.setItem(IDLE_FLAG, '1'); } catch { /* the reload still forgets the key */ }
+  }
+  window.location.reload();
+}
 
 /** A bridge keeping more than this share of a chain's value is flagged next to it */
 const BRIDGE_TAKES_FLAG = 0.5;
@@ -91,6 +103,17 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
     setProgress((prev) => ({ states: { ...prev.states, ...states }, bridgeOf: { ...prev.bridgeOf, ...bridgeOf } }));
   }, []);
   const sweepingNow = Object.values(progress.states).some((st) => st.phase === 'sweeping');
+  // The key stays only while it is used: 15 minutes without activity forgets it (never mid-sweep),
+  // as on the old page; between groups too, not only while a sweep session is open
+  const keyLoaded = wallet?.kind === 'key';
+  useEffect(() => {
+    if (!keyLoaded || sweepingNow) return;
+    let timer = setTimeout(() => forgetKey(true), IDLE_FORGET_MS);
+    const reset = () => { clearTimeout(timer); timer = setTimeout(() => forgetKey(true), IDLE_FORGET_MS); };
+    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
+    for (const e of events) window.addEventListener(e, reset, { passive: true });
+    return () => { clearTimeout(timer); for (const e of events) window.removeEventListener(e, reset); };
+  }, [keyLoaded, sweepingNow]);
   const anyResult = Object.values(progress.states).some((st) => st.phase === 'done' || st.phase === 'failed');
   const runs = useRef(0);
   const begin = (plan: SweepPlan, w: Wallet) => {
@@ -123,7 +146,9 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
           <h1>{name ?? shortAddress(address)} <CopyButton text={address} /></h1>
           <p className="ap-badges">
             {name && <span className="tag">{shortAddress(address)}</span>}
-            <span className="tag">Not connected</span>
+            {keyLoaded
+              ? <span className="tag acc">Key loaded · <button type="button" className="linkbtn" onClick={() => forgetKey(false)} disabled={sweepingNow}>Forget it</button></span>
+              : wallet?.kind === 'metamask' ? <span className="tag ok">MetaMask</span> : <span className="tag">Not connected</span>}
           </p>
           <p className="ap-links">
             <a href={`https://etherscan.io/address/${address}`} target="_blank" rel="noreferrer">etherscan ↗</a>

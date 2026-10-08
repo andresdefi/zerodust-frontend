@@ -136,3 +136,43 @@ test('"Stays on its own chain": the gas goes to an address on the same chain, af
   await confirm.getByRole('button', { name: 'Sweep 1 chain' }).click();
   await expect(group.locator('.ap-row', { hasText: 'Scroll' })).toContainText('Done · 0 left', { timeout: 30_000 });
 });
+
+async function loadKeyAndBackOut(page: import('@playwright/test').Page, key: string) {
+  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'MetaMask or key' }) });
+  await group.getByRole('button', { name: 'Sweep 1 chain' }).click();
+  await page.getByRole('dialog', { name: /with/ }).getByRole('button', { name: /Private key/ }).click();
+  await page.locator('.zd-with .keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  // Back out at the confirm: no sweep session runs, the key is still held
+  const confirm = page.getByRole('dialog', { name: /Sweep 1 chain to Base/ });
+  await expect(confirm).toBeVisible({ timeout: 20_000 });
+  await confirm.getByRole('button', { name: 'Back' }).click();
+  await expect(page.locator('.ap-acct')).toContainText('Key loaded');
+}
+
+test('a loaded key is forgotten after 15 idle minutes, also between groups (no sweep session open)', async ({ page }) => {
+  const key = generatePrivateKey();
+  const user = privateKeyToAccount(key).address;
+  await mockNetwork(page, user);
+  await page.goto(`/address/${user}`);
+  await loadKeyAndBackOut(page, key);
+  const acct = page.locator('.ap-acct');
+  // From here time is simulated: any activity restarts the idle timer on the fake clock
+  await page.clock.install();
+  await page.locator('.ap-acct h1').click();
+  await page.clock.runFor(15 * 60 * 1000 - 5000);
+  await expect(acct).toContainText('Key loaded');
+  await page.clock.runFor(10_000);
+  await expect(acct).toContainText('Not connected', { timeout: 10_000 });
+});
+
+test('"Forget it" drops a loaded key at once', async ({ page }) => {
+  const key = generatePrivateKey();
+  const user = privateKeyToAccount(key).address;
+  await mockNetwork(page, user);
+  await page.goto(`/address/${user}`);
+  await loadKeyAndBackOut(page, key);
+  await page.locator('.ap-acct').getByRole('button', { name: 'Forget it' }).click();
+  await expect(page.locator('.ap-acct')).toContainText('Not connected', { timeout: 10_000 });
+});
