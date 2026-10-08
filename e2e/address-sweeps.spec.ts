@@ -51,7 +51,7 @@ const row = (page: Page, name: string) => page.locator('.ap-row', { hasText: nam
 test('the key never reaches the DOM, an input value, storage, a request or the console, and the page keeps its CSP', async ({ page }) => {
   const { key } = await openAddress(page);
   const watch = await watchForKey(page, key);
-  await group(page, 'MetaMask or key').getByRole('button', { name: 'Sweep 1 chain' }).click();
+  await group(page, 'Arrives as gas on Base').getByRole('button', { name: 'Sweep 1 chain' }).click();
   const dialog = page.getByRole('dialog', { name: /chain with/ });
   await dialog.getByRole('button', { name: /Private key/ }).click();
   const input = dialog.locator('.keyfield input');
@@ -72,7 +72,7 @@ test('pasting a key wipes the clipboard', async ({ page, context, browserName })
   test.skip(browserName !== 'chromium', 'clipboard permissions');
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const { key } = await openAddress(page);
-  await group(page, 'MetaMask or key').getByRole('button', { name: 'Sweep 1 chain' }).click();
+  await group(page, 'Arrives as gas on Base').getByRole('button', { name: 'Sweep 1 chain' }).click();
   const dialog = page.getByRole('dialog', { name: /chain with/ });
   await dialog.getByRole('button', { name: /Private key/ }).click();
   await page.evaluate((k) => navigator.clipboard.writeText(k), key);
@@ -90,7 +90,7 @@ test('pasting a key wipes the clipboard', async ({ page, context, browserName })
 
 test('rejects something that is not a key, without echoing it', async ({ page }) => {
   await openAddress(page);
-  await group(page, 'MetaMask or key').getByRole('button', { name: 'Sweep 1 chain' }).click();
+  await group(page, 'Arrives as gas on Base').getByRole('button', { name: 'Sweep 1 chain' }).click();
   const dialog = page.getByRole('dialog', { name: /chain with/ });
   await dialog.getByRole('button', { name: /Private key/ }).click();
   await dialog.locator('.keyfield input').focus();
@@ -103,7 +103,7 @@ test('rejects something that is not a key, without echoing it', async ({ page })
 
 test('while ZeroDust is paused: the sweep dialog says so and takes no key; nothing when it works', async ({ page }) => {
   const { user } = await openAddress(page, { paused: true });
-  await group(page, 'MetaMask or key').getByRole('button', { name: 'Sweep 1 chain' }).click();
+  await group(page, 'Arrives as gas on Base').getByRole('button', { name: 'Sweep 1 chain' }).click();
   const dialog = page.getByRole('dialog', { name: /chain with/ });
   await expect(dialog.getByRole('status')).toContainText('ZeroDust is paused');
   await expect(dialog.getByRole('button', { name: /Private key/ })).toBeDisabled();
@@ -112,7 +112,7 @@ test('while ZeroDust is paused: the sweep dialog says so and takes no key; nothi
   await page.unrouteAll({ behavior: 'ignoreErrors' });
   await mockNetwork(page, user);
   await page.reload();
-  await group(page, 'MetaMask or key').getByRole('button', { name: 'Sweep 1 chain' }).click();
+  await group(page, 'Arrives as gas on Base').getByRole('button', { name: 'Sweep 1 chain' }).click();
   await expect(page.getByRole('dialog', { name: /chain with/ }).getByRole('button', { name: /Private key/ })).toBeEnabled();
   await expect(page.getByText('ZeroDust is paused')).toHaveCount(0);
 });
@@ -120,7 +120,7 @@ test('while ZeroDust is paused: the sweep dialog says so and takes no key; nothi
 test('sweeps a direct chain: plan checked and replayed in the page, signed here, sent to the chain, reported once', async ({ page }) => {
   const { key, swept, sent, reports } = await openAddress(page, { direct: true });
   const watch = await watchForKey(page, key);
-  await sweepOnly(page, 'Key only', ['Avalanche']);
+  await sweepOnly(page, 'Arrives as gas on Base', ['Avalanche']);
   await useKey(page, key);
   await confirmSweep(page, 1);
   await expect(row(page, 'Avalanche')).toContainText('Done · 0 left', { timeout: 60_000 });
@@ -140,7 +140,7 @@ test('sweeps a direct chain: plan checked and replayed in the page, signed here,
 
 test('refuses a direct plan that pays someone else, and sends nothing', async ({ page }) => {
   const { key, sent } = await openAddress(page, { direct: true, tamper: true });
-  await sweepOnly(page, 'Key only', ['Avalanche']);
+  await sweepOnly(page, 'Arrives as gas on Base', ['Avalanche']);
   await useKey(page, key);
   const dialog = confirmDialog(page);
   await expect(dialog.getByRole('heading', { name: 'Nothing can be swept right now' })).toBeVisible({ timeout: 30_000 });
@@ -168,9 +168,9 @@ test('a chain whose bridges cannot reach the destination goes to another chain t
 
 test('a passing "unknown" route does not send a chain elsewhere', async ({ page }) => {
   await openAddress(page, { direct: true, hiccups: 1 });
-  await expect(group(page, 'Key only')).toContainText('Avalanche');
+  await expect(group(page, 'Arrives as gas on Base')).toContainText('Avalanche');
   await page.waitForTimeout(4_000);
-  await expect(group(page, 'Key only')).toContainText('Avalanche');
+  await expect(group(page, 'Arrives as gas on Base')).toContainText('Avalanche');
   await expect(page.getByRole('heading', { name: /Can't reach/ })).toHaveCount(0);
 });
 
@@ -272,7 +272,7 @@ test('a sponsored chain too small at the sweep names the minimum and is reported
 test('sweeps Monad through Across: gas-limit rules, deposit decoded and its Settler checked in the page', async ({ page }) => {
   const { key, swept, sent } = await openAddress(page, { monad: true });
   const watch = await watchForKey(page, key);
-  await sweepOnly(page, 'Key only', ['Monad']);
+  await sweepOnly(page, 'Arrives as gas on Base', ['Monad']);
   await useKey(page, key);
   await confirmSweep(page, 1);
   await expect(row(page, 'Monad')).toContainText('Done · 0 left', { timeout: 60_000 });
@@ -285,7 +285,7 @@ test('sweeps Monad through Across: gas-limit rules, deposit decoded and its Sett
 
 test('refuses an Across plan whose deposit pays someone else, and sends nothing', async ({ page }) => {
   const { key, sent } = await openAddress(page, { monad: true, tamper: true });
-  await sweepOnly(page, 'Key only', ['Monad']);
+  await sweepOnly(page, 'Arrives as gas on Base', ['Monad']);
   await useKey(page, key);
   const dialog = confirmDialog(page);
   await expect(dialog.getByRole('heading', { name: 'Nothing can be swept right now' })).toBeVisible({ timeout: 30_000 });
@@ -302,7 +302,7 @@ test('the header says plainly when MetaMask is not installed', async ({ page }) 
 
 test("a row's own Sweep button sweeps just that chain", async ({ page }) => {
   const { key, swept } = await openAddress(page, { direct: true });
-  await group(page, 'Key only').getByRole('button', { name: 'Sweep Avalanche' }).click();
+  await group(page, 'Arrives as gas on Base').getByRole('button', { name: 'Sweep Avalanche' }).click();
   await useKey(page, key);
   await expect(confirmDialog(page).getByRole('heading', { name: 'Sweep 1 chain to Base?' })).toBeVisible({ timeout: 30_000 });
   await confirmSweep(page, 1);
@@ -325,4 +325,20 @@ test('each row says how long its bridge usually takes, and warns when it has bee
   const slow = row(page, 'Optimism').getByText('Relay · slower lately');
   await expect(slow).toBeVisible({ timeout: 20_000 });
   await expect(slow).toHaveAttribute('title', 'Usually 9s, but slower than usual lately');
+});
+
+test('one gas group: the key sweeps a MetaMask chain and a key-only chain together; the dialog says what MetaMask would leave', async ({ page }) => {
+  const { key, swept, sent } = await openAddress(page, { direct: true });
+  const gas = group(page, 'Arrives as gas on Base');
+  await gas.getByRole('button', { name: 'Sweep 2 chains' }).click();
+  const dialog = page.getByRole('dialog', { name: /Sweep 2 chains with/ });
+  await expect(dialog.getByRole('button', { name: /MetaMask/ })).toContainText('Covers 1 of 2');
+  await expect(dialog).toContainText('With MetaMask, Avalanche is left for later: it needs the key');
+  await expect(dialog.getByRole('button', { name: /Private key/ })).toContainText('Covers all 2');
+  await useKey(page, key);
+  await confirmSweep(page, 2);
+  await expect(row(page, 'Optimism')).toContainText('Done · 0 left', { timeout: 60_000 });
+  await expect(row(page, 'Avalanche')).toContainText('Done · 0 left', { timeout: 60_000 });
+  expect([...swept].sort()).toEqual([10, 43114].sort());
+  expect(sent).toHaveLength(2);
 });

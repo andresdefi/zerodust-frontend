@@ -10,7 +10,7 @@ test('groups every chain by how it is swept, quotes the gas groups, and selects 
   await mockNetwork(page, user, { direct: true, mitosis: true });
   await page.goto(`/address/${user}`);
 
-  const group = (title: string) => page.locator('section.ap-grp', { has: page.getByRole('heading', { name: title }) });
+  const group = (title: string | RegExp) => page.locator('section.ap-grp', { has: page.getByRole('heading', { name: title }) });
   const dest = page.getByRole('region', { name: 'Where swept gas goes' });
   // Default destination: the chain holding most of the wallet's bridgeable gas, said plainly and changeable
   await expect(dest).toContainText('Base');
@@ -20,16 +20,21 @@ test('groups every chain by how it is swept, quotes the gas groups, and selects 
   // One list, no tabs: the Delegations placeholder is gone
   await expect(page.getByRole('heading', { name: 'Balances', level: 2 })).toBeVisible();
   await expect(page.getByRole('tab')).toHaveCount(0);
-  await expect(group('MetaMask or key').locator('.ap-row')).toHaveCount(1);
-  await expect(group('MetaMask or key')).toContainText('Optimism');
-  await expect(group('Key only')).toContainText('Avalanche');
+  // One gas group whoever signs: Avalanche (direct, key only) is tagged, Optimism (MetaMask) is not
+  const gas = group('Arrives as gas on Base');
+  await expect(gas.locator('.ap-row')).toHaveCount(2);
+  await expect(gas.locator('.ap-row', { hasText: 'Optimism' })).not.toContainText('Key only');
+  await expect(gas.locator('.ap-row', { hasText: 'Avalanche' }).getByText('Key only')).toBeVisible();
+  await expect(gas).toContainText('Chains tagged Key only need the key');
   await expect(group('Arrives as a token')).toContainText('MITO on BNB Chain');
   await expect(group('Stays on its own chain')).toContainText('Scroll');
-  await expect(page.locator('.ap-kpis')).toContainText('5');
+  // The numbers count what moves: Base's own balance stays where it is
+  await expect(page.locator('.ap-kpis')).toContainText('Chains to sweep4');
+  await expect(page.locator('.ap-kpis')).toContainText('To sweep');
 
   // Quoted against the default chain
-  await expect(group('MetaMask or key').locator('.ap-recv').first()).toContainText('ETH');
-  await expect(page.locator('.ap-sticky')).toContainText('MetaMask or key · 1 chain');
+  await expect(gas.locator('.ap-recv').first()).toContainText('ETH');
+  await expect(page.locator('.ap-sticky')).toContainText('Arrives as gas on Base · 2 chains');
   await expect(page.locator('.ap-sticky')).toContainText('you receive at least');
 
   // Another chain: Base becomes a source, Optimism the one already in place
@@ -39,7 +44,9 @@ test('groups every chain by how it is swept, quotes the gas groups, and selects 
   await picker.locator('.pick', { hasText: 'Optimism' }).first().click();
   await expect(dest).toContainText('Already on Optimism');
   await expect(dest).not.toContainText('Picked because');
-  await expect(group('MetaMask or key')).toContainText('Base');
+  await expect(group('Arrives as gas on Optimism')).toContainText('Base');
+  // Optimism's own balance stays now, Base's moves
+  await expect(page.locator('.ap-kpis')).toContainText('Chains to sweep4');
 
   // To another address, the destination chain's own balance is a real same-chain transfer
   await dest.getByRole('button', { name: 'Send to another address' }).click();
@@ -47,12 +54,13 @@ test('groups every chain by how it is swept, quotes the gas groups, and selects 
   await dest.getByRole('button', { name: 'Use this address' }).click();
   await expect(dest).toContainText('(another address)');
   await expect(dest).not.toContainText('Already on');
-  await expect(group('MetaMask or key').locator('.ap-row')).toHaveCount(2);
+  await expect(group('Arrives as gas on Optimism').locator('.ap-row')).toHaveCount(3);
+  await expect(page.locator('.ap-kpis')).toContainText('Chains to sweep5');
 
   // Ticking a chain in another group starts a selection there; the first group lets go
   await group('Stays on its own chain').getByRole('checkbox', { name: 'Select Scroll' }).check();
   await expect(page.locator('.ap-sticky')).toContainText('Stays on its own chain · 1 chain');
-  await expect(group('MetaMask or key').getByRole('checkbox', { name: 'Select Base' })).not.toBeChecked();
+  await expect(group('Arrives as gas on Optimism').getByRole('checkbox', { name: 'Select Base' })).not.toBeChecked();
   await expect(group('Stays on its own chain')).toHaveClass(/active/);
 });
 
@@ -61,7 +69,7 @@ test('a key sweep keeps a MetaMask smart account: the closing authorization goes
   const user = privateKeyToAccount(key).address;
   const net = await mockNetwork(page, user, { metamaskSmartAccount: true });
   await page.goto(`/address/${user}`);
-  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'MetaMask or key' }) });
+  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'Arrives as gas on Base' }) });
   await group.getByRole('button', { name: 'Sweep 1 chain' }).click();
   const withDialog = page.getByRole('dialog', { name: /Sweep 1 chain with/ });
   await withDialog.getByRole('button', { name: /Private key/ }).click();
@@ -101,8 +109,8 @@ test('sweeps a group with the key of this address: the key stays out of the page
 
   const group = (title: string) => page.locator('section.ap-grp', { has: page.getByRole('heading', { name: title }) });
   // Default destination Base (to this wallet): Optimism is what moves in the MetaMask-or-key group
-  await expect(group('MetaMask or key').locator('.ap-row')).toHaveCount(1);
-  await group('MetaMask or key').getByRole('button', { name: 'Sweep 1 chain' }).click();
+  await expect(group('Arrives as gas on Base').locator('.ap-row')).toHaveCount(1);
+  await group('Arrives as gas on Base').getByRole('button', { name: 'Sweep 1 chain' }).click();
 
   const withDialog = page.getByRole('dialog', { name: /Sweep 1 chain with/ });
   await expect(withDialog).toContainText('MetaMask');
@@ -127,12 +135,12 @@ test('sweeps a group with the key of this address: the key stays out of the page
   await watch.checkPage();
   await confirm.getByRole('button', { name: 'Sweep 1 chain' }).click();
 
-  const row = group('MetaMask or key').locator('.ap-row', { hasText: 'Optimism' });
+  const row = group('Arrives as gas on Base').locator('.ap-row', { hasText: 'Optimism' });
   await expect(row).toContainText('Done · 0 left', { timeout: 30_000 });
   await expect(row.getByRole('link', { name: 'Sent ↗' })).toHaveAttribute('href', /optimistic\.etherscan\.io\/tx\/0x/);
   await expect(page.getByRole('button', { name: 'Refresh balances' })).toBeVisible();
   // A chain swept to 0 is not offered again until the balances are read again
-  await expect(group('MetaMask or key').getByRole('button', { name: 'Sweep 0 chains' })).toBeDisabled();
+  await expect(group('Arrives as gas on Base').getByRole('button', { name: 'Sweep 0 chains' })).toBeDisabled();
   await expect(page.locator('.ap-sticky').getByRole('button')).toBeDisabled();
   await watch.checkPage();
   expect(watch.leaks).toEqual([]);
@@ -162,7 +170,7 @@ test('"Stays on its own chain": the gas goes to an address on the same chain, af
 });
 
 async function loadKeyAndBackOut(page: import('@playwright/test').Page, key: string) {
-  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'MetaMask or key' }) });
+  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'Arrives as gas on Base' }) });
   await group.getByRole('button', { name: 'Sweep 1 chain' }).click();
   await page.getByRole('dialog', { name: /with/ }).getByRole('button', { name: /Private key/ }).click();
   await page.locator('.zd-with .keyfield input').focus();
@@ -232,7 +240,7 @@ test('MetaMask: one session for the site, shown in the header and reused by the 
   await expect(page.locator('.ap-badges')).toContainText('MetaMask connected');
 
   // The sweep dialog uses the same session: no second connect
-  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'MetaMask or key' }) });
+  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'Arrives as gas on Base' }) });
   await group.getByRole('button', { name: 'Sweep 1 chain' }).click();
   const withDialog = page.getByRole('dialog', { name: /Sweep 1 chain with/ });
   await expect(withDialog.locator('.zd-opt', { hasText: 'MetaMask' })).toContainText('Connected');

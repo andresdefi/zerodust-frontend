@@ -23,3 +23,23 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+---
+
+Project logos added 2026-10-08 (not in web3icons). Each is the project's own logo, a
+trademark of that project, used only to identify its network. Resized to 96x96; PNG
+unless noted.
+
+360 Shape: ethereum-lists/chains icon "shape" (submitted for the chain's registry entry)
+648 Endurance: ace.fusionist.io apple-touch-icon
+1155 Intuition: ethereum-lists/chains icon "intuition"
+1514 DATA Network (formerly Story): datafdn.org apple-icon
+1672 Pharos: ethereum-lists/chains icon "pharos", padded to square
+2818 Morph: morph.network apple-touch-icon
+5031 Somnia: SOMI token logo (CoinGecko), the network's mark
+5330 Superseed: ethereum-lists/chains icon "superseed"
+16661 0G: ethereum-lists/chains icon "0g" (SVG, unchanged)
+42018 Mythos: mythos.foundation apple-touch-icon
+97477 Doma: ethereum-lists/chains icon "doma"
+124816 Mitosis: MITO token logo (CoinGecko), the network's mark
+685689 Gensyn: ethereum-lists/chains icon "gensyn"
+5064014 Ethereal: ethereal.trade favicon (SVG, unchanged)
