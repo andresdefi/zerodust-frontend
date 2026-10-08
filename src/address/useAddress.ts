@@ -67,6 +67,22 @@ export async function resolveName(q: string): Promise<{ address: Address } | { e
   }
 }
 
+/**
+ * Whether ScamSniffer's public scam list names this address (GET /address-check, checked on our
+ * server; the address never goes to ScamSniffer). null when the check could not answer: then
+ * nothing is shown, the check only ever adds a warning.
+ */
+export async function isListedScam(address: Address): Promise<boolean | null> {
+  try {
+    const res = await fetch(`${API_URL}/address-check/${address}`, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { listed?: unknown; available?: unknown };
+    return body.available === true ? body.listed === true : null;
+  } catch {
+    return null;
+  }
+}
+
 /** An address or an ENS name, to the address (and the name to show) */
 export function useResolved(query: string): Resolution {
   const [result, setResult] = useState<{ query: string; res: Resolution } | null>(null);
