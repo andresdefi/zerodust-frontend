@@ -4,7 +4,6 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { ShieldIcon } from './icons';
 import { OFFLINE } from '../lib/env';
 import { isPaused, useServiceStatus } from '../sweep/status';
-import { connectMetaMask, findMetaMask, type MetaMaskSession } from '../sweep/metamask';
 
 const KEY_PATTERN = /^(0x)?[0-9a-fA-F]{64}$/;
 
@@ -22,9 +21,10 @@ export type ClipboardState = 'cleared' | 'failed' | null;
  * password field, so macOS turns on Secure Event Input while it has focus.
  * A paste is followed by an immediate clipboard wipe.
  */
-export function KeyEntry({ onAccount, onMetaMask }: {
+export function KeyEntry({ onAccount, title = 'Use the private key', help = 'Type or paste the private key of the wallet you want to empty.' }: {
   onAccount: (account: LocalAccount, clipboard: ClipboardState) => void;
-  onMetaMask: (session: MetaMaskSession) => void;
+  title?: string;
+  help?: string;
 }) {
   const buffer = useRef('');
   const [length, setLength] = useState(0);
@@ -46,27 +46,6 @@ export function KeyEntry({ onAccount, onMetaMask }: {
       return false;
     }
   });
-
-  // MetaMask is the main way in (owner, 2026-10-06); the key is the fallback for chains MetaMask
-  // cannot sweep. The offline file has no wallet extension, so it is key-only.
-  // Back from the idle timeout: open on the key, where the "forgotten" notice is
-  const [keyMode, setKeyMode] = useState(OFFLINE || forgotIdle);
-  const [connecting, setConnecting] = useState(false);
-  const [mmError, setMmError] = useState<string | null>(null);
-  const connect = async () => {
-    if (paused) return;
-    setConnecting(true);
-    setMmError(null);
-    try {
-      const provider = await findMetaMask();
-      if (!provider) throw new Error('MetaMask was not found in this browser. Install it, or load the wallet with its key.');
-      onMetaMask(await connectMetaMask(provider));
-    } catch (error) {
-      setMmError(error instanceof Error ? error.message : 'Could not connect to MetaMask.');
-    } finally {
-      setConnecting(false);
-    }
-  };
 
   const reset = () => {
     buffer.current = '';
@@ -123,44 +102,14 @@ export function KeyEntry({ onAccount, onMetaMask }: {
     </p>
   );
 
-  if (!keyMode) {
-    return (
-      <section className="card" aria-labelledby="load-title">
-        <div className="card-head">
-          <h2 id="load-title">Connect wallet</h2>
-        </div>
-        <div className="load">
-          {pausedNotice}
-          <p>Connect MetaMask to empty your wallet. You approve the chains in MetaMask and sign once; the key never leaves it.</p>
-          {mmError && <p className="field-error" role="alert">{mmError}</p>}
-          <div className="safety">
-            <div><ShieldIcon /><span>MetaMask grants ZeroDust a one-time permission per chain, for that chain's balance, valid 10 minutes.</span></div>
-            <div><ShieldIcon /><span>The funds can only go where your signature says: the address and chain you choose.</span></div>
-            <div><ShieldIcon /><span>MetaMask covers 16 chains today. For the others, load the wallet with its key instead.</span></div>
-          </div>
-          <div className="offline">
-            <span>No MetaMask, or a chain it does not cover?</span>
-            <button type="button" className="link-btn" onClick={() => setKeyMode(true)}>Use a private key</button>
-          </div>
-        </div>
-        <div className="actions">
-          <button type="button" className="btn btn-primary btn-block" onClick={connect} disabled={connecting || paused}>
-            {connecting ? 'Connecting…' : 'Connect MetaMask'}
-          </button>
-        </div>
-      </section>
-    );
-  }
-
   return (
     <section className="card" aria-labelledby="load-title">
       <div className="card-head">
-        <h2 id="load-title">Load wallet</h2>
-        {!OFFLINE && <button type="button" className="link-btn" onClick={() => { reset(); setKeyMode(false); }}>Use MetaMask</button>}
+        <h2 id="load-title">{title}</h2>
       </div>
       <div className="load">
         {pausedNotice}
-        <p id="key-help">Type or paste the private key of the wallet you want to empty.</p>
+        <p id="key-help">{help}</p>
         <label className={paused ? 'keyfield is-disabled' : 'keyfield'}>
           <span className="visually-hidden">Private key</span>
           <input
@@ -192,7 +141,7 @@ export function KeyEntry({ onAccount, onMetaMask }: {
         <div className="safety">
           <div><ShieldIcon /><span>The key stays in this tab. It is never sent, saved or shown. Only signatures leave.</span></div>
           <div><ShieldIcon /><span>Pasting wipes your clipboard. Typing keeps the key off it entirely.</span></div>
-          <div><ShieldIcon /><span>Browser extensions can read what you type or paste on any page. Use a private window with extensions off, or the offline page.</span></div>
+          <div><ShieldIcon /><span>Browser extensions can read what you type or paste on any page. Use a private window with extensions off{OFFLINE ? '' : ', or the offline page'}.</span></div>
           {forgotIdle && <div><ShieldIcon /><span>The last key was forgotten after 15 minutes without activity.</span></div>}
         </div>
         {OFFLINE ? (
@@ -206,7 +155,7 @@ export function KeyEntry({ onAccount, onMetaMask }: {
       </div>
       <div className="actions">
         <button type="button" className="btn btn-primary btn-block" onClick={() => unlock()} disabled={length === 0 || paused}>
-          Load wallet
+          Use this key
         </button>
       </div>
     </section>
