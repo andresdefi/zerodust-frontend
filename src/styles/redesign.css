@@ -18,6 +18,10 @@
 .hdr-bar { display: flex; align-items: center; gap: 24px; height: 76px; }
 .hdr-bar .logo { margin-right: auto; }
 .hdr-mm-short { display: none; }
+.hdr-acct { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
+.hdr-acct .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 14px; }
+.hdr-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.hdr-error { max-width: 1240px; margin: 12px auto 0; padding: 0 32px; font-size: 14px; color: var(--danger); }
 .hdr-search { display: flex; align-items: center; gap: 12px; height: 52px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--faint); }
 .hdr-search input { flex: 1; height: 100%; border: 0; background: transparent; font: inherit; font-size: 16px; color: var(--ink); outline: none; }
 .hdr-search:focus-within { color: var(--ink); border-bottom-color: var(--ink); }
@@ -139,7 +143,7 @@
 }
 
 @media (max-width: 760px) {
-  .hdr, .hm, .ap { padding-left: 16px; padding-right: 16px; }
+  .hdr, .hm, .ap, .hdr-error { padding-left: 16px; padding-right: 16px; }
   .hdr-bar { gap: 12px; height: 64px; }
   .hdr-bar .navlinks { display: none; }
   .hdr-mm-long { display: none; }
