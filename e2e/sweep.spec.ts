@@ -43,7 +43,7 @@ test('the key never reaches the DOM, storage, a request or the console', async (
   await mockNetwork(page, address);
   const watch = await watchForKey(page, key);
 
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   const input = page.locator('.keyfield input');
   await input.focus();
@@ -67,7 +67,7 @@ test('pasting a key wipes the clipboard', async ({ page, context, browserName })
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const key = generatePrivateKey();
   await mockNetwork(page, privateKeyToAccount(key).address);
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.evaluate((k) => navigator.clipboard.writeText(k), key);
   await page.locator('.keyfield input').focus();
@@ -85,7 +85,7 @@ test('a loaded key is forgotten after 15 minutes without activity', async ({ pag
   await page.clock.install();
   const key = generatePrivateKey();
   await mockNetwork(page, privateKeyToAccount(key).address);
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await expect(page.locator('.safety')).toContainText('Browser extensions can read what you type');
   await page.locator('.keyfield input').focus();
@@ -105,7 +105,7 @@ test('a loaded key is forgotten after 15 minutes without activity', async ({ pag
 test('while ZeroDust is paused: says so before a key is entered and takes no key; nothing when it works', async ({ page }) => {
   const key = generatePrivateKey();
   await mockNetwork(page, privateKeyToAccount(key).address, { paused: true });
-  await page.goto('/');
+  await page.goto('/sweep');
   await expect(page.getByRole('status').filter({ hasText: 'ZeroDust is paused' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connect MetaMask' })).toBeDisabled();
   await useKey(page);
@@ -121,7 +121,7 @@ test('while ZeroDust is paused: says so before a key is entered and takes no key
 
 test('rejects something that is not a key, without echoing it', async ({ page }) => {
   await mockNetwork(page, privateKeyToAccount(generatePrivateKey()).address);
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type('abc123');
@@ -136,7 +136,7 @@ test('sweeps sponsored chains to one destination, burning a chain with no route'
   const { swept } = await mockNetwork(page, address);
   const watch = await watchForKey(page, key);
 
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
@@ -181,7 +181,7 @@ test('sweeps a direct chain: plan checked and replayed in the page, signed here,
   const { swept, sent, reports } = await mockNetwork(page, address, { direct: true });
   const watch = await watchForKey(page, key);
 
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
@@ -222,7 +222,7 @@ test('sweeps a direct chain: plan checked and replayed in the page, signed here,
 test('a chain that cannot reach the destination can go to another chain instead', async ({ page }) => {
   const key = generatePrivateKey();
   const { swept, sent } = await mockNetwork(page, privateKeyToAccount(key).address, { direct: true, onlyTo: 10 });
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
@@ -259,7 +259,7 @@ test('any chain can go to another address on that chain, set only from its menu'
   const address = privateKeyToAccount(key).address;
   const { swept, quoted } = await mockNetwork(page, address);
   const exchange = '0x820653ccE8a755edbb52eC1bc5829D2a60CD5cc5';
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
@@ -317,7 +317,7 @@ test('names how long the bridge usually takes, and warns when it has been slow l
       pairs: { 'relay:10': { typicalSeconds: 9, samples: 4 } },
     },
   });
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
@@ -336,7 +336,7 @@ test('names how long the bridge usually takes, and warns when it has been slow l
 test('a passing "unknown" route does not send a chain elsewhere', async ({ page }) => {
   const key = generatePrivateKey();
   await mockNetwork(page, privateKeyToAccount(key).address, { direct: true, hiccups: 1 });
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
@@ -355,7 +355,7 @@ test('a passing "unknown" route does not send a chain elsewhere', async ({ page 
 test('token delivery: Mitosis is swept to exactly 0 and arrives as MITO (a token) on BNB Chain, said plainly', async ({ page }) => {
   const key = generatePrivateKey();
   const { swept } = await mockNetwork(page, privateKeyToAccount(key).address, { mitosis: true });
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
@@ -386,7 +386,7 @@ test('a balance below every bridge minimum says how much to add, at load, at the
   const key = generatePrivateKey();
   // Direct chain: known when the wallet loads
   await mockNetwork(page, privateKeyToAccount(key).address, { monad: true, tooSmall: 'direct' });
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
@@ -403,7 +403,7 @@ for (const when of ['check', 'sweep'] as const) {
   test(`a sponsored chain too small at the ${when} names the minimum, not a failure`, async ({ page }) => {
     const key = generatePrivateKey();
     const { reports } = await mockNetwork(page, privateKeyToAccount(key).address, { mitosis: true, tooSmall: when });
-    await page.goto('/');
+    await page.goto('/sweep');
     await useKey(page);
     await page.locator('.keyfield input').focus();
     await page.keyboard.type(key, { delay: 1 });
@@ -436,7 +436,7 @@ for (const when of ['check', 'sweep'] as const) {
 test('token delivery, own wallet only: Endurance goes as ACE to this wallet on BNB Chain, and is blocked for another recipient', async ({ page }) => {
   const key = generatePrivateKey();
   const { swept } = await mockNetwork(page, privateKeyToAccount(key).address, { endurance: true });
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
@@ -467,7 +467,7 @@ test('token delivery, own wallet only: Endurance goes as ACE to this wallet on B
 test('refuses a direct plan that pays someone else, and sends nothing', async ({ page }) => {
   const key = generatePrivateKey();
   const { sent } = await mockNetwork(page, privateKeyToAccount(key).address, { direct: true, tamper: true });
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
@@ -490,7 +490,7 @@ test('sweeps Monad through Across: gas-limit rules, deposit decoded and its Sett
   const key = generatePrivateKey();
   const { swept, sent } = await mockNetwork(page, privateKeyToAccount(key).address, { monad: true });
   const watch = await watchForKey(page, key);
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
@@ -518,7 +518,7 @@ test('sweeps Monad through Across: gas-limit rules, deposit decoded and its Sett
 test('refuses an Across plan whose deposit pays someone else, and sends nothing', async ({ page }) => {
   const key = generatePrivateKey();
   const { sent } = await mockNetwork(page, privateKeyToAccount(key).address, { monad: true, tamper: true });
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });
@@ -537,7 +537,7 @@ test('refuses an Across plan whose deposit pays someone else, and sends nothing'
 
 test('lands on MetaMask: Connect MetaMask first, the key one click away, and a clear error without MetaMask', async ({ page }) => {
   await mockNetwork(page, privateKeyToAccount(generatePrivateKey()).address);
-  await page.goto('/');
+  await page.goto('/sweep');
   await expect(page.getByRole('heading', { name: 'Connect wallet' })).toBeVisible();
   await expect(page.locator('.keyfield input')).toHaveCount(0);
   await page.getByRole('button', { name: 'Connect MetaMask' }).click();
@@ -551,7 +551,7 @@ test('lands on MetaMask: Connect MetaMask first, the key one click away, and a c
 test('token exit: Telos leaves through its own bridge as TLOS (a token) on Base, said plainly; the leftover cents are donated', async ({ page }) => {
   const key = generatePrivateKey();
   const { swept, sent, reports } = await mockNetwork(page, privateKeyToAccount(key).address, { telos: true });
-  await page.goto('/');
+  await page.goto('/sweep');
   await useKey(page);
   await page.locator('.keyfield input').focus();
   await page.keyboard.type(key, { delay: 1 });

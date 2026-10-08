@@ -1,8 +1,17 @@
 import { useEffect, useState } from 'react';
+import { ZeroDust } from '@zerodust/sdk';
 import { Nav } from './components/Nav';
 import { IDLE_FLAG, KeyEntry, type ClipboardState } from './components/KeyEntry';
 import { SweepCard } from './components/SweepCard';
+import { SiteHeader } from './components/SiteHeader';
 import { LeftPanel, RightPanel } from './components/SidePanels';
+import { AddressPage } from './address/AddressPage';
+import { Home } from './home/Home';
+import { directChains } from './direct/plan';
+import { OFFLINE } from './lib/env';
+import { addressHref, navigate, useView } from './lib/route';
+import { API_URL } from './sweep/constants';
+import { connectMetaMask, findMetaMask, type MetaMaskSession } from './sweep/metamask';
 import { useSweep, type Wallet } from './sweep/useSweep';
 
 /** Dropping the key: a reload clears this tab's memory */
@@ -35,10 +44,13 @@ function Sweep({ wallet, clipboard }: { wallet: Wallet; clipboard: ClipboardStat
   return <SweepCard model={model} clipboard={clipboard} onForget={forget} />;
 }
 
-export function App() {
+/**
+ * The sweep flow as it is today (key or MetaMask, then the card). The redesign keeps it at
+ * /sweep, and in the offline file, until the address page can sweep (phase 3).
+ */
+function LegacySweep() {
   // A key's account object lives in memory only and never reaches the DOM; a MetaMask session holds no key
   const [loaded, setLoaded] = useState<{ wallet: Wallet; clipboard: ClipboardState } | null>(null);
-
   return (
     <>
       <Nav />
@@ -54,4 +66,61 @@ export function App() {
       </main>
     </>
   );
+}
+
+const client = new ZeroDust({ environment: 'mainnet', baseUrl: API_URL });
+
+/** How many chains ZeroDust sweeps (sponsored + direct), for the home page */
+function useChainCount(): number {
+  const [count, setCount] = useState(73);
+  useEffect(() => {
+    void Promise.all([client.getChains().catch(() => null), directChains().catch(() => null)]).then(([s, d]) => {
+      if (s && d) setCount(s.length + d.chains.length);
+    });
+  }, []);
+  return count;
+}
+
+function Site() {
+  const view = useView();
+  const chainCount = useChainCount();
+  // Kept for the sweep (phase 3); connecting today opens the wallet's own address page
+  const [, setSession] = useState<MetaMaskSession | null>(null);
+  const [mmBusy, setMmBusy] = useState(false);
+  const [mmError, setMmError] = useState<string | null>(null);
+
+  const onMetaMask = async () => {
+    setMmError(null);
+    const provider = await findMetaMask();
+    if (!provider) {
+      setMmError('MetaMask was not found in this browser. Paste the address instead, or install MetaMask.');
+      if (view.kind !== 'home') navigate('/');
+      return;
+    }
+    setMmBusy(true);
+    try {
+      const s = await connectMetaMask(provider);
+      setSession(s);
+      navigate(addressHref(s.address));
+    } catch (error) {
+      setMmError(error instanceof Error ? error.message : 'MetaMask did not connect.');
+    } finally {
+      setMmBusy(false);
+    }
+  };
+
+  if (view.kind === 'sweep') return <LegacySweep />;
+  return (
+    <>
+      <SiteHeader search={view.kind !== 'home'} onMetaMask={() => void onMetaMask()} metaMaskBusy={mmBusy} />
+      {view.kind === 'home'
+        ? <Home chainCount={chainCount} onMetaMask={() => void onMetaMask()} metaMaskError={mmError} />
+        : <AddressPage key={view.query} query={view.query} />}
+    </>
+  );
+}
+
+export function App() {
+  // The offline file keeps today's flow until the address page can sweep
+  return OFFLINE ? <LegacySweep /> : <Site />;
 }
