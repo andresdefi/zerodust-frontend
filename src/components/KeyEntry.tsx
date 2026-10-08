@@ -196,7 +196,7 @@ export function KeyEntry({ onAccount, onMetaMask, keyOnly = false, title = 'Load
         <div className="safety">
           <div><ShieldIcon /><span>The key stays in this tab. It is never sent, saved or shown. Only signatures leave.</span></div>
           <div><ShieldIcon /><span>Pasting wipes your clipboard. Typing keeps the key off it entirely.</span></div>
-          <div><ShieldIcon /><span>Browser extensions can read what you type or paste on any page. Use a private window with extensions off, or the offline page.</span></div>
+          <div><ShieldIcon /><span>Browser extensions can read what you type or paste on any page. Use a private window with extensions off{OFFLINE ? '' : ', or the offline page'}.</span></div>
           {forgotIdle && <div><ShieldIcon /><span>The last key was forgotten after 15 minutes without activity.</span></div>}
         </div>
         {OFFLINE ? (

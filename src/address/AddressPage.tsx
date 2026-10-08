@@ -9,6 +9,7 @@ import { resolveName, useAddressData, useEstimates, useResolved, type AddressRow
 import { SweepSession, SweepWithDialog, type SweepPlan } from './SweepSession';
 import type { RowState, Wallet } from '../sweep/useSweep';
 import type { MetaMaskSession } from '../sweep/metamask';
+import { OFFLINE } from '../lib/env';
 
 // One address: every chain holding gas, in groups by how it is swept and what arrives.
 // Reading needs nothing; sweeping a group asks how to sign (MetaMask or the key of this
@@ -151,7 +152,7 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
             {name && <span className="tag">{shortAddress(address)}</span>}
             {keyLoaded
               ? <span className="tag acc">Key loaded · <button type="button" className="linkbtn" onClick={() => forgetKey(false)} disabled={sweepingNow}>Forget it</button></span>
-              : mmHere ? <span className="tag ok">MetaMask connected</span> : <span className="tag">Not connected</span>}
+              : OFFLINE ? <span className="tag">Offline page</span> : mmHere ? <span className="tag ok">MetaMask connected</span> : <span className="tag">Not connected</span>}
           </p>
           <p className="ap-links">
             <a href={`https://etherscan.io/address/${address}`} target="_blank" rel="noreferrer">etherscan ↗</a>
@@ -173,10 +174,7 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
       />
 
       <div className="ap-tabbar">
-        <div className="ap-tabs" role="tablist">
-          <span role="tab" aria-selected="true" className="on">Balances</span>
-          <span role="tab" aria-selected="false" aria-disabled="true">Delegations</span>
-        </div>
+        <h2 className="ap-section-title">Balances</h2>
         {anyResult && !sweepingNow && (
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setProgress({ states: {}, bridgeOf: {} }); setRun(null); setSelection(null); setVersion((v) => v + 1); }}>Refresh balances</button>
         )}
