@@ -10,6 +10,7 @@ import { resolveName, useAddressData, useEstimates, useResolved, type AddressRow
 import { SweepSession, SweepWithDialog, type SweepPlan } from './SweepSession';
 import { FAILURE_LABEL, failureKind, minimumOf, tooSmallText, type RowState, type Wallet } from '../sweep/useSweep';
 import { reportText } from '../sweep/report';
+import { durationText, expectedTime, fetchTimings, NO_TIMINGS, type BridgeTimings, type ExpectedTime } from '../sweep/timing';
 import type { MetaMaskSession } from '../sweep/metamask';
 import { OFFLINE } from '../lib/env';
 
@@ -78,6 +79,9 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
   // Both gas groups share the destination: quote them together
   const gasChains = groups.filter((g) => g.key === 'metamask' || g.key === 'key').flatMap((g) => g.chains);
   const estimates = useEstimates(address, gasChains, destination, recipient);
+  // How long each bridge usually takes (GET /bridges/timing), to set expectations on each row
+  const [timings, setTimings] = useState<BridgeTimings>(NO_TIMINGS);
+  useEffect(() => { void fetchTimings().then(setTimings, () => undefined); }, []);
   // By default a group's chains are all selected, except those no bridge answered for or that failed to quote
   const [progress, setProgress] = useState<{ states: Record<number, RowState>; bridgeOf: Record<number, string> }>({ states: {}, bridgeOf: {} });
   // A chain swept to 0 is not offered again until the balances are read again
@@ -233,6 +237,7 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
                   destPrice={destToken ? data.priceOf(destToken.token) : undefined}
                   unknownRoute={data.routesOf(c.chainId).unknown === true}
                   minimum={data.routesOf(c.chainId).minimum}
+                  usual={estimates[c.chainId]?.route ? expectedTime(timings, estimates[c.chainId]!.route, c.chainId) : null}
                   senderOnly={senderOnly(c)}
                   state={progress.states[c.chainId]}
                   bridge={progress.bridgeOf[c.chainId]}
@@ -254,7 +259,7 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
               {gasGroup && destination !== null && quotedRows.length > 0 && destToken
                 ? <span> · you receive at least {formatAmount(selectedReceive, destToken.decimals)} {destToken.token} on {destName}{quotedRows.length < selectedRows.length ? ` (${quotedRows.length} of ${selectedRows.length} quoted)` : ''}</span>
                 : gasGroup && destination === null ? <span> · choose where it goes</span> : null}
-              <small>One group at a time: each group has its own way of signing and its own destination</small>
+              <small>Groups are swept one at a time.</small>
             </p>
             <button
               type="button"
@@ -391,7 +396,7 @@ function OwnChainAddress({ value, onChange }: { value: Address | null; onChange:
 
 const SHOWN_PHASES = new Set(['sweeping', 'done', 'failed']);
 
-function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destination, destName, destToken, estimate, destPrice, unknownRoute, minimum, senderOnly, state, bridge, arrivalExplorer, arrivalName, running }: {
+function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destination, destName, destToken, estimate, destPrice, unknownRoute, minimum, usual, senderOnly, state, bridge, arrivalExplorer, arrivalName, running }: {
   row: AddressRow;
   group: GroupKey;
   selected: boolean;
@@ -407,6 +412,8 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
   unknownRoute: boolean;
   /** Below every bridge's minimum (direct chains: known before any quote) */
   minimum: bigint | undefined;
+  /** How long its bridge usually takes from this chain, when measured */
+  usual: ExpectedTime | null;
   /** Its bridge pays only the sending wallet, and the gas is set to go elsewhere */
   senderOnly: boolean;
   state: RowState | undefined;
@@ -434,7 +441,10 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
       // Flag a bridge that keeps most of the value (owner, 2026-10-08)
       const arrivesUsd = estimate.receive !== undefined && destToken && destPrice ? (Number(estimate.receive) / 10 ** destToken.decimals) * destPrice : null;
       const takes = arrivesUsd !== null && row.usd ? 1 - arrivesUsd / row.usd : 0;
-      route = takes > BRIDGE_TAKES_FLAG ? { text: `Bridge takes ${Math.round(takes * 100)}%`, tone: 'warn' } : { text: estimate.route, tone: 'ok' };
+      route = takes > BRIDGE_TAKES_FLAG ? { text: `Bridge takes ${Math.round(takes * 100)}%`, tone: 'warn' }
+        : usual?.slowLately ? { text: `${estimate.route} · slower lately`, tone: 'warn', title: `Usually ${durationText(usual.seconds)}, but slower than usual lately` }
+        : usual ? { text: `${estimate.route} · usually ${durationText(usual.seconds)}`, tone: 'ok' }
+        : { text: estimate.route, tone: 'ok' };
     }
     else route = { text: row.chainId === destination ? 'Same chain' : 'Checking…', tone: 'plain' };
     if (estimate?.receive !== undefined && destToken && minimum === undefined) receive = `${formatAmount(estimate.receive, destToken.decimals)} ${destToken.token}`;

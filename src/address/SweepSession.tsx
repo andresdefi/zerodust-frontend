@@ -108,7 +108,7 @@ export function SweepWithDialog({ open, plan, address, session, onWallet, onClos
             )}
             <button type="button" className="zd-opt" onClick={() => setMode('key')} disabled={paused}>
               <span className="zd-opt-ic" aria-hidden="true">🔑</span>
-              <span className="zd-opt-t"><b>Private key</b><span>Covers {n === 1 ? 'it' : `all ${n}`} · stays in this page, never sent</span></span>
+              <span className="zd-opt-t"><b>Private key</b><span>Covers {n === 1 ? 'it' : `all ${n}`} · stays on this page, never sent</span></span>
             </button>
           </div>
           {covered.length > 0 && left.length > 0 && (

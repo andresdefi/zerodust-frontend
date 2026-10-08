@@ -311,3 +311,18 @@ test("a row's own Sweep button sweeps just that chain", async ({ page }) => {
   // The other chains keep their own button
   await expect(row(page, 'Optimism').getByRole('button', { name: 'Sweep Optimism' })).toBeEnabled();
 });
+
+test('each row says how long its bridge usually takes, and warns when it has been slow lately', async ({ page }) => {
+  const timings = (slowLately: boolean) => ({
+    routes: { relay: { typicalSeconds: 18, p90Seconds: 40, samples: 12, slowLately } },
+    pairs: { 'relay:10': { typicalSeconds: 9, samples: 4 } },
+  });
+  // Optimism has its own measured time
+  await openAddress(page, { timings: timings(false) });
+  await expect(row(page, 'Optimism').getByText('Relay · usually 9s')).toBeVisible({ timeout: 20_000 });
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+  await openAddress(page, { timings: timings(true) });
+  const slow = row(page, 'Optimism').getByText('Relay · slower lately');
+  await expect(slow).toBeVisible({ timeout: 20_000 });
+  await expect(slow).toHaveAttribute('title', 'Usually 9s, but slower than usual lately');
+});

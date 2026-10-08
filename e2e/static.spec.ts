@@ -23,6 +23,25 @@ test('static pages render with their only script, under the site CSP', async ({ 
   expect(csp).toEqual([]);
 });
 
+test('home: the numbers come from the API, and the footer links the legal pages', async ({ page }) => {
+  await mockNetwork(page, privateKeyToAccount(generatePrivateKey()).address);
+  await page.goto('/');
+  // The mock API: Base and Optimism sweepable with MetaMask, three direct chains
+  await expect(page.locator('.hm-tags').getByText('MetaMask on 2')).toBeVisible();
+  await expect(page.getByText('No key needed on 2 chains.')).toBeVisible();
+  await expect(page.locator('.hm-way', { hasText: 'Worked out to the wei' }).locator('.hm-count')).toHaveText('3chains');
+  // The example: Base, where everything lands, holds the total after the sweep; the others read 0
+  const after = page.locator('.hm-panel', { hasText: 'After the sweep' });
+  await expect(after.locator('.hm-prow', { hasText: 'Base' })).toContainText('0.0115 ETH');
+  await expect(after.locator('.hm-prow', { hasText: 'Arbitrum' }).locator('.hm-zero')).toHaveText('0');
+  const foot = page.locator('footer.foot');
+  await expect(foot.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', '/terms');
+  await expect(foot.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', '/privacy');
+  // On an address page too
+  await page.goto('/address/0x820653ccE8a755edbb52eC1bc5829D2a60CD5cc5');
+  await expect(page.locator('footer.foot').getByRole('link', { name: 'Privacy' })).toBeVisible();
+});
+
 test('the offline file matches its published hash and runs the address page from disk, key only, under its own CSP', async ({ page }) => {
   const record = JSON.parse(readFileSync('dist/.well-known/zerodust-build.json', 'utf8')) as { offlineSha256: string };
   const file = readFileSync('dist/download/zerodust-offline.html');
@@ -39,6 +58,8 @@ test('the offline file matches its published hash and runs the address page from
   // MetaMask does not run on a file: no way to connect it
   await expect(page.getByRole('button', { name: /Connect/ })).toHaveCount(0);
   await expect(page.getByText('connect MetaMask')).toHaveCount(0);
+  // Its footer links to the live site
+  await expect(page.locator('footer.foot').getByRole('link', { name: 'Terms' })).toHaveAttribute('href', 'https://www.zerodust.xyz/terms');
 
   // The same flow as the site: the address, then its page (hash routing), then the key
   await page.getByRole('searchbox', { name: 'Address or ENS name' }).fill(user);
