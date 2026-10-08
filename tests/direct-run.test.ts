@@ -35,6 +35,8 @@ function acrossPlan(quoteTimestamp: number): DirectPlan {
 
 interface Net {
   plan?: DirectPlan;
+  /** The chain's own eth_gasPrice */
+  networkPrice?: bigint;
   kind?: string;
   settler?: string;
   log: string[];
@@ -57,6 +59,7 @@ function network(net: Net) {
       case 'eth_getBalance': return reply(hex(isUser ? BAL : 0n));
       case 'eth_getTransactionCount': return reply(hex(isUser ? 7 : 0));
       case 'eth_getCode': return reply('0x');
+      case 'eth_gasPrice': return reply(hex(net.networkPrice ?? 102_000_000_000n));
       case 'eth_getStorageAt': return reply(hex(0));
       case 'eth_getBlockByNumber': return reply({ number: hex(1000), timestamp: hex(nowS()), gasLimit: hex(200_000_000) });
       case 'eth_blockNumber': net.head += 1; return reply(hex(net.head));
@@ -89,6 +92,12 @@ describe('planChecked: Across on Monad', () => {
   it('refuses a Settler 0x\'s registry does not list', async () => {
     vi.stubGlobal('fetch', network({ plan: acrossPlan(nowS() - 3570), settler: '0x5555555555555555555555555555555555555555', log: [], head: 100 }));
     await expect(run.planChecked(target, 'route')).rejects.toThrow(/registered Settler/);
+  });
+
+  it('refuses a gas price more than twice the chain\'s own (the balance would go on gas)', async () => {
+    const net: Net = { plan: acrossPlan(nowS()), log: [], head: 0, networkPrice: PRICE / 2n - 1n };
+    vi.stubGlobal('fetch', network(net));
+    await expect(run.planChecked(target, 'route')).rejects.toThrow(/gas price is far above/);
   });
 
   it('refuses when the API and the page disagree on the chain\'s gas rule', async () => {

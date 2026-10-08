@@ -454,7 +454,8 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
         eth_chainId: `0x${chainId.toString(16)}`,
         eth_getBalance: `0x${(direct ? balance : isUser || !r.params ? balance : 0n).toString(16)}`,
         eth_getTransactionCount: direct ? `0x${(isUser ? directNonce : 0).toString(16)}` : `0x${AUTH_NONCE.toString(16)}`,
-        eth_gasPrice: `0x${GAS_PRICE.toString(16)}`,
+        // Each chain's own price: the page refuses a plan priced over twice it
+        eth_gasPrice: `0x${(chainId === 43114 ? AVAX_PRICE : chainId === 143 ? MONAD_PRICE : GAS_PRICE).toString(16)}`,
         eth_getCode: '0x',
         eth_getStorageAt: `0x${'0'.repeat(64)}`,
         eth_getBlockByNumber: { number: '0x3e8', timestamp: `0x${Math.floor(Date.now() / 1000).toString(16)}`, gasLimit: '0x1c9c380' },
