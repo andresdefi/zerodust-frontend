@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { isAddressEqual, type Address } from 'viem';
-import { KeyEntry, IDLE_FLAG } from '../components/KeyEntry';
+import { KeyEntry } from '../components/KeyEntry';
 import { ChainIcon } from '../components/ChainIcon';
 import { TOKEN_EXITS } from '../direct/plan';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
@@ -15,8 +15,6 @@ import type { AddressRow } from './useAddress';
 // the confirm dialog shows what happens, and the rows show progress until each chain
 // reads exactly 0 and its bridge delivers.
 
-/** A loaded key left alone this long is forgotten (never during a sweep) */
-const IDLE_FORGET_MS = 15 * 60 * 1000;
 /** Per route in the confirm dialog: rows shown before "+N more" */
 const ROUTE_ROWS = 8;
 /** A bridge keeping more than this share of a chain's value is called out before signing */
@@ -188,21 +186,6 @@ export function SweepSession({ wallet, plan, onProgress, onEnd }: {
   }, [step]);
 
   useEffect(() => { onProgress(model.states, model.bridgeOf); }, [model.states, model.bridgeOf, onProgress]);
-
-  // A key is forgotten after 15 minutes without activity, never mid-sweep
-  const sweeping = step === 'sweeping';
-  useEffect(() => {
-    if (wallet.kind !== 'key' || sweeping) return;
-    let timer = setTimeout(expire, IDLE_FORGET_MS);
-    function expire() {
-      try { sessionStorage.setItem(IDLE_FLAG, '1'); } catch { /* the reload still forgets the key */ }
-      window.location.reload();
-    }
-    const reset = () => { clearTimeout(timer); timer = setTimeout(expire, IDLE_FORGET_MS); };
-    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
-    for (const e of events) window.addEventListener(e, reset, { passive: true });
-    return () => { clearTimeout(timer); for (const e of events) window.removeEventListener(e, reset); };
-  }, [wallet.kind, sweeping]);
 
   const confirm = async () => {
     setStep('sweeping');
