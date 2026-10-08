@@ -98,10 +98,7 @@
 .ap-val { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
 .ap-val small { color: var(--muted); font-weight: 500; }
 .ap-push { margin-left: auto; }
-.ap-tabs { display: inline-flex; background: var(--sunken); border-radius: 12px; padding: 4px; margin: 22px 0 14px; border: 1px solid var(--line); }
-.ap-tabs span { padding: 8px 16px; border-radius: 9px; font-size: 15px; color: var(--muted); font-weight: 500; }
-.ap-tabs span.on { background: var(--ink); color: var(--bg); }
-.ap-tabs span[aria-disabled='true'] { opacity: 0.55; }
+.ap-section-title { font-size: 19px; margin: 26px 0 14px; }
 .ap-grp { margin-bottom: 14px; overflow: hidden; transition: opacity 0.15s; }
 .ap-grp.active { box-shadow: 0 0 0 2px var(--ink), var(--shadow); }
 .ap-grp.dim { opacity: 0.72; }

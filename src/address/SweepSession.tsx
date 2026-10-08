@@ -9,6 +9,7 @@ import { isPaused, useServiceStatus } from '../sweep/status';
 import { useSweep, type Row, type RowState, type SweepModel, type Wallet } from '../sweep/useSweep';
 import { tokenRouteOf, type GroupKey } from './groups';
 import type { AddressRow } from './useAddress';
+import { OFFLINE } from '../lib/env';
 
 // Sweeping one group from the address page (redesign phase 3): pick how to sign, then
 // the proven sweep machinery (sweep/useSweep.ts) checks every chain with real quotes,
@@ -53,7 +54,9 @@ export function SweepWithDialog({ open, plan, address, session, onWallet, onClos
   onClose: () => void;
 }) {
   const ref = useDialog(open);
-  const [mode, setMode] = useState<'choose' | 'key'>('choose');
+  // The offline file is key-only: straight to the key
+  const start = OFFLINE ? 'key' : 'choose';
+  const [mode, setMode] = useState<'choose' | 'key'>(start);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const status = useServiceStatus();
@@ -63,7 +66,7 @@ export function SweepWithDialog({ open, plan, address, session, onWallet, onClos
   const left = chains.filter((c) => !c.metamask || c.direct);
   const n = chains.length;
 
-  const close = () => { setMode('choose'); setError(null); onClose(); };
+  const close = () => { setMode(start); setError(null); onClose(); };
   const connectWithMetaMask = async () => {
     if (session) {
       onWallet({ kind: 'metamask', session });
@@ -88,7 +91,7 @@ export function SweepWithDialog({ open, plan, address, session, onWallet, onClos
   return (
     <dialog ref={ref} className="modal zd-with" onClose={close} aria-labelledby="with-title">
       <div className="modal-head">
-        <h3 id="with-title">Sweep {n} {n === 1 ? 'chain' : 'chains'} with</h3>
+        <h3 id="with-title">Sweep {n} {n === 1 ? 'chain' : 'chains'} with{OFFLINE ? ' the key' : ''}</h3>
         <button type="button" className="iconbtn" onClick={close} aria-label="Close">✕</button>
       </div>
       {paused && <p className="status-notice" role="status">{status?.message ?? 'ZeroDust is paused right now. Sweeps resume automatically; please come back shortly.'}</p>}
@@ -124,13 +127,13 @@ export function SweepWithDialog({ open, plan, address, session, onWallet, onClos
                 setError(`That key belongs to ${shortAddress(account.address)}, not ${shortAddress(address)}. Nothing was loaded.`);
                 return;
               }
-              setMode('choose');
+              setMode(start);
               setError(null);
               onWallet({ kind: 'key', account });
             }}
           />
           {error && <p className="field-error" role="alert">{error}</p>}
-          <button type="button" className="linkbtn zd-back" onClick={() => { setMode('choose'); setError(null); }}>Back</button>
+          {!OFFLINE && <button type="button" className="linkbtn zd-back" onClick={() => { setMode('choose'); setError(null); }}>Back</button>}
         </>
       )}
     </dialog>

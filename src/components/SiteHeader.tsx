@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import type { Address } from 'viem';
 import { Mark, MoonIcon, SunIcon } from './icons';
 import { applyTheme, storedTheme, systemTheme, type Theme } from '../lib/theme';
-import { SITE } from '../lib/env';
+import { SITE, OFFLINE } from '../lib/env';
 import { shortAddress } from '../lib/format';
 import { addressHref, homeHref, navigate } from '../lib/route';
 
@@ -51,7 +51,8 @@ export function SiteHeader({ search = true, onMetaMask, metaMaskBusy = false, ac
         <button type="button" className="iconbtn" onClick={() => { applyTheme(next); setTheme(next); }} aria-label={`Switch to ${next} mode`}>
           {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
         </button>
-        {account ? (
+        {/* The offline file is key-only: MetaMask does not run on a page opened from disk */}
+        {OFFLINE ? null : account ? (
           <a className="btn btn-ghost hdr-mm hdr-acct" href={addressHref(account)} onClick={(e) => { e.preventDefault(); onMetaMask(); }} title="MetaMask connected: open this wallet's page">
             <span className="hdr-dot" aria-hidden="true" />
             <span className="mono">{shortAddress(account)}</span>

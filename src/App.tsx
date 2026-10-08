@@ -9,7 +9,6 @@ import { LeftPanel, RightPanel } from './components/SidePanels';
 import { AddressPage } from './address/AddressPage';
 import { Home } from './home/Home';
 import { directChains } from './direct/plan';
-import { OFFLINE } from './lib/env';
 import { addressHref, navigate, useView } from './lib/route';
 import { API_URL } from './sweep/constants';
 import { connectMetaMask, findMetaMask, type MetaMaskSession } from './sweep/metamask';
@@ -145,6 +144,5 @@ function Site() {
 }
 
 export function App() {
-  // The offline file keeps today's flow until the address page can sweep
-  return OFFLINE ? <LegacySweep /> : <Site />;
+  return <Site />;
 }

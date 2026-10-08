@@ -1,7 +1,7 @@
 import { ChainIcon } from '../components/ChainIcon';
 import { SearchIcon, useAddressSearch } from '../components/SiteHeader';
 import { ShieldIcon } from '../components/icons';
-import { SITE } from '../lib/env';
+import { OFFLINE, SITE } from '../lib/env';
 
 // The landing page (approved design, 2026-10-08): a ledger reading exactly zero, the
 // search, before and after one sweep, three ways to reach zero, why a key is safe here.
@@ -36,7 +36,9 @@ export function Home({ chainCount, onMetaMask, metaMaskError }: { chainCount: nu
           </label>
           <button type="submit" className="btn btn-primary">Find my dust</button>
         </form>
-        <p className="hm-or">or <button type="button" className="linkbtn" onClick={onMetaMask}>connect MetaMask</button> to load your own wallet</p>
+        {OFFLINE
+          ? <p className="hm-or">You are running the offline page from your own disk. Check for a newer version at <a href={`${SITE}/offline`}>zerodust.xyz/offline</a>.</p>
+          : <p className="hm-or">or <button type="button" className="linkbtn" onClick={onMetaMask}>connect MetaMask</button> to load your own wallet</p>}
         {metaMaskError && <p className="hm-error" role="alert">{metaMaskError}</p>}
         <div className="hm-logos">
           {LOGOS.map(([id, name]) => <ChainIcon key={id} chainId={id} name={name} size={28} />)}
@@ -85,8 +87,10 @@ export function Home({ chainCount, onMetaMask, metaMaskError }: { chainCount: nu
       <section className="hm-block">
         <h2>Built to be trusted with a key</h2>
         <div className="hm-safe">
-          <p><ShieldIcon /><span><b>No key needed on 16 chains.</b> MetaMask grants a one-time permission per chain; the key never leaves it.</span></p>
-          <p><ShieldIcon /><span><b>The key stays on this page.</b> Never sent, never stored. Or download the <a href={`${SITE}/offline`}>offline page</a> and run it yourself.</span></p>
+          {!OFFLINE && <p><ShieldIcon /><span><b>No key needed on 16 chains.</b> MetaMask grants a one-time permission per chain; the key never leaves it.</span></p>}
+          {OFFLINE
+            ? <p><ShieldIcon /><span><b>The key stays in this file.</b> Never sent, never stored. Only signatures leave it.</span></p>
+            : <p><ShieldIcon /><span><b>The key stays on this page.</b> Never sent, never stored. Or download the <a href={`${SITE}/offline`}>offline page</a> and run it yourself.</span></p>}
           <p><ShieldIcon /><span><b>Your signature names the destination.</b> Funds can only go to the address and chain you approved.</span></p>
           <p><ShieldIcon /><span><b>Open source, every line.</b> Contracts, SDK and this site are public, and the page you load is hash-checked.</span></p>
         </div>

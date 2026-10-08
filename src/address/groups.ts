@@ -1,5 +1,6 @@
 import { ENDURANCE_ROUTE, HYPERLANE_ROUTES } from '@zerodust/sdk';
 import { TOKEN_EXITS } from '../direct/plan';
+import { OFFLINE } from '../lib/env';
 
 // The address page sorts every chain holding gas into one group by how it is swept and
 // what arrives (owner, 2026-10-08). A sweep acts on one group only: groups differ in
@@ -62,7 +63,8 @@ export function tokenRouteOf(chainId: number): TokenRoute | null {
  * picked (then only what the chain can do at all counts).
  */
 export function groupOf(chain: AddressChain, routes: ChainRoutes, destination: number | null): GroupKey {
-  const signer: GroupKey = chain.metamask && !chain.direct ? 'metamask' : 'key';
+  // The offline file is key-only, so every gas chain is in the key group there
+  const signer: GroupKey = chain.metamask && !chain.direct && !OFFLINE ? 'metamask' : 'key';
   // Staying on the same chain is always a plain transfer
   if (destination !== null && chain.chainId === destination) return signer;
   if (routes.gas === true) return signer;
@@ -95,7 +97,9 @@ export function groupText(key: GroupKey, destinationName: string | null): { titl
     case 'metamask':
       return { title: 'MetaMask or key', tag: destinationName ? `Gas ${to}` : undefined, detail: `Swept with MetaMask (no key) or the key. Arrives as gas ${to}.` };
     case 'key':
-      return { title: 'Key only', tag: destinationName ? `Gas ${to}` : undefined, detail: `MetaMask doesn't cover these yet. Arrives as gas ${to}.` };
+      return OFFLINE
+        ? { title: 'With the key', tag: destinationName ? `Gas ${to}` : undefined, detail: `Swept with this wallet's key, which stays in this file. Arrives as gas ${to}.` }
+        : { title: 'Key only', tag: destinationName ? `Gas ${to}` : undefined, detail: `MetaMask doesn't cover these yet. Arrives as gas ${to}.` };
     case 'token':
       return { title: 'Arrives as a token', tag: 'Not gas', detail: 'No bridge carries these as gas. Each one\'s own bridge delivers its token to your wallet on another chain.' };
     case 'elsewhere':

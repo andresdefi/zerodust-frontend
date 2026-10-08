@@ -17,6 +17,9 @@ test('groups every chain by how it is swept, quotes the gas groups, and selects 
   await expect(dest).toContainText('Picked because most of this wallet\'s gas is already on Base');
   // Sent to this same wallet, Base's own balance already is where everything goes: not a sweep
   await expect(dest).toContainText('Already on Base');
+  // One list, no tabs: the Delegations placeholder is gone
+  await expect(page.getByRole('heading', { name: 'Balances', level: 2 })).toBeVisible();
+  await expect(page.getByRole('tab')).toHaveCount(0);
   await expect(group('MetaMask or key').locator('.ap-row')).toHaveCount(1);
   await expect(group('MetaMask or key')).toContainText('Optimism');
   await expect(group('Key only')).toContainText('Avalanche');
