@@ -4,7 +4,7 @@ import { ZeroDust, ZeroDustAgent, deliveredToken, deliversOnlyToSender, type Des
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { inPool } from '../lib/pool';
 import { readState } from '../lib/rpc';
-import { deliveryStatus, directBalances, directChains, directRoute, tokenExitFor, BURN_ADDRESS, ZERODUST_ADDRESS, type PlanMode } from '../direct/plan';
+import { deliveryStatus, directBalances, directChains, directRoute, tokenExitFor, BURN_ADDRESS, TOKEN_EXITS, ZERODUST_ADDRESS, type PlanMode } from '../direct/plan';
 import { broadcast, planChecked, settledBalance, signPlan } from '../direct/run';
 import { API_URL } from './constants';
 import { formatAmountUp } from '../lib/format';
@@ -73,6 +73,8 @@ export interface RowState {
   receive?: bigint;
   detail?: string;
   txHash?: string;
+  /** Cross-chain: the transaction that delivered on the destination, once the bridge reports it */
+  arrivalTx?: string;
   /** A transaction left this wallet (or the relayer took the sweep): a failure then needs checking */
   sent?: boolean;
   /** What was reported to the API (POST /reports), for "Copy details" */
@@ -424,6 +426,9 @@ export function useSweep(wallet: Wallet) {
     return [...exit, 'donate', 'burn'];
   };
 
+  /** The chains to sweep, set as a whole (the address page sends one group's selection) */
+  const select = (ids: Set<number>) => setSelected(new Set(ids));
+
   const toggle = (chainId: number) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -475,6 +480,8 @@ export function useSweep(wallet: Wallet) {
     if (choice === 'donate') return { toChainId: row.chainId, recipient: ZERODUST_ADDRESS };
     if (choice === 'elsewhere') return { toChainId: elsewhere[row.chainId]!, recipient };
     if (choice === 'address') return { toChainId: row.chainId, recipient: addressOf[row.chainId]! };
+    // A chain's own token bridge delivers on one fixed chain, whatever the destination (Telos: TLOS on Base)
+    if (isExit(choice) && TOKEN_EXITS[row.chainId]) return { toChainId: TOKEN_EXITS[row.chainId]!.toChainId, recipient };
     return { toChainId: destination!, recipient };
   };
 
@@ -611,7 +618,7 @@ export function useSweep(wallet: Wallet) {
         if (i > 0) update({ phase: 'sweeping', receive, fee, detail: bridgingText(bridgeName, destOf(toChainId!)?.name ?? 'the destination', secondsSince(bridgeStarted), expected) });
         const s = await deliveryStatus(plan, hash!, toChainId).catch(() => ({ state: 'pending' as const }));
         if (s.state === 'delivered') {
-          update({ phase: 'done', receive, fee, detail: 'Balance reads 0 on-chain, delivered' });
+          update({ phase: 'done', receive, fee, detail: 'Balance reads 0 on-chain, delivered', arrivalTx: (s as { destTx?: string }).destTx });
           return;
         }
         if (s.state === 'failed') {
@@ -692,6 +699,7 @@ export function useSweep(wallet: Wallet) {
         }
         // Cross-chain: the wallet already reads 0; say so while the bridge delivers
         let status = result.status;
+        let arrivalTx: string | undefined;
         const started = nowMs();
         const bridge = result.quote?.bridge?.displayName ?? 'The bridge';
         const expected = expectedTime(timingsRef.current, bridge, row.chainId);
@@ -699,11 +707,14 @@ export function useSweep(wallet: Wallet) {
           const secs = secondsSince(started);
           setState(row.chainId, { phase: 'sweeping', detail: bridgingText(bridge, m(toChainId), secs, expected), txHash: result.txHash, choice });
           await wait(5000);
-          status = (await sweepStatus(result.sweepId).catch(() => ({ status }))).status;
+          const s = await sweepStatus(result.sweepId).catch(() => ({ status, destinationTxHash: undefined }));
+          status = s.status;
+          arrivalTx = s.destinationTxHash || arrivalTx;
         }
+        if (!arrivalTx && toChainId !== row.chainId) arrivalTx = (await sweepStatus(result.sweepId).catch(() => null))?.destinationTxHash || undefined;
         setState(row.chainId, {
           phase: status === 'failed' ? 'failed' : 'done',
-          txHash: result.txHash, sent: true, receive, toChainId, token, choice,
+          txHash: result.txHash, sent: true, receive, toChainId, token, choice, arrivalTx,
           detail: status === 'failed' ? 'The balance is 0, but the bridge reports the delivery failed or refunded'
             : status === 'completed' || toChainId === row.chainId ? 'Balance reads 0 on-chain' + (toChainId !== row.chainId ? ', delivered' : '')
             : 'Balance reads 0 on-chain; delivery still pending',
@@ -780,6 +791,11 @@ export function useSweep(wallet: Wallet) {
         setState(row.chainId, final);
         // The relayer recorded the sweep; what the chain showed afterwards it did not
         if (final.phase === 'failed') sponsored(final);
+        // Cross-chain: the bridge's delivery transaction, for the arrival link (owner note 7)
+        if (final.phase === 'done' && toChainId !== row.chainId && result.sweepId) {
+          const delivered = await sweepStatus(result.sweepId).catch(() => null);
+          if (delivered?.destinationTxHash) setStates((prev) => ({ ...prev, [row.chainId]: { ...prev[row.chainId]!, arrivalTx: delivered.destinationTxHash } }));
+        }
       } catch {
         setState(row.chainId, { phase: 'done', txHash: result.txHash, receive, toChainId, token, choice, detail: 'Completed; the on-chain check could not run' });
       }
@@ -815,7 +831,7 @@ export function useSweep(wallet: Wallet) {
 
   return {
     wallet: wallet.kind, address, rows, stage, loadError, prices, dests, sourceCount, destination, destRow, setDestination,
-    recipient, setRecipient, recipientValid, toSelf, selected, toggle, states, choices, setChoice, choicesFor,
+    recipient, setRecipient, recipientValid, toSelf, selected, toggle, select, states, choices, setChoice, choicesFor,
     altsFor, elsewhere, addressOf, destOf, bridgeOf, expectedFor, blockedReason, needsChoice, selectedRows, readyRows, readyTotals, busy, check, sweep, reload, selfOnly,
   };
 }
