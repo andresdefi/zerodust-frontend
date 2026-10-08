@@ -8,7 +8,7 @@
   "rewrites": [
     {
       "source": "/address/:path*",
-      "destination": "/index.html"
+      "destination": "/"
     }
   ],
   "redirects": [

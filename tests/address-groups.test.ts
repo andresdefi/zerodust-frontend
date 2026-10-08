@@ -77,4 +77,11 @@ describe('vercel.json', () => {
     expect(vercel.redirects).toContainEqual({ source: '/sweep', destination: '/', permanent: true });
     expect(vercel.rewrites?.some((r) => r.source === '/sweep')).toBe(false);
   });
+
+  it('serves the app for a direct /address/... load: with cleanUrls the page is "/", not "/index.html" (a 404)', () => {
+    const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8')) as { cleanUrls?: boolean; rewrites?: Array<{ source: string; destination: string }> };
+    const address = vercel.rewrites?.find((r) => r.source === '/address/:path*');
+    expect(address?.destination).toBe('/');
+    if (vercel.cleanUrls) expect(vercel.rewrites?.every((r) => !r.destination.endsWith('.html'))).toBe(true);
+  });
 });
