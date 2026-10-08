@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { mockNetwork, watchForKey } from './fixtures';
+import { METAMASK_DELEGATE, mockNetwork, watchForKey } from './fixtures';
 
 // The address page (redesign phase 2): read-only, any address, chains grouped by how
 // they are swept and what arrives, one group selected at a time.
@@ -51,6 +51,27 @@ test('groups every chain by how it is swept, quotes the gas groups, and selects 
   await expect(page.locator('.ap-sticky')).toContainText('Stays on its own chain · 1 chain');
   await expect(group('MetaMask or key').getByRole('checkbox', { name: 'Select Base' })).not.toBeChecked();
   await expect(group('Stays on its own chain')).toHaveClass(/active/);
+});
+
+test('a key sweep keeps a MetaMask smart account: the closing authorization goes back to MetaMask, the row says done', async ({ page }) => {
+  const key = generatePrivateKey();
+  const user = privateKeyToAccount(key).address;
+  const net = await mockNetwork(page, user, { metamaskSmartAccount: true });
+  await page.goto(`/address/${user}`);
+  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'MetaMask or key' }) });
+  await group.getByRole('button', { name: 'Sweep 1 chain' }).click();
+  const withDialog = page.getByRole('dialog', { name: /Sweep 1 chain with/ });
+  await withDialog.getByRole('button', { name: /Private key/ }).click();
+  await withDialog.locator('.keyfield input').focus();
+  await page.keyboard.type(key, { delay: 1 });
+  await page.keyboard.press('Enter');
+  const confirm = page.getByRole('dialog', { name: /Sweep 1 chain to Base/ });
+  await expect(confirm).toBeVisible({ timeout: 20_000 });
+  await confirm.getByRole('button', { name: 'Sweep 1 chain' }).click();
+
+  const row = group.locator('.ap-row', { hasText: 'Optimism' });
+  await expect(row).toContainText('Done · 0 left', { timeout: 30_000 });
+  expect(net.closings).toEqual([METAMASK_DELEGATE]);
 });
 
 test('home: the search opens the address page; a bad entry says why', async ({ page }) => {

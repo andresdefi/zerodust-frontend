@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getAddress, isAddress, parseUnits, type Address, type LocalAccount } from 'viem';
-import { ZeroDust, ZeroDustAgent, deliveredToken, deliversOnlyToSender, type Destination } from '@zerodust/sdk';
+import { ZERODUST_CONTRACT_ADDRESS, ZeroDust, ZeroDustAgent, closingDelegateFor, deliveredToken, deliversOnlyToSender, type Destination } from '@zerodust/sdk';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { inPool } from '../lib/pool';
 import { readState } from '../lib/rpc';
@@ -746,6 +746,10 @@ export function useSweep(wallet: Wallet) {
       const toChainId = target.toChainId;
       const token = rowToken(row.chainId, toChainId);
       setState(row.chainId, { phase: 'sweeping', detail: 'Signing', choice });
+      // Where the sweep must leave the wallet: no delegation, or back on MetaMask's smart-account
+      // delegate when it is one (the SDK signs the same rule; a failed read only loosens the check
+      // to "ZeroDust's delegation is gone")
+      const closing = await readState(row.chainId, address).then((st) => closingDelegateFor(st.code)).catch(() => null);
       const result = await agent!.sweep(
         { fromChainId: row.chainId, toChainId: target.toChainId, destination: getAddress(target.recipient) },
         { timeoutMs: 300_000, onStatusChange: (s) => setState(row.chainId, { phase: 'sweeping', detail: s.status, choice }) }
@@ -769,13 +773,14 @@ export function useSweep(wallet: Wallet) {
       setState(row.chainId, { phase: 'sweeping', detail: 'Checking on-chain', txHash: result.txHash, choice });
       const receive = result.quote && (!choice || choice === 'elsewhere') ? BigInt(result.quote.estimatedReceive) : undefined;
       try {
+        const ended = (code: string) => endedWhereSigned(code, closing);
         let onChain = await readState(row.chainId, address);
-        for (let i = 0; i < 24 && !(onChain.balance === 0n && onChain.code === '0x'); i++) {
+        for (let i = 0; i < 24 && !(onChain.balance === 0n && ended(onChain.code)); i++) {
           await wait(5000);
           onChain = await readState(row.chainId, address);
         }
         const zero = onChain.balance === 0n;
-        const revoked = onChain.code === '0x';
+        const revoked = ended(onChain.code);
         const final: RowState = {
           phase: zero && revoked ? 'done' : 'failed',
           txHash: result.txHash,
@@ -785,8 +790,8 @@ export function useSweep(wallet: Wallet) {
           token,
           choice,
           detail: zero && revoked
-            ? 'Balance reads 0 on-chain, delegation revoked'
-            : `Sent, but the chain shows ${zero ? '' : 'a balance left'}${!zero && !revoked ? ' and ' : ''}${revoked ? '' : 'the delegation still set'}`,
+            ? 'Balance reads 0 on-chain'
+            : [zero ? '' : 'Sent, but the chain shows a balance left', revoked ? '' : 'ZeroDust\'s access to this wallet was not removed yet; it is retried automatically'].filter(Boolean).join('. '),
         };
         setState(row.chainId, final);
         // The relayer recorded the sweep; what the chain showed afterwards it did not
@@ -948,4 +953,16 @@ export function plainReason(detail: string, token: string, chain: string, row?: 
 
 export function isNoRoute(message: string): boolean {
   return /Chain Disabled|Limit Exceeded|not supported|no routes|does not deliver|router call|Insuf+icient Liquidity|No bridge|NO_ROUTE/i.test(message);
+}
+
+/**
+ * Whether a sweep left the wallet where its closing authorization puts it: no code, or the
+ * smart-account delegate it had before (`closing`). Unknown (`null`): ZeroDust's delegation is
+ * gone, whatever is there instead.
+ */
+export function endedWhereSigned(code: string, closing: string | null): boolean {
+  const lower = code.toLowerCase();
+  if (closing === null) return lower === '0x' || (lower.startsWith('0xef0100') && lower.slice(8) !== ZERODUST_CONTRACT_ADDRESS.slice(2).toLowerCase());
+  if (BigInt(closing) === 0n) return lower === '0x';
+  return lower === `0xef0100${closing.slice(2).toLowerCase()}`;
 }
