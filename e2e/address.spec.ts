@@ -11,23 +11,39 @@ test('groups every chain by how it is swept, quotes the gas groups, and selects 
   await page.goto(`/address/${user}`);
 
   const group = (title: string) => page.locator('section.ap-grp', { has: page.getByRole('heading', { name: title }) });
-  await expect(group('MetaMask or key').locator('.ap-row')).toHaveCount(2);
-  await expect(group('MetaMask or key')).toContainText('Base');
+  const dest = page.getByRole('region', { name: 'Where swept gas goes' });
+  // Default destination: the chain holding most of the wallet's bridgeable gas, said plainly and changeable
+  await expect(dest).toContainText('Base');
+  await expect(dest).toContainText('Picked because most of this wallet\'s gas is already on Base');
+  // Sent to this same wallet, Base's own balance already is where everything goes: not a sweep
+  await expect(dest).toContainText('Already on Base');
+  await expect(group('MetaMask or key').locator('.ap-row')).toHaveCount(1);
   await expect(group('MetaMask or key')).toContainText('Optimism');
   await expect(group('Key only')).toContainText('Avalanche');
   await expect(group('Arrives as a token')).toContainText('MITO on BNB Chain');
   await expect(group('Stays on its own chain')).toContainText('Scroll');
   await expect(page.locator('.ap-kpis')).toContainText('5');
 
-  // Nothing is quoted until a destination is chosen
-  await expect(group('MetaMask or key')).toContainText('Choose a chain');
-  await page.getByRole('button', { name: 'Choose a chain' }).click();
-  await page.getByLabel('Search chains').fill('Base');
-  await page.locator('.pick', { hasText: 'Base' }).first().click();
-  await expect(group('MetaMask or key')).toContainText('Same chain');
+  // Quoted against the default chain
   await expect(group('MetaMask or key').locator('.ap-recv').first()).toContainText('ETH');
-  await expect(page.locator('.ap-sticky')).toContainText('MetaMask or key · 2 chains');
+  await expect(page.locator('.ap-sticky')).toContainText('MetaMask or key · 1 chain');
   await expect(page.locator('.ap-sticky')).toContainText('you receive at least');
+
+  // Another chain: Base becomes a source, Optimism the one already in place
+  await dest.getByRole('button', { name: 'Change chain' }).click();
+  await page.getByLabel('Search chains').fill('Optimism');
+  await page.locator('.pick', { hasText: 'Optimism' }).first().click();
+  await expect(dest).toContainText('Already on Optimism');
+  await expect(dest).not.toContainText('Picked because');
+  await expect(group('MetaMask or key')).toContainText('Base');
+
+  // To another address, the destination chain's own balance is a real same-chain transfer
+  await dest.getByRole('button', { name: 'Send to another address' }).click();
+  await dest.getByLabel('Send to address').fill('0x000000000000000000000000000000000000bEEF');
+  await dest.getByRole('button', { name: 'Use this address' }).click();
+  await expect(dest).toContainText('(another address)');
+  await expect(dest).not.toContainText('Already on');
+  await expect(group('MetaMask or key').locator('.ap-row')).toHaveCount(2);
 
   // Ticking a chain in another group starts a selection there; the first group lets go
   await group('Stays on its own chain').getByRole('checkbox', { name: 'Select Scroll' }).check();

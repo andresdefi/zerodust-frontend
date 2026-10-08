@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
-import type { Address } from 'viem';
+import { useMemo, useState, type FormEvent } from 'react';
+import { isAddressEqual, type Address } from 'viem';
 import { ChainIcon } from '../components/ChainIcon';
 import { DestinationPicker } from '../components/DestinationPicker';
 import { formatAmount, formatUsd, shortAddress } from '../lib/format';
 import { groupChains, groupText, tokenRouteOf, type GroupKey } from './groups';
-import { useAddressData, useEstimates, useResolved, type AddressRow, type Estimate } from './useAddress';
+import { resolveName, useAddressData, useEstimates, useResolved, type AddressRow, type Estimate } from './useAddress';
 
 // One address, read-only (redesign phase 2): every chain holding gas, in groups by how
 // it is swept and what arrives. Selecting works within one group (a sweep acts on one
@@ -30,11 +30,24 @@ export function AddressPage({ query }: { query: string }) {
 }
 
 function Loaded({ address, name }: { address: Address; name: string | null }) {
-  const [destination, setDestination] = useState<number | null>(null);
+  const [chosenDest, setChosenDest] = useState<number | null>(null);
   const [picking, setPicking] = useState(false);
-  const recipient = address;
+  const [recipient, setRecipient] = useState<Address>(address);
+  const [defaultDest, setDefaultDest] = useState<number | null>(null);
+  const destination = chosenDest ?? defaultDest;
+  const isDefault = chosenDest === null && destination !== null;
   const data = useAddressData(address, destination, recipient);
-  const groups = useMemo(() => groupChains(data.rows, data.routesOf, destination), [data.rows, data.routesOf, destination]);
+  // Default destination (owner, 2026-10-08): where most of the wallet's bridgeable gas already is,
+  // so the most stays put; shown prominently as changeable. Base when nothing qualifies.
+  if (data.state === 'ready' && defaultDest === null) {
+    const top = data.rows.filter((r) => !r.direct && data.routesOf(r.chainId).gas === true).sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0))[0];
+    setDefaultDest(top?.chainId ?? 8453);
+  }
+  const toSelf = isAddressEqual(recipient, address);
+  // To this same wallet, the destination chain's own balance is already where everything goes
+  const here = toSelf && destination !== null ? data.rows.find((r) => r.chainId === destination) : undefined;
+  const movable = useMemo(() => (here ? data.rows.filter((r) => r !== here) : data.rows), [data.rows, here]);
+  const groups = useMemo(() => groupChains(movable, data.routesOf, destination), [movable, data.routesOf, destination]);
   const destName = destination === null ? null : data.chainOptions.find((c) => c.chainId === destination)?.name ?? `Chain ${destination}`;
   const destToken = destination === null ? null : data.chainOptions.find((c) => c.chainId === destination);
 
@@ -88,17 +101,11 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
         </dl>
       </section>
 
-      <section className="ap-card ap-dest">
-        <span className="ap-dim">Bridged gas goes to</span>
-        <span className="ap-val">{shortAddress(recipient)} <small>(this wallet)</small></span>
-        <span className="ap-dim">on</span>
-        {destination === null
-          ? <span className="ap-val ap-dim">a chain you choose</span>
-          : <span className="ap-val"><ChainIcon chainId={destination} name={destName!} size={22} />{destName}</span>}
-        <button type="button" className={`btn ${destination === null ? 'btn-primary' : 'btn-ghost'} btn-sm ap-push`} onClick={() => setPicking(true)}>
-          {destination === null ? 'Choose a chain' : 'Change'}
-        </button>
-      </section>
+      <DestinationBar
+        address={address} recipient={recipient} destination={destination} destName={destName} isDefault={isDefault}
+        here={here} onPickChain={() => setPicking(true)}
+        onRecipient={(r) => { setRecipient(r); setSelection(null); }}
+      />
 
       <div className="ap-tabs" role="tablist">
         <span role="tab" aria-selected="true" className="on">Balances</span>
@@ -170,10 +177,73 @@ function Loaded({ address, name }: { address: Address; name: string | null }) {
         dests={data.chainOptions.map((c) => ({ ...c, reachableFrom: 0 }))}
         sourceCount={0}
         current={destination}
-        onPick={(id) => { setDestination(id); setPicking(false); setSelection(null); }}
+        onPick={(id) => { setChosenDest(id); setPicking(false); setSelection(null); }}
         onClose={() => setPicking(false)}
       />
     </main>
+  );
+}
+
+/**
+ * Where swept gas goes: the recipient (this wallet, or another address) and the chain. A default
+ * chain is highlighted with why it was picked and a plain way to change it.
+ */
+function DestinationBar({ address, recipient, destination, destName, isDefault, here, onPickChain, onRecipient }: {
+  address: Address;
+  recipient: Address;
+  destination: number | null;
+  destName: string | null;
+  isDefault: boolean;
+  here: AddressRow | undefined;
+  onPickChain: () => void;
+  onRecipient: (recipient: Address) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [input, setInput] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const toSelf = isAddressEqual(recipient, address);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    const res = await resolveName(input.trim());
+    setBusy(false);
+    if ('error' in res) { setError(res.error); return; }
+    onRecipient(res.address);
+    setEditing(false);
+    setInput('');
+  };
+  return (
+    <section className={`ap-card ap-dest${isDefault ? ' is-default' : ''}`} aria-label="Where swept gas goes">
+      <div className="ap-dest-line">
+        <span className="ap-dim">Everything goes to</span>
+        <span className="ap-val">{shortAddress(recipient)} <small>{toSelf ? '(this wallet)' : '(another address)'}</small></span>
+        <span className="ap-dim">on</span>
+        {destination === null
+          ? <span className="ap-val ap-dim">…</span>
+          : <span className="ap-val"><ChainIcon chainId={destination} name={destName!} size={22} />{destName}</span>}
+        <span className="ap-dest-btns">
+          <button type="button" className="btn btn-ink btn-sm" onClick={onPickChain}>Change chain</button>
+          {toSelf
+            ? <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing((v) => !v)}>Send to another address</button>
+            : <button type="button" className="btn btn-ghost btn-sm" onClick={() => onRecipient(address)}>Back to this wallet</button>}
+        </span>
+      </div>
+      {isDefault && destName && (
+        <p className="ap-dest-note">Picked because most of this wallet's gas is already on {destName}. Change it if you want everything somewhere else.</p>
+      )}
+      {here && destName && (
+        <p className="ap-dest-note">Already on {destName}: {formatAmount(here.balance, here.decimals)} {here.token} {here.usd !== null ? `(${formatUsd(here.usd)}) ` : ''}stays where it is.</p>
+      )}
+      {editing && (
+        <form className="ap-dest-edit" onSubmit={(e) => void submit(e)}>
+          <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="0x… or name.eth" aria-label="Send to address" autoComplete="off" spellCheck={false} autoFocus />
+          <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !input.trim()}>Use this address</button>
+          {error && <span className="ap-dest-err" role="alert">{error}</span>}
+        </form>
+      )}
+    </section>
   );
 }
 

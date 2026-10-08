@@ -43,6 +43,18 @@ export type Resolution =
 
 const ens = createPublicClient({ chain: mainnet, transport: http(RPC_URLS[1]) });
 
+/** An address or ENS name typed as a recipient: the address, or why not */
+export async function resolveName(q: string): Promise<{ address: Address } | { error: string }> {
+  if (isAddress(q, { strict: false })) return { address: getAddress(q) };
+  if (!q.includes('.')) return { error: 'That is not an address or an ENS name.' };
+  try {
+    const address = await ens.getEnsAddress({ name: normalize(q) });
+    return address ? { address: getAddress(address) } : { error: `No address is set for ${q}.` };
+  } catch {
+    return { error: `Could not look up ${q}.` };
+  }
+}
+
 /** An address or an ENS name, to the address (and the name to show) */
 export function useResolved(query: string): Resolution {
   const [result, setResult] = useState<{ query: string; res: Resolution } | null>(null);
