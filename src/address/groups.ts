@@ -97,13 +97,13 @@ export function groupText(key: GroupKey, destinationName: string | null): { titl
   const to = destinationName ? `on ${destinationName}` : 'on the chain you choose';
   switch (key) {
     case 'metamask':
-      return { title: 'MetaMask or key', tag: destinationName ? `Gas ${to}` : undefined, detail: `Swept with MetaMask (no key) or the key. Arrives as gas ${to}.` };
+      return { title: 'MetaMask or key', tag: destinationName ? `Gas ${to}` : undefined, detail: `Sign with MetaMask (no key needed) or with the key. Arrives as gas ${to}.` };
     case 'key':
       return OFFLINE
         ? { title: 'With the key', tag: destinationName ? `Gas ${to}` : undefined, detail: `Swept with this wallet's key, which stays in this file. Arrives as gas ${to}.` }
-        : { title: 'Key only', tag: destinationName ? `Gas ${to}` : undefined, detail: `MetaMask doesn't cover these yet. Arrives as gas ${to}.` };
+        : { title: 'Key only', tag: destinationName ? `Gas ${to}` : undefined, detail: `MetaMask can't sweep these yet, so they need the key. Arrives as gas ${to}.` };
     case 'token':
-      return { title: 'Arrives as a token', tag: 'Not gas', detail: 'No bridge carries these as gas. Each one\'s own bridge delivers its token to your wallet on another chain.' };
+      return { title: 'Arrives as a token', tag: 'Not gas', detail: 'No bridge carries these out as gas. Each chain\'s own bridge sends its token to your wallet on another chain.' };
     case 'elsewhere':
       return { title: `Can't reach ${destinationName ?? 'that chain'}`, detail: 'Bridges take these out, but not to the chain you chose. Pick another chain for them.' };
     case 'own-chain':
