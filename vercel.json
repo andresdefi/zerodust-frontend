@@ -9,10 +9,13 @@
     {
       "source": "/address/:path*",
       "destination": "/index.html"
-    },
+    }
+  ],
+  "redirects": [
     {
       "source": "/sweep",
-      "destination": "/index.html"
+      "destination": "/",
+      "permanent": true
     }
   ],
   "headers": [

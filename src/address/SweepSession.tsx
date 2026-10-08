@@ -6,7 +6,7 @@ import { TOKEN_EXITS } from '../direct/plan';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
 import { connectMetaMask, findMetaMask, type MetaMaskSession } from '../sweep/metamask';
 import { isPaused, useServiceStatus } from '../sweep/status';
-import { useSweep, type Row, type RowState, type SweepModel, type Wallet } from '../sweep/useSweep';
+import { minimumOf, tooSmallText, useSweep, type Row, type RowState, type SweepModel, type Wallet } from '../sweep/useSweep';
 import { tokenRouteOf, type GroupKey } from './groups';
 import type { AddressRow } from './useAddress';
 import { OFFLINE } from '../lib/env';
@@ -119,7 +119,6 @@ export function SweepWithDialog({ open, plan, address, session, onWallet, onClos
       ) : (
         <>
           <KeyEntry
-            keyOnly
             title="Use the private key"
             help={`Type or paste the private key of ${shortAddress(address)}, the address on this page.`}
             onAccount={(account) => {
@@ -213,6 +212,15 @@ export function SweepSession({ wallet, plan, onProgress, onEnd }: {
   );
 }
 
+/** Why a chain was left out of the confirmation, in plain words (the exact reason stays on hover) */
+function notIncludedReason(c: { name: string; token: string; decimals: number; balance: bigint; metamask: boolean }, detail: string | undefined): string {
+  if (!detail) return c.metamask ? 'Not ready' : 'Needs the key';
+  const least = minimumOf(detail, c.decimals);
+  if (least !== null) return tooSmallText(least, c);
+  if (/refus|unsafe|safety/i.test(detail)) return 'Stopped before signing: the plan failed a safety check';
+  return detail;
+}
+
 /** Before anything is signed: every chain that will move, by route, with what arrives where */
 function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
   open: boolean;
@@ -297,7 +305,7 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
             {notReady.map((c) => (
               <p key={c.chainId} className="zd-cl zd-cl-out">
                 <ChainIcon chainId={c.chainId} name={c.name} size={22} />
-                <span className="zd-cl-name">{c.name}<small>{m.states[c.chainId]?.detail ?? (c.metamask ? 'Not ready' : 'Needs the key')}</small></span>
+                <span className="zd-cl-name">{c.name}<small title={m.states[c.chainId]?.detail}>{notIncludedReason(c, m.states[c.chainId]?.detail)}</small></span>
               </p>
             ))}
           </div>

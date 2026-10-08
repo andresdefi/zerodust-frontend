@@ -5,15 +5,13 @@ import { OFFLINE } from './env';
 // routes by path (Vercel rewrites /address/* to the app); the offline file runs
 // from disk, where paths mean files, so it routes by hash (#/address/…).
 
-export type View = { kind: 'home' } | { kind: 'address'; query: string } | { kind: 'sweep' };
+export type View = { kind: 'home' } | { kind: 'address'; query: string };
 
 const PREFIX = '/address/';
 
 export function parseView(pathname: string, hash: string): View {
   const path = OFFLINE ? hash.replace(/^#/, '') : pathname;
   // Today's sweep flow, kept until the address page can sweep (redesign phase 3)
-  // The old flow stays at /sweep on the site; the offline file has only the new one
-  if (path === '/sweep' && !OFFLINE) return { kind: 'sweep' };
   if (path.startsWith(PREFIX)) {
     const query = decodeURIComponent(path.slice(PREFIX.length)).trim();
     if (query) return { kind: 'address', query };

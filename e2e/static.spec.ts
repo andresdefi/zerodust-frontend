@@ -69,15 +69,3 @@ test('the offline file matches its published hash and runs the address page from
   expect(watch.leaks).toEqual([]);
   expect(csp).toEqual([]);
 });
-
-test('How it works on the old flow (/sweep): MetaMask first', async ({ page }) => {
-  await mockNetwork(page, privateKeyToAccount(generatePrivateKey()).address);
-  await page.goto('/sweep');
-  await page.getByText('How it works').click();
-  await expect(page.getByText('Connect MetaMask', { exact: true }).first()).toBeVisible();
-  await page.getByText('What MetaMask shows').click();
-  for (const step of ['Switch to smart account', 'Grant, then Confirm', 'One signature']) {
-    await expect(page.getByText(step, { exact: true })).toBeVisible();
-  }
-
-});

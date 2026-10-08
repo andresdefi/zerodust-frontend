@@ -36,6 +36,8 @@ export interface ChainRoutes {
   notToDestination?: boolean;
   /** Asked, and no bridge gave an answer either way (throttled, down): not selected by default */
   unknown?: boolean;
+  /** Below every bridge's minimum: the least a bridge takes (stays in its gas group, not selected) */
+  minimum?: bigint;
 }
 
 /** A token the chain's only way out delivers instead of gas, on a fixed chain */
@@ -67,7 +69,7 @@ export function groupOf(chain: AddressChain, routes: ChainRoutes, destination: n
   const signer: GroupKey = chain.metamask && !chain.direct && !OFFLINE ? 'metamask' : 'key';
   // Staying on the same chain is always a plain transfer
   if (destination !== null && chain.chainId === destination) return signer;
-  if (routes.gas === true) return signer;
+  if (routes.gas === true || routes.minimum !== undefined) return signer;
   if (routes.notToDestination) return 'elsewhere';
   if (tokenRouteOf(chain.chainId)) return 'token';
   // Not known yet: the gas groups, until a bridge says otherwise
