@@ -6,7 +6,7 @@ import { ChainIcon } from '../components/ChainIcon';
 import { DestinationPicker } from '../components/DestinationPicker';
 import { formatAmount, formatUsd, shortAddress } from '../lib/format';
 import { groupChains, groupOf, groupText, tokenRouteOf, type GroupKey } from './groups';
-import { closesLong, closesShort, cutoffLong, stillSwept } from './closing';
+import { announcementHref, closesLong, closesShort, cutoffLong, stillSwept } from './closing';
 import { isListedScam, resolveName, useAddressData, useEstimates, useResolved, type AddressRow, type ChainOption, type Estimate } from './useAddress';
 import { SweepSession, SweepWithDialog, type SweepPlan } from './SweepSession';
 import { FAILURE_LABEL, failureKind, minimumOf, tooSmallText, type RowState, type Wallet } from '../sweep/useSweep';
@@ -420,9 +420,10 @@ function ClosingNotice({ rows, stopped }: { rows: AddressRow[]; stopped: Address
         const amount = `${formatAmount(r.balance, r.decimals)} ${r.token}`;
         if (stopped.includes(r)) {
           const why = stillSwept(r) ? 'nothing bridges it out right now' : `ZeroDust stopped sweeping it on ${cutoffLong(c)}`;
+          const href = announcementHref(c);
           return (
             <p key={r.chainId}>
-              <b>{r.name} closes on {closesLong(c)}</b> and {why}. Move the {amount} with {r.name}'s own bridge before then: <a href={c.source} target="_blank" rel="noreferrer">{r.name}'s announcement</a>.
+              <b>{r.name} closes on {closesLong(c)}</b> and {why}. Move the {amount} with {r.name}'s own bridge before then{href ? <>: <a href={href} target="_blank" rel="noreferrer">{r.name}'s announcement</a></> : null}.
             </p>
           );
         }

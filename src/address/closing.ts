@@ -26,3 +26,13 @@ export function stillSwept(row: { direct: boolean; closing?: Closing }): boolean
   if (!row.closing) return true;
   return row.closing.stage === 'closing' || (row.direct && row.closing.stage === 'cutoff');
 }
+
+/** The announcement link, only if it is plain https (it comes from L2BEAT through a reviewed PR; defence in depth) */
+export function announcementHref(c: Closing): string | undefined {
+  try {
+    const u = new URL(c.source);
+    return u.protocol === 'https:' && !u.username && !u.password ? u.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
