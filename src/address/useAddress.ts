@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { Closing } from './closing';
 import { createPublicClient, getAddress, http, isAddress, type Address } from 'viem';
 import { mainnet } from 'viem/chains';
 import { normalize } from 'viem/ens';
@@ -38,6 +39,8 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export interface AddressRow extends AddressChain {
   usd: number | null;
+  /** The chain announced its shutdown (closing.ts) */
+  closing?: Closing;
 }
 
 export interface ChainOption {
@@ -118,6 +121,7 @@ interface ChainInfo {
   explorerUrl: string;
   metamask?: boolean;
   crossChain?: { available: boolean | null; bridges?: string[] };
+  closing?: Closing;
 }
 
 export interface AddressData {
@@ -165,19 +169,25 @@ export function useAddressData(address: Address | null, destination: number | nu
               chainId: b.chainId, name: b.name, token: b.nativeToken, decimals, balance: BigInt(b.balance),
               explorerUrl: c?.explorerUrl ?? '', direct: false, metamask: c?.metamask === true,
               usd: usd(BigInt(b.balance), decimals, b.nativeToken),
+              ...(c?.closing ? { closing: c.closing } : {}),
             };
           }),
           // Only direct chains this page can sweep (its own RPC list)
-          ...direct.filter((d) => DIRECT_RPC_URLS[d.chainId] !== undefined).map((d) => ({
-            chainId: d.chainId, name: d.name, token: d.token, decimals: d.decimals, balance: BigInt(d.balance),
-            explorerUrl: d.explorerUrl, direct: true, metamask: false, usd: usd(BigInt(d.balance), d.decimals, d.token),
-          })),
+          ...direct.filter((d) => DIRECT_RPC_URLS[d.chainId] !== undefined).map((d) => {
+            const closing = directInfo.chains.find((c) => c.chainId === d.chainId)?.closing;
+            return {
+              chainId: d.chainId, name: d.name, token: d.token, decimals: d.decimals, balance: BigInt(d.balance),
+              explorerUrl: d.explorerUrl, direct: true, metamask: false, usd: usd(BigInt(d.balance), d.decimals, d.token),
+              ...(closing ? { closing } : {}),
+            };
+          }),
         ]
           .filter((r) => r.balance > 0n)
           .sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0) || a.name.localeCompare(b.name));
+        // A chain that announced its shutdown is never a destination
         const chainOptions = [
-          ...chains.map((c) => ({ chainId: c.chainId, name: c.name, token: c.nativeToken, decimals: c.nativeTokenDecimals, explorerUrl: c.explorerUrl })),
-          ...directInfo.chains.map((c) => ({ chainId: c.chainId, name: c.name, token: c.token, decimals: c.decimals, explorerUrl: c.explorerUrl })),
+          ...chains.filter((c) => !c.closing).map((c) => ({ chainId: c.chainId, name: c.name, token: c.nativeToken, decimals: c.nativeTokenDecimals, explorerUrl: c.explorerUrl })),
+          ...directInfo.chains.filter((c) => !c.closing).map((c) => ({ chainId: c.chainId, name: c.name, token: c.token, decimals: c.decimals, explorerUrl: c.explorerUrl })),
         ].sort((a, b) => a.name.localeCompare(b.name));
         const unchecked = [
           ...(balances.chains as Array<{ name: string; checked?: boolean }>).filter((b) => b.checked === false).map((b) => b.name),

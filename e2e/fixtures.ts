@@ -254,9 +254,15 @@ function telosLeftoverPlan(nonce: number) {
  * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base);
  * `hiccups`: the first route checks answer "unknown", then the real answer
  */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean; scam?: string[]; scamCheckDown?: boolean; unchecked?: number } = {}) {
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean; scam?: string[]; scamCheckDown?: boolean; unchecked?: number; closing?: Record<number, 'closing' | 'cutoff'> } = {}) {
   const chains = [...CHAINS, ...(opts.mitosis ? [MITOSIS_CHAIN] : []), ...(opts.endurance ? [ENDURANCE_CHAIN] : [])];
   const funded = [...FUNDED, ...(opts.mitosis ? [MITOSIS] : []), ...(opts.endurance ? [ENDURANCE] : []), ...(opts.unchecked !== undefined ? [42161] : [])];
+  // Chains that announced their shutdown, as GET /chains and /direct/chains report them
+  const closingOf = (chainId: number, name: string) => {
+    const stage = opts.closing?.[chainId];
+    if (!stage) return {};
+    return { closing: { stage, closesAt: '2026-10-31T00:00:00Z', cutoffAt: '2026-10-28T00:00:00Z', source: `https://example.org/${name.toLowerCase()}-closing`, note: `${name} shuts down on 31 October 2026.` } };
+  };
   // Arbitrum's RPCs miss the deadline on this many balance reads, then answer with its (hidden) balance
   let uncheckedLeft = opts.unchecked ?? 0;
   let hiccups = opts.hiccups ?? 0;
@@ -298,6 +304,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
           crossChain: { available: c.available, bridges: c.chainId === MITOSIS ? ['hyperlane'] : c.chainId === ENDURANCE ? ['endurance'] : c.available ? ['relay'] : [] },
           // MetaMask permission sweeps: Base and Optimism here
           metamask: c.chainId === 8453 || c.chainId === 10,
+          ...closingOf(c.chainId, c.name),
         })),
       });
     }
@@ -337,7 +344,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     if (path === '/direct/chains') {
       return json(route, {
         chains: [
-          { chainId: AVAX, name: 'Avalanche', token: 'AVAX', decimals: 18, explorerUrl: 'https://snowtrace.io', rpcUrl: DIRECT_RPC_URLS[AVAX], kind: 'evm' },
+          { chainId: AVAX, name: 'Avalanche', token: 'AVAX', decimals: 18, explorerUrl: 'https://snowtrace.io', rpcUrl: DIRECT_RPC_URLS[AVAX], kind: 'evm', ...closingOf(AVAX, 'Avalanche') },
           { chainId: MONAD, name: 'Monad', token: 'MON', decimals: 18, explorerUrl: 'https://monadvision.com', rpcUrl: DIRECT_RPC_URLS[MONAD], kind: 'gaslimit', txGapBlocks: 4 },
           { chainId: TELOS, name: 'Telos', token: 'TLOS', decimals: 18, explorerUrl: 'https://teloscan.io', rpcUrl: DIRECT_RPC_URLS[TELOS], kind: 'fixedprice' },
         ],
