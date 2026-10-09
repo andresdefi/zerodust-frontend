@@ -5,7 +5,8 @@ import { deliversOnlyToSender } from '@zerodust/sdk';
 import { ChainIcon } from '../components/ChainIcon';
 import { DestinationPicker } from '../components/DestinationPicker';
 import { formatAmount, formatUsd, shortAddress } from '../lib/format';
-import { groupChains, groupText, tokenRouteOf, type GroupKey } from './groups';
+import { groupChains, groupOf, groupText, tokenRouteOf, type GroupKey } from './groups';
+import { closesLong, closesShort, cutoffLong, stillSwept } from './closing';
 import { isListedScam, resolveName, useAddressData, useEstimates, useResolved, type AddressRow, type ChainOption, type Estimate } from './useAddress';
 import { SweepSession, SweepWithDialog, type SweepPlan } from './SweepSession';
 import { FAILURE_LABEL, failureKind, minimumOf, tooSmallText, type RowState, type Wallet } from '../sweep/useSweep';
@@ -60,14 +61,21 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
   // Default destination (owner, 2026-10-08): where most of the wallet's bridgeable gas already is,
   // so the most stays put; shown prominently as changeable. Base when nothing qualifies.
   if (data.state === 'ready' && defaultDest === null) {
-    const top = data.rows.filter((r) => !r.direct && data.routesOf(r.chainId).gas === true).sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0))[0];
+    // Never a chain that announced its shutdown
+    const top = data.rows.filter((r) => !r.direct && !r.closing && data.routesOf(r.chainId).gas === true).sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0))[0];
     setDefaultDest(top?.chainId ?? 8453);
   }
   const toSelf = isAddressEqual(recipient, address);
   // To this same wallet, the destination chain's own balance is already where everything goes
   const here = toSelf && destination !== null ? data.rows.find((r) => r.chainId === destination) : undefined;
   const movable = useMemo(() => (here ? data.rows.filter((r) => r !== here) : data.rows), [data.rows, here]);
-  const groups = useMemo(() => groupChains(movable, data.routesOf, destination), [movable, data.routesOf, destination]);
+  // A closing chain ZeroDust can no longer take out (past a sponsored chain's cut-off, or no bridge
+  // left: keeping it on its own chain is refused) leaves the groups for the closing notice
+  const routesOf = data.routesOf;
+  const stopped = useMemo(() => movable.filter((r) => r.closing && (!stillSwept(r) || groupOf(r, routesOf(r.chainId), destination) === 'own-chain')), [movable, routesOf, destination]);
+  const leaving = useMemo(() => movable.filter((r) => !stopped.includes(r)), [movable, stopped]);
+  const groups = useMemo(() => groupChains(leaving, routesOf, destination), [leaving, routesOf, destination]);
+  const closingRows = data.rows.filter((r) => r.closing);
   const destName = destination === null ? null : data.chainOptions.find((c) => c.chainId === destination)?.name ?? `Chain ${destination}`;
   const destToken = destination === null ? null : data.chainOptions.find((c) => c.chainId === destination);
 
@@ -148,7 +156,7 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
   const optionOf = (chainId: number): ChainOption | undefined => data.chainOptions.find((o) => o.chainId === chainId);
 
   // What a sweep moves: the destination chain's own balance (to this same wallet) is already there
-  const toSweepUsd = movable.reduce((s, r) => s + (r.usd ?? 0), 0);
+  const toSweepUsd = leaving.reduce((s, r) => s + (r.usd ?? 0), 0);
   const selectedRows = active ? active.chains.filter((c) => selectedIds.has(c.chainId) && !finished.has(c.chainId)) : [];
   const quotedRows = selectedRows.filter((r) => estimates[r.chainId]?.receive !== undefined);
   const selectedReceive = quotedRows.reduce((s, r) => s + estimates[r.chainId]!.receive!, 0n);
@@ -171,7 +179,7 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
           </p>
         </div>
         <dl className="ap-kpis">
-          <div><dt>Chains to sweep</dt><dd>{data.state === 'ready' ? movable.length : '…'}</dd></div>
+          <div><dt>Chains to sweep</dt><dd>{data.state === 'ready' ? leaving.length : '…'}</dd></div>
           <div><dt>To sweep</dt><dd>{data.state === 'ready' ? formatUsd(toSweepUsd) || '$0.00' : '…'}</dd></div>
           <div><dt>Groups</dt><dd>{data.state === 'ready' ? groups.length : '…'}</dd></div>
         </dl>
@@ -198,6 +206,7 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
           {!sweepingNow && <button type="button" className="btn btn-ghost btn-sm" onClick={refresh}>Check again</button>}
         </div>
       )}
+      {data.state === 'ready' && closingRows.length > 0 && <ClosingNotice rows={closingRows} stopped={stopped} />}
       {data.state === 'ready' && data.rows.length === 0 && (
         <div className="ap-state">{data.unchecked.length === 0
           ? `Nothing to sweep: this address holds no gas on any of the ${data.chainOptions.length} chains ZeroDust covers.`
@@ -402,6 +411,32 @@ function ScamWarning({ address, onUse, onCancel }: { address: Address; onUse: ()
   );
 }
 
+/** Chains in the wallet that announced their shutdown: sweep them before the date, or use their own bridge */
+function ClosingNotice({ rows, stopped }: { rows: AddressRow[]; stopped: AddressRow[] }) {
+  return (
+    <div className="ap-closing" role="status">
+      {rows.map((r) => {
+        const c = r.closing!;
+        const amount = `${formatAmount(r.balance, r.decimals)} ${r.token}`;
+        if (stopped.includes(r)) {
+          const why = stillSwept(r) ? 'nothing bridges it out right now' : `ZeroDust stopped sweeping it on ${cutoffLong(c)}`;
+          return (
+            <p key={r.chainId}>
+              <b>{r.name} closes on {closesLong(c)}</b> and {why}. Move the {amount} with {r.name}'s own bridge before then: <a href={c.source} target="_blank" rel="noreferrer">{r.name}'s announcement</a>.
+            </p>
+          );
+        }
+        const lastDays = r.direct && c.stage === 'cutoff' ? ' No ZeroDust fee in its last days.' : '';
+        return (
+          <p key={r.chainId}>
+            <b>{r.name} closes on {closesLong(c)}.</b> Sweep the {amount} before then; ZeroDust won't send anything there.{lastDays}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 /** "A", "A and B", "A, B and C" */
 function listNames(names: string[]): string {
   return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
@@ -509,7 +544,7 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
       <input type="checkbox" className="ap-cb" checked={selected} onChange={onToggle} aria-label={`Select ${row.name}`} />
       <span className="ap-chain">
         <ChainIcon chainId={row.chainId} name={row.name} size={28} />
-        <span>{row.name}{keyOnly && <span className="tag acc">Key only</span>}</span>
+        <span>{row.name}{keyOnly && <span className="tag acc">Key only</span>}{row.closing && <span className="tag warn" title={row.closing.note}>Closes {closesShort(row.closing)}</span>}</span>
       </span>
       <span className="ap-bal">{formatAmount(row.balance, row.decimals)} {row.token}<small>{formatUsd(row.usd)}</small></span>
       <span className="ap-route"><span className={`tag ${route.tone}`} title={route.title}>{route.text}</span></span>

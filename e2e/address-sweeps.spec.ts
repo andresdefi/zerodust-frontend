@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { mockNetwork, TELOS, watchForKey } from './fixtures';
+import { AVAX, mockNetwork, TELOS, watchForKey } from './fixtures';
 
 // The sweep engine's checks, through the address page: what the old /sweep page's tests
 // covered, kept when that page was removed (2026-10-08).
@@ -389,4 +389,28 @@ test('a chain whose RPCs did not answer in time is named, never shown as empty, 
   await note.getByRole('button', { name: 'Check again' }).click();
   await expect(note).toHaveCount(0);
   await expect(page.getByRole('checkbox', { name: 'Select Arbitrum' })).toBeVisible();
+});
+
+test('a closing chain: tagged, named in a notice, never offered or defaulted as the destination', async ({ page }) => {
+  // Base holds the most gas, so it would be the default destination; it is closing instead
+  await openAddress(page, { closing: { 8453: 'closing' } });
+  const note = page.locator('.ap-closing');
+  await expect(note).toContainText('Base closes on 31 October. Sweep the');
+  await expect(note).toContainText("ZeroDust won't send anything there.");
+  await expect(page.locator('li.ap-row', { hasText: 'Base' }).locator('.tag.warn')).toHaveText('Closes 31 Oct');
+  const dest = page.getByRole('region', { name: 'Where swept gas goes' });
+  await expect(dest).not.toContainText('Base');
+  await dest.getByRole('button', { name: 'Change chain' }).click();
+  await expect(page.getByRole('dialog').getByText('Base', { exact: true })).toHaveCount(0);
+});
+
+test('past its cut-off a sponsored chain leaves the groups and points to its own bridge; a direct chain sweeps without a fee', async ({ page }) => {
+  await openAddress(page, { closing: { 10: 'cutoff', [AVAX]: 'cutoff' }, direct: true });
+  const note = page.locator('.ap-closing');
+  await expect(note).toContainText('Optimism closes on 31 October and ZeroDust stopped sweeping it on 28 October.');
+  await expect(note.getByRole('link', { name: "Optimism's announcement" })).toHaveAttribute('href', 'https://example.org/optimism-closing');
+  await expect(page.getByRole('checkbox', { name: 'Select Optimism' })).toHaveCount(0);
+  await expect(note).toContainText('Avalanche closes on 31 October.');
+  await expect(note).toContainText('No ZeroDust fee in its last days.');
+  await expect(page.getByRole('checkbox', { name: 'Select Avalanche' })).toBeVisible();
 });

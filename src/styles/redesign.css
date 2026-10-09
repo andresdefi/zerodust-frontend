@@ -179,6 +179,10 @@
 .ap-scam b { color: var(--danger); }
 .ap-unchecked { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; margin-top: 14px; padding: 10px 14px; border-radius: 12px; background: var(--warn-soft); color: var(--warn); font-size: 14px; line-height: 1.45; }
 .ap-unchecked p { margin: 0; flex: 1 1 260px; }
+.ap-closing { display: grid; gap: 6px; margin-top: 14px; padding: 10px 14px; border-radius: 12px; background: var(--warn-soft); color: var(--warn); font-size: 14px; line-height: 1.45; }
+.ap-closing p { margin: 0; }
+.ap-closing b { color: var(--warn); }
+.ap-closing a { color: inherit; text-decoration: underline; }
 .ap-scam-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .ap-own input { flex: 1; min-width: 240px; height: 36px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 0 12px; font: inherit; font-size: 14px; color: var(--ink); }
 .ap-prog-detail { font-size: 13px; color: var(--muted); line-height: 1.4; }
