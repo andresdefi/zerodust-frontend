@@ -127,6 +127,7 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
     return () => { clearTimeout(timer); for (const e of events) window.removeEventListener(e, reset); };
   }, [keyLoaded, sweepingNow]);
   const anyResult = Object.values(progress.states).some((st) => st.phase === 'done' || st.phase === 'failed');
+  const refresh = () => { setProgress({ states: {}, bridgeOf: {} }); setRun(null); setSelection(null); setVersion((v) => v + 1); };
   const runs = useRef(0);
   const begin = (plan: SweepPlan, w: Wallet) => {
     setWallet(w);
@@ -185,14 +186,22 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
       <div className="ap-tabbar">
         <h2 className="ap-section-title">Balances</h2>
         {anyResult && !sweepingNow && (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setProgress({ states: {}, bridgeOf: {} }); setRun(null); setSelection(null); setVersion((v) => v + 1); }}>Refresh balances</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={refresh}>Refresh balances</button>
         )}
       </div>
 
       {data.state === 'loading' && <div className="ap-state">Reading balances on every chain…</div>}
       {data.state === 'error' && <div className="ap-state" role="alert">{data.error}</div>}
+      {data.state === 'ready' && data.unchecked.length > 0 && (
+        <div className="ap-unchecked" role="status">
+          <p>Couldn't read {listNames(data.unchecked)} just now, so {data.unchecked.length === 1 ? 'it' : 'they'} may hold gas that isn't shown here.</p>
+          {!sweepingNow && <button type="button" className="btn btn-ghost btn-sm" onClick={refresh}>Check again</button>}
+        </div>
+      )}
       {data.state === 'ready' && data.rows.length === 0 && (
-        <div className="ap-state">Nothing to sweep: this address holds no gas on any of the {data.chainOptions.length} chains ZeroDust covers.</div>
+        <div className="ap-state">{data.unchecked.length === 0
+          ? `Nothing to sweep: this address holds no gas on any of the ${data.chainOptions.length} chains ZeroDust covers.`
+          : 'Nothing to sweep on the chains that answered.'}</div>
       )}
 
       {groups.map((g) => {
@@ -391,6 +400,11 @@ function ScamWarning({ address, onUse, onCancel }: { address: Address; onUse: ()
       </p>
     </div>
   );
+}
+
+/** "A", "A and B", "A, B and C" */
+function listNames(names: string[]): string {
+  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 }
 
 /** The address the 'Stays on its own chain' group sends to, on each of its chains */
