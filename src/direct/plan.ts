@@ -188,6 +188,8 @@ export interface DirectBalance {
   decimals: number;
   explorerUrl: string;
   balance: string;
+  /** false: the chain's RPCs did not answer in time; balance "0" but unknown */
+  checked?: boolean;
 }
 
 export interface Target {

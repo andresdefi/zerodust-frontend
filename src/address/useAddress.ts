@@ -126,6 +126,8 @@ export interface AddressData {
   rows: AddressRow[];
   /** Every chain the funds can be sent to */
   chainOptions: ChainOption[];
+  /** Chains whose balance could not be read just now (shown as such, never as empty) */
+  unchecked: string[];
   routesOf: (chainId: number) => ChainRoutes;
   /** USD per token symbol, when known */
   priceOf: (symbol: string) => number | undefined;
@@ -133,7 +135,7 @@ export interface AddressData {
 
 /** Balances, prices and what can move each chain's gas, for any address */
 export function useAddressData(address: Address | null, destination: number | null, recipient: Address | null, version = 0): AddressData {
-  const [base, setBase] = useState<{ address: Address; rows: AddressRow[]; info: Map<number, ChainInfo>; chainOptions: ChainOption[]; prices: Record<string, number> } | { address: Address; error: string } | null>(null);
+  const [base, setBase] = useState<{ address: Address; rows: AddressRow[]; info: Map<number, ChainInfo>; chainOptions: ChainOption[]; prices: Record<string, number>; unchecked: string[] } | { address: Address; error: string } | null>(null);
   // Per destination: sponsored sources that cannot reach it, direct routes
   const [destRoutes, setDestRoutes] = useState<{ key: string; unreachable: Set<number>; direct: Record<number, DirectReach> } | null>(null);
 
@@ -177,7 +179,11 @@ export function useAddressData(address: Address | null, destination: number | nu
           ...chains.map((c) => ({ chainId: c.chainId, name: c.name, token: c.nativeToken, decimals: c.nativeTokenDecimals, explorerUrl: c.explorerUrl })),
           ...directInfo.chains.map((c) => ({ chainId: c.chainId, name: c.name, token: c.token, decimals: c.decimals, explorerUrl: c.explorerUrl })),
         ].sort((a, b) => a.name.localeCompare(b.name));
-        if (!cancelled) setBase({ address, rows, info, chainOptions, prices: { ...directInfo.prices, ...prices } });
+        const unchecked = [
+          ...(balances.chains as Array<{ name: string; checked?: boolean }>).filter((b) => b.checked === false).map((b) => b.name),
+          ...direct.filter((d) => d.checked === false && DIRECT_RPC_URLS[d.chainId] !== undefined).map((d) => d.name),
+        ].sort((a, b) => a.localeCompare(b));
+        if (!cancelled) setBase({ address, rows, info, chainOptions, prices: { ...directInfo.prices, ...prices }, unchecked });
       } catch (error) {
         if (!cancelled) setBase({ address, error: error instanceof Error ? error.message : 'Could not load balances.' });
       }
@@ -248,11 +254,11 @@ export function useAddressData(address: Address | null, destination: number | nu
     return { gas: true };
   }, [ready, routes, destination]);
 
-  const none = { rows: [], chainOptions: [], routesOf: () => ({ gas: null }), priceOf: () => undefined };
+  const none = { rows: [], chainOptions: [], unchecked: [], routesOf: () => ({ gas: null }), priceOf: () => undefined };
   if (!address || !base || base.address !== address) return { state: 'loading', ...none };
   if ('error' in base) return { state: 'error', error: base.error, ...none };
   const prices = base.prices;
-  return { state: 'ready', rows: base.rows, chainOptions: base.chainOptions, routesOf, priceOf: (symbol) => prices[symbol] };
+  return { state: 'ready', rows: base.rows, chainOptions: base.chainOptions, unchecked: base.unchecked, routesOf, priceOf: (symbol) => prices[symbol] };
 }
 
 /** Any bridge that carries this chain's gas out right now (not only a token route) */
