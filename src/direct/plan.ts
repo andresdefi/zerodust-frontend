@@ -1,4 +1,5 @@
 import { API_URL } from '../sweep/constants';
+import type { Closing } from '../address/closing';
 import type { L1Formula } from './l1fee';
 
 // Direct chains: no EIP-7702 in ZeroDust, swept by the wallet itself with
@@ -179,6 +180,8 @@ export interface DirectChainInfo {
   /** Guard chains: the OP-stack L1 fee formula */
   l1Formula?: string;
   txGapBlocks?: number;
+  /** The chain announced its shutdown (address/closing.ts) */
+  closing?: Closing;
 }
 
 export interface DirectBalance {
