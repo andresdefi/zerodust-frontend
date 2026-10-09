@@ -379,3 +379,14 @@ test('a recipient on the scam list is said plainly and used only after a second 
   await dest2.getByRole('button', { name: 'Use this address' }).click();
   await expect(dest2).toContainText('(another address)');
 });
+
+test('a chain whose RPCs did not answer in time is named, never shown as empty, and Check again reads it', async ({ page }) => {
+  await openAddress(page, { unchecked: 1 });
+  const note = page.getByRole('status').filter({ hasText: "Couldn't read" });
+  await expect(note).toHaveText(/Couldn't read Arbitrum just now, so it may hold gas that isn't shown here\./);
+  await expect(page.getByRole('checkbox', { name: 'Select Arbitrum' })).toHaveCount(0);
+
+  await note.getByRole('button', { name: 'Check again' }).click();
+  await expect(note).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: 'Select Arbitrum' })).toBeVisible();
+});

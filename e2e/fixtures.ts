@@ -254,9 +254,11 @@ function telosLeftoverPlan(nonce: number) {
  * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base);
  * `hiccups`: the first route checks answer "unknown", then the real answer
  */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean; scam?: string[]; scamCheckDown?: boolean } = {}) {
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean; scam?: string[]; scamCheckDown?: boolean; unchecked?: number } = {}) {
   const chains = [...CHAINS, ...(opts.mitosis ? [MITOSIS_CHAIN] : []), ...(opts.endurance ? [ENDURANCE_CHAIN] : [])];
-  const funded = [...FUNDED, ...(opts.mitosis ? [MITOSIS] : []), ...(opts.endurance ? [ENDURANCE] : [])];
+  const funded = [...FUNDED, ...(opts.mitosis ? [MITOSIS] : []), ...(opts.endurance ? [ENDURANCE] : []), ...(opts.unchecked !== undefined ? [42161] : [])];
+  // Arbitrum's RPCs miss the deadline on this many balance reads, then answer with its (hidden) balance
+  let uncheckedLeft = opts.unchecked ?? 0;
   let hiccups = opts.hiccups ?? 0;
   /** The funded direct chain, if any */
   const DIRECT = opts.telos ? TELOS : opts.monad ? MONAD : AVAX;
@@ -300,13 +302,18 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       });
     }
     if (path === `/balances/${user}` || path.toLowerCase() === `/balances/${user.toLowerCase()}`) {
+      const late = uncheckedLeft > 0;
+      if (late) uncheckedLeft -= 1;
       return json(route, {
         address: user,
-        chains: chains.map((c) => ({
-          chainId: c.chainId, name: c.name, nativeToken: c.nativeToken,
-          balance: funded.includes(c.chainId) && !swept.has(c.chainId) ? BALANCE.toString() : '0',
-          balanceFormatted: '', canSweep: funded.includes(c.chainId) && !swept.has(c.chainId), minBalance: '0',
-        })),
+        chains: chains.map((c) => {
+          const missed = late && c.chainId === 42161;
+          const has = !missed && funded.includes(c.chainId) && !swept.has(c.chainId);
+          return {
+            chainId: c.chainId, name: c.name, nativeToken: c.nativeToken,
+            balance: has ? BALANCE.toString() : '0', balanceFormatted: '', canSweep: has, minBalance: '0', checked: !missed,
+          };
+        }),
       });
     }
     if (path === '/destinations') {
