@@ -298,7 +298,7 @@ export function useEstimates(address: Address | null, rows: AddressRow[], destin
           const plan = await preparePlan({ chainId: r.chainId, toChainId: destination, from: address, recipient, mode: 'route' });
           if (!cancelled) put(r.chainId, { receive: BigInt(plan.receive), route: plan.route === 'transfer' ? 'Same chain' : DIRECT_ROUTE_NAMES[plan.route] ?? plan.route });
         } else {
-          const q = await client.getQuote({ fromChainId: r.chainId, toChainId: destination, userAddress: address, destination: recipient });
+          const q = await estimateQuote({ fromChainId: r.chainId, toChainId: destination, userAddress: address, destination: recipient });
           const bridge = (q as { bridge?: { displayName?: string } }).bridge?.displayName;
           if (!cancelled) put(r.chainId, { receive: BigInt(q.estimatedReceive), route: r.chainId === destination ? 'Same chain' : bridge ?? 'Bridge' });
         }
@@ -311,6 +311,19 @@ export function useEstimates(address: Address | null, rows: AddressRow[], destin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
   return store.key === key ? store.values : {};
+}
+
+/**
+ * "You receive" for one chain: GET /quote?estimate=true. Nothing is stored and nothing can be
+ * signed; the API asks only the bridges its route check saw serving the chain and repeats an
+ * answer for 30 s. The sweep itself still takes a real quote (sweep/useSweep.ts).
+ */
+async function estimateQuote(p: { fromChainId: number; toChainId: number; userAddress: Address; destination: Address }): Promise<{ estimatedReceive: string; bridge?: { displayName?: string } }> {
+  const query = new URLSearchParams({ fromChainId: String(p.fromChainId), toChainId: String(p.toChainId), userAddress: p.userAddress, destination: p.destination, estimate: 'true' });
+  const res = await fetch(`${API_URL}/quote?${query}`);
+  const body = (await res.json().catch(() => ({}))) as { estimatedReceive?: string; bridge?: { displayName?: string }; error?: string };
+  if (!res.ok || body.estimatedReceive === undefined) throw new Error(body.error ?? 'No quote');
+  return { estimatedReceive: body.estimatedReceive, ...(body.bridge ? { bridge: body.bridge } : {}) };
 }
 
 const DIRECT_ROUTE_NAMES: Record<string, string> = { gaszip: 'Gas.zip', relay: 'Relay', across: 'Across', lifi: 'LI.FI', oft: 'LayerZero' };
