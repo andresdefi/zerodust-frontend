@@ -66,7 +66,8 @@ A wallet that supports ERC-7715 Advanced Permissions (MetaMask 13.23 or later) c
 The SDK does not support this flow yet. Differences from the key flow:
 
 - No EIP-7702 authorizations from you and no revoke (`autoRevoke: false`, `revokeGasUnits: "0"`): the account stays MetaMask's smart account.
-- Cross-chain only through Relay, Across or Hyperlane, which take the refund address and recipient explicitly. A pair only Gas.zip serves answers `PERMISSION_ROUTE_UNAVAILABLE`; the key flow can still sweep it.
+- Cross-chain only through Relay, Across, Stargate or Hyperlane, which take the refund address and recipient explicitly. A pair only Gas.zip serves answers `PERMISSION_ROUTE_UNAVAILABLE`; the key flow can still sweep it.
+- A chain's own bridge (`bridge=native`) is not offered with a permission; sweep with the key.
 - Quotes live 55 seconds. If they expire while the wallet is signing, quote again and sign a new batch.
 
 ## Chains
@@ -92,7 +93,8 @@ Response:
       "explorerUrl": "https://basescan.org",
       "enabled": true,
       "crossChain": { "available": true, "bridges": ["gaszip", "relay", "across"], "checkedAt": "2026-10-01T16:01:01.302Z" },
-      "simulation": { "reliable": true, "mode": "authorizationList", "checkedAt": "2026-10-01T16:00:51.180Z" }
+      "simulation": { "reliable": true, "mode": "authorizationList", "checkedAt": "2026-10-01T16:00:51.180Z" },
+      "metamask": true
     }
   ]
 }
@@ -103,6 +105,8 @@ Response:
 | `minBalance` | Informational. Quotes do not enforce a fixed minimum; the fee reserve decides. |
 | `crossChain` | Whether any bridge currently accepts this chain as a cross-chain source, and which. Checked every 10 minutes; `null` values until the first check. Advisory: `/quote` always asks the bridges live. |
 | `simulation` | Whether this chain's RPC can simulate an EIP-7702 sweep (checked hourly). `mode` is `authorizationList` or `stateOverride`. Quotes from a chain with `reliable: false` are refused. |
+| `metamask` | Whether a MetaMask permission sweep works on this chain (the permission router is deployed there) |
+| `closing` | Only for a chain that announced its shutdown: `stage` (`closing` or `cutoff`), `closesAt`, `cutoffAt` (3 days earlier: sponsored sweeps stop), `source` (the announcement) and `note`. Never offered as a destination. In the list only; `/chains/:chainId` leaves it out. |
 
 ### GET /chains/:chainId
 
@@ -125,7 +129,7 @@ How long each bridge usually takes to deliver, from real ZeroDust deliveries in 
 
 | Field | Notes |
 |---|---|
-| `routes` | Per bridge (`gaszip`, `relay`, `across`, `lifi`): median and 90th percentile seconds from the source transaction to delivery, and the number of deliveries |
+| `routes` | Per bridge (for example `relay`, `across`, `gaszip`, `stargate`, `hyperlane`): median and 90th percentile seconds from the source transaction to delivery, and the number of deliveries |
 | `slowLately` | The last 24 hours' median is above twice the usual median and at least 60 seconds more |
 | `pairs` | Per bridge and source chain, keyed `bridge:chainId` |
 
@@ -196,8 +200,9 @@ Prices a sweep and stores the quote. Nothing is signed or sent.
 | `userAddress` | Required. The wallet to empty. |
 | `destination` | Required. Where the funds go. |
 | `signer` | `key` (default): EIP-7702, signed with the wallet's key. `permission`: through MetaMask and the permission router ([With MetaMask](#with-metamask)). |
+| `bridge` | `native`: through the source chain's own bridge to Ethereum, for chains that have one (Lisk, Arbitrum Nova; `toChainId` must be `1`). Never chosen without it. See [A chain's own bridge](/docs#a-chains-own-bridge). |
 
-ZeroDust always chooses the route. For a cross-chain sweep it asks Gas.zip, Relay and Across and keeps the highest expected output. Every route delivers the destination's native gas (see [What arrives](/docs#what-arrives) for the two token exceptions): Across is asked only when both chains' gas is ETH, and only a plain deposit to a recipient with no contract code (or an EIP-7702 delegation) on the destination is accepted from it. Passing `callTarget` or `callData` is refused with `CUSTOM_ROUTE_UNSUPPORTED`.
+ZeroDust always chooses the route. For a cross-chain sweep it asks every bridge that serves the pair (Gas.zip, Relay, Across, Stargate; Hyperlane, Metalayer or Endurance for the token deliveries) and keeps the highest expected output. Every route delivers the destination's native gas (see [What arrives](/docs#what-arrives) for the token exceptions): Across is asked only when both chains' gas is ETH, and only a plain deposit to a recipient with no contract code (or an EIP-7702 delegation) on the destination is accepted from it. Passing `callTarget` or `callData` is refused with `CUSTOM_ROUTE_UNSUPPORTED`.
 
 Response:
 
@@ -212,8 +217,8 @@ Response:
 | `autoRevoke` | `true` with `signer=key`; `false` with `signer=permission` (no revoke) |
 | `signer` | `key` or `permission`, as requested |
 | `permission` | `signer=permission` only: `router` (the permission's delegate, redeemer and payee, and the typed data's `verifyingContract`), `delegationManager` (MetaMask's) and `domainVersion` (`permission-2`) |
-| `receiveToken` | Mitosis and Endurance only: `{ symbol, address, decimals }` of the ERC-20 token that arrives on BNB Chain instead of gas. `estimatedReceive` and `intent.minReceive` are in this token. |
-| `bridge` | Cross-chain only: `name`, `displayName`, `inputAmount` (wei sent to the bridge), `expectedOutput` (wei the bridge expects to deliver) |
+| `receiveToken` | Token deliveries only (Mitosis and Endurance to BNB Chain, Intuition to Base): `{ symbol, address, decimals }` of the ERC-20 token that arrives instead of gas. `estimatedReceive` and `intent.minReceive` are in this token. |
+| `bridge` | Cross-chain only: `name`, `displayName`, `inputAmount` (wei sent to the bridge), `expectedOutput` (wei the bridge expects to deliver). With `bridge=native`, `name` is `native` and the sweep is `completed` once its source transaction succeeds: the funds wait in the bridge until the recipient claims them on Ethereum. |
 | `intent` | Fields that go into the signed `SweepIntent`: `mode`, `destination`, `destinationChainId` (string), `callTarget` (zero address for same-chain), `routeHash`, `minReceive`, and `callData` for cross-chain. `keccak256(callData) == routeHash`, so the route can be decoded and checked before signing. |
 | `deadline` | Unix seconds. The contract accepts at most 60 seconds ahead. |
 | `nonce` | The wallet's ZeroDust intent nonce |
@@ -249,6 +254,7 @@ Errors (400 unless noted):
 | `SPONSOR_UNAVAILABLE` | The sponsor cannot pay for this sweep on this chain right now |
 | `L1_FEE_UNAVAILABLE` | The rollup's L1 data fee could not be priced; try again shortly |
 | `CHAIN_CLOCK_LAG` | The chain's latest block is too far behind to leave time to sign |
+| `CHAIN_CLOSING` | The source chain is past its cut-off or closed, or the destination is a closing chain; the message names the date and the chain's own bridge |
 | `ADDRESS_TEMPORARILY_BLOCKED` | Two or more sweeps from this address failed for wallet-side reasons; try again later |
 | `CUSTOM_ROUTE_UNSUPPORTED` | `callTarget` or `callData` was passed |
 | `AMOUNT_TOO_LOW` | Below every bridge's minimum; `minimumBalanceWei` is the balance to top up to (an estimate) |
