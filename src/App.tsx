@@ -9,6 +9,7 @@ import { directChains } from './direct/plan';
 import { addressHref, navigate, useView } from './lib/route';
 import { API_URL } from './sweep/constants';
 import { connectMetaMask, findMetaMask, type MetaMaskSession } from './sweep/metamask';
+import { track } from './lib/events';
 
 const client = new ZeroDust({ environment: 'mainnet', baseUrl: API_URL });
 
@@ -42,6 +43,10 @@ function Site() {
   const [mmBusy, setMmBusy] = useState(false);
   const [mmError, setMmError] = useState<string | null>(null);
 
+  // Each page opened (home or an address) adds one to the day's count; the address is never sent
+  const viewKey = view.kind === 'address' ? `address:${view.query}` : 'home';
+  useEffect(() => { track(viewKey === 'home' ? 'home' : 'address'); }, [viewKey]);
+
   // Switching or disconnecting the account in MetaMask ends this session
   useEffect(() => {
     if (!session) return;
@@ -62,8 +67,10 @@ function Site() {
       navigate(addressHref(session.address));
       return;
     }
+    track('metamask-connect');
     const provider = await findMetaMask();
     if (!provider) {
+      track('metamask-missing');
       setMmError('MetaMask was not found in this browser. Paste the address instead, or install MetaMask.');
       if (view.kind !== 'home') navigate('/');
       return;
@@ -71,9 +78,11 @@ function Site() {
     setMmBusy(true);
     try {
       const s = await connectMetaMask(provider);
+      track('metamask-connected');
       setSession(s);
       navigate(addressHref(s.address));
     } catch (error) {
+      track('metamask-refused');
       setMmError(error instanceof Error ? error.message : 'MetaMask did not connect.');
     } finally {
       setMmBusy(false);

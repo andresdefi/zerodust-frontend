@@ -10,6 +10,7 @@ import { minimumOf, tooSmallText, useSweep, type Row, type RowState, type SweepM
 import { tokenRouteOf, type GroupKey } from './groups';
 import type { AddressRow } from './useAddress';
 import { OFFLINE } from '../lib/env';
+import { track } from '../lib/events';
 
 // Sweeping one group from the address page (redesign phase 3): pick how to sign, then
 // the proven sweep machinery (sweep/useSweep.ts) checks every chain with real quotes,
@@ -54,6 +55,7 @@ export function SweepWithDialog({ open, plan, address, session, onWallet, onClos
   onClose: () => void;
 }) {
   const ref = useDialog(open);
+  useEffect(() => { if (open) track('sweep-dialog'); }, [open]);
   // The offline file is key-only: straight to the key
   const start = OFFLINE ? 'key' : 'choose';
   const [mode, setMode] = useState<'choose' | 'key'>(start);
@@ -74,14 +76,23 @@ export function SweepWithDialog({ open, plan, address, session, onWallet, onClos
     }
     setBusy(true);
     setError(null);
+    track('metamask-connect');
+    let connecting = false;
     try {
       const provider = await findMetaMask();
-      if (!provider) throw new Error('MetaMask was not found in this browser. Use the key, or open this page where MetaMask is installed.');
+      if (!provider) {
+        track('metamask-missing');
+        throw new Error('MetaMask was not found in this browser. Use the key, or open this page where MetaMask is installed.');
+      }
+      connecting = true;
       const session = await connectMetaMask(provider);
+      connecting = false;
+      track('metamask-connected');
       if (!isAddressEqual(session.address, address)) throw new Error(`MetaMask is on ${shortAddress(session.address)}. Switch MetaMask to ${shortAddress(address)}, the address on this page, and try again.`);
       setMode('choose');
       onWallet({ kind: 'metamask', session });
     } catch (e) {
+      if (connecting) track('metamask-refused');
       setError(e instanceof Error ? e.message : 'MetaMask did not connect.');
     } finally {
       setBusy(false);
@@ -106,7 +117,7 @@ export function SweepWithDialog({ open, plan, address, session, onWallet, onClos
                 <span className="tag ok">{busy ? 'Connecting…' : session ? 'Connected' : 'Recommended'}</span>
               </button>
             )}
-            <button type="button" className="zd-opt" onClick={() => setMode('key')} disabled={paused}>
+            <button type="button" className="zd-opt" onClick={() => { track('sweep-with-key'); setMode('key'); }} disabled={paused}>
               <span className="zd-opt-ic" aria-hidden="true">🔑</span>
               <span className="zd-opt-t"><b>Private key</b><span>Covers {n === 1 ? 'it' : `all ${n}`} · stays on this page, never sent</span></span>
             </button>
