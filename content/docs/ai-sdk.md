@@ -1,6 +1,6 @@
 # Vercel AI SDK tools
 
-`@zerodust/ai-sdk` (0.1.1) gives a Vercel AI SDK model read-only ZeroDust tools: chains, balances, quotes and sweep status. The tools never sign and cannot move funds. To let an agent sweep, use [`ZeroDustAgent`](/docs/sdk-agent) or the [MCP server](/docs/mcp).
+`@zerodust/ai-sdk` (0.2.0) gives a Vercel AI SDK model read-only ZeroDust tools: chains, balances, quotes and sweep status. The tools never sign and cannot move funds. To let an agent sweep, use [`ZeroDustAgent`](/docs/sdk-agent) or the [MCP server](/docs/mcp).
 
 ## Install
 
@@ -43,4 +43,3 @@ Each tool returns a plain object.
 | `zerodust_get_sweep_status` | `sweepId` | `sweepId`, `status`, `sweepType`, `fromChainId`, `toChainId`, `destination`, `txHash`, `bridgeTrackingUrl`, `errorMessage` |
 | `zerodust_list_sweeps` | `address`, optional `limit` (1 to 100, default 10) | `total`, `sweeps` |
 
-The fee text in `zerodust_info` 0.1.1 predates the current schedule (it says sweeps under $1 have no service fee). The current fees are on the [overview](/docs): 5% under $1, and 1% from $1 with a minimum of $0.05 and a maximum of $0.50.

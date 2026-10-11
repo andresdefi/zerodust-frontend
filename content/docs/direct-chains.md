@@ -6,7 +6,7 @@ The planning endpoints are quote-only. They return unsigned transactions and nev
 
 ## Chains
 
-As of 8 October 2026, `GET /direct/chains` lists 21 chains:
+As of 11 October 2026, `GET /direct/chains` lists 21 chains:
 
 | Chain | ID | Token | `kind` |
 |---|---|---|---|
@@ -32,7 +32,7 @@ As of 8 October 2026, `GET /direct/chains` lists 21 chains:
 | Blast | 81457 | ETH | `opguard` |
 | Ethereal | 5064014 | USDe | `arbitrum` |
 
-Read the list from the API rather than hardcoding it. Blast is shutting down (standard withdrawals end on 26 October 2026) and leaves the list when it does.
+Read the list from the API rather than hardcoding it. Blast (26 October 2026), Gravity (1 November 2026) and Abstract (15 December 2026) are shutting down: their entries carry `closing`, and each leaves the list when it closes. Vana has `noExit: true`: no bridge takes VANA out, so only a same-chain sweep to another address is planned.
 
 ## How exact zero works
 
@@ -95,6 +95,8 @@ Rate limits: `/direct/chains`, `/direct/balances` and `/direct/status` are reads
 
 `kind` is the chain's gas rule: `evm`, `arbitrum` (price must equal the base fee), `etherlink` (inclusion fee charged as gas), `gaslimit` (the whole limit is charged), `fixedprice` (the network's own price is charged, whatever the transaction offers), `zk` (a paymaster pays the gas) or `opguard` (an L1 data fee; one transaction through ZeroDustGuard, with `l1Formula`). `prices` is USD per token, for display.
 
+Optional fields: `nativeExit` (`stack`, `toChainId`, `bridgeUrl`: the chain's own bridge, see below), `noExit` (no way off the chain) and `closing` (`stage`, `closesAt`, `cutoffAt`, `source`, `note`). In a chain's last 3 days (`cutoff`) plans carry no ZeroDust fee.
+
 ### GET /direct/balances/:address
 
 An array of `{ chainId, name, token, decimals, explorerUrl, balance }`. A chain whose RPC fails is left out.
@@ -109,6 +111,7 @@ Whether a bridge can take the balance to a destination right now. Quotes only.
 | `toChainId` | Destination chain |
 | `from` | The wallet |
 | `recipient` | Destination address |
+| `bridge` | Optional. `native`: through the chain's own bridge to Ethereum (chains with `nativeExit`; `toChainId` must be `1`) |
 
 Response:
 
@@ -127,6 +130,7 @@ The unsigned transactions that take the chain to exactly 0.
 | `feePaidTx` | Optional hash of an earlier fee transaction |
 
 - `route`: an optional fee transaction, then the sweep. Same chain (`toChainId` = `chainId`) is a plain transfer to `recipient`, which must not be `from`. Cross-chain asks Gas.zip and Relay and keeps the larger output.
+- With `bridge=native` (chains with `nativeExit`): the sweep goes into the chain's own bridge to `recipient` on Ethereum (`route: "native"`, `receive: null`): Blast through ZeroDustGuard into its `L2StandardBridge`, Abstract through the paymaster into `L2BaseToken.withdraw`, Gravity into `ArbSys.withdrawEth` (G arrives on Ethereum as an ERC-20, named in `receiveToken`). Nothing arrives by itself: after the chain's waiting period the recipient proves (Blast) and claims the withdrawal on Ethereum, on the chain's bridge site (`nativeExit.bridgeUrl`).
 - `burn`: one transfer of everything to `0x000000000000000000000000000000000000dEaD`. `toChainId` and `recipient` are still required but not used.
 - `donate`: one transfer of everything to ZeroDust.
 
@@ -135,7 +139,7 @@ Response:
 | Field | Notes |
 |---|---|
 | `chainId` | |
-| `route` | `gaszip`, `relay`, `across`, `transfer`, `burn` or `donate` |
+| `route` | `gaszip`, `relay`, `across`, `native`, `transfer`, `burn` or `donate` |
 | `requestId` | Relay's request ID, needed by `/direct/status`; otherwise `null` |
 | `txs` | Unsigned legacy transactions, in order, with consecutive nonces: `kind` (`fee`, `sweep` or `swap`), `to`, `data`, `value`, `gas`, `gasPrice`, `nonce` |
 | `receive` | The least that arrives: the bridge's quote less 3% (bridges settle at their own price on delivery), the exact value for a same-chain transfer, `0` for burn or donate |
@@ -145,6 +149,7 @@ Response:
 | `txGapBlocks` | Gas-limit chains with a reserve rule (Monad): blocks to wait after each transaction's block before sending the next |
 | `expiresAt` | Across only: unix seconds after which the deposit reverts on-chain. Across quotes live about 30 seconds; never send the sweep after this |
 | `guard` | Guard chains only: how the one transaction through ZeroDustGuard is built (see [Guard chains](#guard-chains-op-stack)) |
+| `receiveToken` | When a token arrives instead of gas (Telos's OFT exit, Gravity's own bridge): `{ chainId, symbol, address, decimals }` |
 
 #### Across (not offered at the moment)
 
@@ -154,9 +159,9 @@ Before signing, check that the plan is what you asked for and that the sum of `v
 
 ### GET /direct/exit
 
-For a chain with no direct route but a swap-then-bridge one (LI.FI). Takes `chainId`, `toChainId` (must differ from `chainId`), `from`, `recipient` and optional `feePaidTx`.
+For a chain with no direct route but an exit: a swap-then-bridge (LI.FI), or the chain's own token bridge (Telos: TLOS to Base through its OFT, `route: "oft"`, the token named in `receiveToken`). Takes `chainId`, `toChainId` (must differ from `chainId`), `from`, `recipient` and optional `feePaidTx`.
 
-The response has the same shape as `/direct/prepare`, with `route: "lifi"`, a `swap` transaction, `tool` (the LI.FI tool used) and `leftoverMax`. A swap cannot use its gas limit exactly, so it leaves a small remainder. After the swap lands, sweep that remainder with `/direct/prepare` in `burn` or `donate` mode. If the balance is then above `leftoverMax`, the swap failed: stop.
+The response has the same shape as `/direct/prepare`, with `route: "lifi"` and a `swap` transaction (or `route: "oft"` and a `sweep` into the OFT), `tool` (the tool used) and `leftoverMax`. A swap cannot use its gas limit exactly, so it leaves a small remainder. After the swap lands, sweep that remainder with `/direct/prepare` in `burn` or `donate` mode. If the balance is then above `leftoverMax`, the swap failed: stop.
 
 ### GET /direct/status
 

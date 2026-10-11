@@ -1,6 +1,6 @@
 # LangChain tools
 
-`@zerodust/langchain` (0.1.1) gives a LangChain agent read-only ZeroDust tools: chains, balances, quotes and sweep status. The tools never sign and cannot move funds. To let an agent sweep, use [`ZeroDustAgent`](/docs/sdk-agent) or the [MCP server](/docs/mcp).
+`@zerodust/langchain` (0.2.0) gives a LangChain agent read-only ZeroDust tools: chains, balances, quotes and sweep status. The tools never sign and cannot move funds. To let an agent sweep, use [`ZeroDustAgent`](/docs/sdk-agent) or the [MCP server](/docs/mcp).
 
 ## Install
 

@@ -1,6 +1,6 @@
 # SDK overview
 
-`@zerodust/sdk` is the TypeScript SDK for ZeroDust. The current version is 0.5.7 (MIT licensed, source at [github.com/andresdefi/zerodust](https://github.com/andresdefi/zerodust/tree/main/sdk)).
+`@zerodust/sdk` is the TypeScript SDK for ZeroDust. The current version is 0.5.14 (MIT licensed, source at [github.com/andresdefi/zerodust](https://github.com/andresdefi/zerodust/tree/main/sdk)).
 
 ## Install
 
@@ -21,7 +21,7 @@ npm install @zerodust/sdk viem
 
 Use `ZeroDustAgent` unless you need to sign somewhere the agent cannot run. It is the only path that applies every pre-signing check for you.
 
-The SDK signs with a key (EIP-7702). Sweeping through MetaMask Advanced Permissions, without the key, is not in the SDK yet; see the [REST API](/docs/api#with-metamask).
+The SDK signs with a key (EIP-7702). Sweeping through MetaMask Advanced Permissions, without the key, is not in the SDK yet; see the [REST API](/docs/api#with-metamask). Neither is asking for a chain's own bridge: `getQuote` has no `bridge` option yet, though the agent checks such a quote (`bridge=native` from the REST API) like any other route.
 
 ## Configuration
 
@@ -54,20 +54,25 @@ The SDK works in Node.js. The API only allows browser requests from the ZeroDust
 Classes and factories:
 
 - `ZeroDust`, `ZeroDustAgent`, `createAgentFromPrivateKey`
+- `DEFAULT_RPC_URLS`: the public RPC per chain the agent uses without your own
 
 Errors (see [Errors](/docs/sdk-errors)):
 
-- `ZeroDustError`, `BalanceTooLowError`, `QuoteExpiredError`, `NetworkError`, `TimeoutError`, `ChainNotSupportedError`, `InvalidAddressError`, `SignatureError`, `BridgeError`, `createErrorFromResponse`, `isZeroDustError`, `wrapError`
+- `ZeroDustError`, `BalanceTooLowError`, `QuoteExpiredError`, `NetworkError`, `TimeoutError`, `ChainNotSupportedError`, `InvalidAddressError`, `SignatureError`, `BridgeError`, `createErrorFromResponse`, `codeForStatus`, `isZeroDustError`, `wrapError`
 
 Pre-signing checks, for integrations that sign themselves (see [API client](/docs/sdk-client)):
 
 - `verifySweepQuote`, `assertAuthorizationMatches`, `assertSignedAuthorization`, `maxAcceptableFeeWei`
-- Bridge allowlist helpers: `bridgeForCallTarget`, `allowedCallTargets`, `buildGasZipDepositCalldata`, `createGasZipChainShortResolver`, `ZERODUST_MAINNET_CHAIN_IDS`
+- Bridge allowlist helpers: `bridgeForCallTarget`, `allowedCallTargets`, `buildGasZipDepositCalldata`, `createGasZipChainShortResolver`, `ZERODUST_MAINNET_CHAIN_IDS`, `HYPERLANE_ROUTES`, `ENDURANCE_ROUTE`
+- Token deliveries: `deliveredToken(fromChainId, toChainId)` (the token that arrives instead of gas, if any), `deliversOnlyToSender(chainId)`
+- Relay: `requestRelayDeposit`, `RELAY_API_URL` (the agent fetches Relay deposits itself)
+- Rollup L1 fees: `l1FeeAllowanceWei`, `L1_FEE_ORACLES`, `L1_FEE_PROBE_BYTES`, `L1_FEE_ALLOWANCE_MULTIPLIER`
 - Bounds: `MAX_DEADLINE_WINDOW_SECS` (60), `DEADLINE_CLOCK_SKEW_SECS` (10), `MAX_GAS_PRICE_CAP_MULTIPLIER` (3), `FEE_GAS_BUDGET_UNITS` (1,500,000), `MAX_SERVICE_FEE_BPS` (500)
 
 Signing constants and helpers:
 
 - `ZERODUST_CONTRACT_ADDRESS` (`0x3732398281d0606aCB7EC1D490dFB0591BE4c4f2`), `DOMAIN_NAME` (`'ZeroDust'`), `DOMAIN_VERSION` (`'3'`), `SWEEP_INTENT_TYPES`, `MODE_TRANSFER` (0), `MODE_CALL` (1), `ZERO_ADDRESS`, `ZERO_ROUTE_HASH`
+- `RESTORABLE_DELEGATES`, `closingDelegateFor(code)`: the closing authorization returns a MetaMask smart account to MetaMask's delegate instead of address 0
 - `computeRouteHash`, `buildSweepIntentTypedData`, `buildSweepIntentFromQuote`, `validateSweepIntentParams`
 
 Input validation:
@@ -78,9 +83,12 @@ Types:
 
 - `Environment`, `ZeroDustConfig`, `Chain`, `ChainsResponse`, `Destination`, `DestinationsResponse`, `ChainBalance`, `BalancesResponse`, `QuoteRequest`, `QuoteResponse`, `FeeBreakdown`, `SweepIntentFields`, `AuthorizationResponse`, `EIP712TypedData`, `EIP7702Authorization`, `SweepRequest`, `SweepResponse`, `SweepStatus`, `RevokeStatus`, `SweepStatusResponse`, `SweepSummary`, `ListSweepsOptions`, `SweepsListResponse`, `ZeroDustErrorCode`, `ApiErrorResponse`
 - Agent types: `ZeroDustAgentConfig`, `AgentSweepRequest`, `AgentBatchSweepRequest`, `AgentSweepResult`, `AgentBatchSweepResult`, `AgentSweepOptions`
+- Others: `DeliveredToken`, `RelayDeposit`, `RelayDepositRequest`
 - Check types: `QuoteCheckContext`, `VerifiedSweep`, `SweepTypedData`, `SweepIntentMessage`, `SweepIntentParams`, `BridgeName`
 
 ## Changes in 0.5
+
+0.5.13 and 0.5.14 accept a chain's own bridge as a route (Lisk's `L2StandardBridge`, Arbitrum Nova's `ArbSys.withdrawEth`, only toward Ethereum and only to the requested recipient). 0.5.11 and 0.5.12 return a MetaMask smart account to MetaMask's delegate after the sweep instead of address 0, so its owner does not pay to upgrade again (0.5.11 is deprecated: it refused its own restore). 0.5.10 adds Stargate's native-ETH pools as a route, with the LayerZero fee read from the pool. 0.5.9 adds Intuition to TRUST on Base (token delivery) and default RPCs for Kaia, 0G, Arbitrum Nova and Intuition. 0.5.8 allows Arbitrum Nova's L1 cost in the fee ceiling.
 
 0.5.6 and 0.5.7: for a Relay route the agent fetches the deposit from Relay itself and binds it (`bindRelayRoute()`, `requestRelayDeposit()`, the quote's `relayRouteToken`), with the amount computed from the balance it reads; Across routes must be plain ETH deposits to a non-contract destination, because Across settles failed swaps in another token than native gas. 0.5.4 requires the revoke authorization on `submitSweep`, as the API does, so every swept wallet ends as a plain account (`ZeroDustAgent` always signed it). 0.5.2 and 0.5.3 added token delivery for chains whose coin has no gas bridge (Mitosis: MITO on BNB Chain via Hyperlane; Endurance: ACE on BNB Chain, to the same wallet only), with `deliveredToken()` and `deliversOnlyToSender()` to tell users.
 
