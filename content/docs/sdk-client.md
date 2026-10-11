@@ -87,7 +87,7 @@ Do not sign this typed data as received. Build your own with `verifySweepQuote()
 | `quoteId` | From `getQuote()` |
 | `signature` | EIP-712 signature of the `SweepIntent` |
 | `eip7702Authorization` | `EIP7702Authorization` delegating to the ZeroDust contract on the source chain |
-| `revokeAuthorization` | Required `EIP7702Authorization` delegating to address 0 on the same chain with nonce + 1, so the delegation is removed right after the sweep. The client (0.5.4+) and the API refuse a sweep without it. |
+| `revokeAuthorization` | Required `EIP7702Authorization` delegating to address 0 (or back to MetaMask's delegate for a wallet that was a MetaMask smart account, see `closingDelegateFor`) on the same chain with nonce + 1, so the delegation is removed right after the sweep. The client (0.5.4+) and the API refuse a sweep without it. |
 
 `EIP7702Authorization` is `{ chainId, contractAddress, nonce, yParity, r, s }`.
 

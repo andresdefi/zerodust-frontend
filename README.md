@@ -1,7 +1,8 @@
 # ZeroDust website
 
-The public site at [zerodust.xyz](https://zerodust.xyz): empty a wallet's native gas balances to
-exactly 0, across many chains at once, to one destination. The home page is the app.
+The public site at [zerodust.xyz](https://zerodust.xyz): look up any address, see its native gas on
+73 chains, and empty them to exactly 0 to one destination, with MetaMask (no key, 16 chains) or the
+wallet's key (every chain). Also a downloadable offline file (key only) and the developer docs.
 
 The page handles private keys, so the build is held to strict rules (checked on every build):
 
@@ -36,7 +37,7 @@ machine.
 
 ## Layout
 
-- `src/` the page (`App.tsx`, `components/`, `styles/tokens.css` for the palette)
+- `src/` the page (`App.tsx`, `home/`, `address/` (the address page and sweep dialog), `sweep/` (sweep flows, MetaMask), `components/`, `styles/`)
 - `build/` Vite plugins (SRI)
 - `scripts/` build checks and the build hash
 - `content/docs/` developer docs and `content/legal/` terms and privacy, Markdown rendered at build time

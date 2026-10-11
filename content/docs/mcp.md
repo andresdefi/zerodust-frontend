@@ -4,7 +4,7 @@ ZeroDust has two Model Context Protocol servers:
 
 | | Hosted | Package |
 |---|---|---|
-| Where | `https://api.zerodust.xyz/mcp` | `@zerodust/mcp-server` (0.4.1), run locally over stdio |
+| Where | `https://api.zerodust.xyz/mcp` | `@zerodust/mcp-server` (0.5.2), run locally over stdio |
 | Install | None | `npx @zerodust/mcp-server` |
 | Read tools | Yes | Yes |
 | Sweeping | No (it holds no keys) | Yes, when enabled with a key you configure |

@@ -28,7 +28,7 @@ The website's main flow. MetaMask's Advanced Permissions (ERC-7715, MetaMask 13.
 How it differs from the key flow:
 
 - No revoke. The wallet keeps MetaMask's smart-account delegation, which is MetaMask's normal state. The allowance is used up by the sweep and expires anyway.
-- Cross-chain only through bridges that take the refund address and recipient as explicit parameters (Relay, Across for ETH to ETH, Hyperlane). The router is the bridge's caller, so Gas.zip, which refunds to its caller, is never used here.
+- Cross-chain only through bridges that take the refund address and recipient as explicit parameters (Relay, Across for ETH to ETH, Stargate, Hyperlane). The router is the bridge's caller, so Gas.zip, which refunds to its caller, is never used here.
 - The router is on 16 chains: Ethereum, OP Mainnet, BNB Chain, Gnosis, Unichain, Polygon, Sonic, Robinhood Chain, Mantle, Arc, Base, Arbitrum, Celo, Linea, Berachain and Katana. Other chains need the key.
 - The SDK does not support this flow yet. The [REST API](/docs/api#with-metamask) does.
 
@@ -42,19 +42,35 @@ How it differs from the key flow:
 
 A sweep delivers the destination chain's own gas token, never a wrapped token or a stablecoin: Avalanche to Base is AVAX in, ETH out; Base to BNB Chain is ETH in, BNB out.
 
-- Bridges that deliver native gas directly carry every pair: Gas.zip, Relay, and Across where both chains' gas is ETH.
+- Bridges that deliver native gas directly carry every pair: Gas.zip, Relay, Stargate (its native-ETH pools), and Across where both chains' gas is ETH. ZeroDust asks them all and keeps the highest expected output.
 - Across is used only for ETH to ETH, as a plain deposit (no swap) to a wallet with no contract code or an EIP-7702 delegation. On other routes Across converts through USDC, USDT or WETH, and if that conversion fails or leaves a remainder it pays the remainder in that token; it also pays WETH instead of ETH to a contract. ZeroDust does not use it there.
 
 ZeroDust picks the route; the bridge does the delivery. If a bridge fails, it refunds under its own rules, usually to the sweeping wallet on the source chain, so that chain is no longer at 0.
 
-Two chains are the exception, because no bridge carries their gas token as gas:
+Some chains are the exception, because no bridge carries their gas token as gas:
 
 | Source | Arrives as | Bridge | Recipient |
 |---|---|---|---|
 | Mitosis (124816), MITO | MITO, an ERC-20 token on BNB Chain | Hyperlane | Any address |
 | Endurance (648), ACE | ACE, an ERC-20 token on BNB Chain | Endurance's bridge | The sweeping wallet only (`OWN_WALLET_ONLY` otherwise) |
+| Intuition (1155), TRUST | TRUST, an ERC-20 token on Base | Metalayer (Caldera's Hyperlane deployment) | Any address |
+| Telos (40), TLOS (direct chain) | TLOS, a token on Base | Telos's own OFT bridge | Any address |
 
 A quote for these routes carries `receiveToken` (symbol, address, decimals), and `estimatedReceive` is in that token. The site says plainly that a token arrives, before you confirm.
+
+### A chain's own bridge
+
+Asked for explicitly (`bridge=native` on [`GET /quote`](/docs/api#get-quote) and the [direct-chain](/docs/direct-chains) planner), ZeroDust sweeps the wallet to exactly 0 into the chain's own bridge to Ethereum. The funds do not arrive by themselves: after a waiting period the recipient proves the withdrawal (OP Stack chains) and claims it on Ethereum, paying Ethereum gas, on the chain's own bridge site. ZeroDust never chooses this route on its own.
+
+| Chain | Stack | Wait before the claim | Arrives on Ethereum as |
+|---|---|---|---|
+| Lisk (1135) | OP Stack | a state record (up to ~6 h), prove, then 7 days | ETH |
+| Arbitrum Nova (42170) | Arbitrum | ~6.4 days | ETH |
+| Blast (81457), direct | OP Stack (older oracle) | an output (~1 h), prove, then 1 day | ETH |
+| Abstract (2741), direct | ZK Stack | until its batch is executed on Ethereum (hours) | ETH |
+| Gravity (1625), direct | Arbitrum Orbit | ~5.6 days | G, an ERC-20 token |
+
+The website does not offer these routes yet.
 
 ## Ways to use ZeroDust
 
@@ -69,12 +85,13 @@ A quote for these routes carries `receiveToken` (symbol, address, decimals), and
 
 ## Supported chains
 
-As of 8 October 2026 ZeroDust sweeps 73 chains:
+As of 11 October 2026 ZeroDust sweeps 73 chains:
 
 - 52 EIP-7702 chains, swept by the sponsor (`GET /chains`). Each entry's `crossChain.available` says whether a bridge currently accepts it as a cross-chain source.
 - 21 direct chains, swept by the wallet itself (`GET /direct/chains`).
 - 16 of the EIP-7702 chains can also be swept with MetaMask, without the key.
-- Cross-chain destinations are not limited to ZeroDust chains: any EVM chain a bridge delivers native gas to qualifies. From Base there are 107 (`GET /destinations?fromChainId=8453`).
+- Cross-chain destinations are not limited to ZeroDust chains: any EVM chain a bridge delivers native gas to qualifies. From Base there are over 100 (104 on 11 October 2026, `GET /destinations?fromChainId=8453`).
+- A chain that announced its shutdown carries `closing` (`closesAt`, `cutoffAt`, the announcement): it is still swept but never offered as a destination, and sponsored sweeps stop 3 days before it closes.
 
 These numbers change. Read them from the API rather than hardcoding them.
 
