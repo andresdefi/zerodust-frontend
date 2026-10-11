@@ -1,6 +1,6 @@
 # Privacy
 
-ZeroDust collects as little as it can. There are no accounts, no cookies, no analytics and no ads. With MetaMask, this site never sees your key; when you load a wallet with its key instead, the key never leaves your browser tab.
+ZeroDust collects as little as it can. There are no accounts, no cookies, no tracking and no ads. With MetaMask, this site never sees your key; when you load a wallet with its key instead, the key never leaves your browser tab.
 
 ## Who runs ZeroDust
 
@@ -10,7 +10,8 @@ ZeroDust is a community tool built and run by [andresdefi](https://x.com/andresd
 
 - **With MetaMask**, the site receives your address, the permissions you grant and the message you sign. Your key stays in MetaMask.
 - **Your private key**, when you load a wallet with it, stays in your browser tab's memory. It is never sent to us or anyone else, never stored, and never logged. Only signatures and signed transactions leave the tab.
-- **No cookies, no analytics, no tracking.** The site stores one thing in your browser, and only if you choose a theme: your light or dark preference (local storage).
+- **No cookies, no tracking.** The site stores one thing in your browser, and only if you choose a theme: your light or dark preference (local storage).
+- **Daily counts of a few steps.** When a page opens, and when you connect MetaMask, open the sweep dialog or choose the key, the page sends the API only the step's name (for example "home"). The API adds it to that day's totals and keeps nothing else: no address, no IP address, no identifier. The offline page sends none.
 - **Hosting.** The site is served by Vercel, which processes the connection data any web server needs to deliver a page (such as your IP address). We do not add analytics to it.
 
 ## What the ZeroDust API receives and keeps
@@ -24,6 +25,7 @@ To quote and run a sweep, the API (api.zerodust.xyz) receives your wallet addres
 | Your signatures for a sweep, and with MetaMask the permission you granted | To execute it | Deleted 7 days after the sweep ends (once its delegation is revoked) |
 | Sweep reports: wallet address, chains, route, transaction hashes, the result and its message, the site version | Sent by the page when a direct-chain sweep ends or a sweep fails, so we can look into it from the reference shown on the page. Never your key | Deleted after 400 days |
 | Daily counts of quotes per chain pair, and of sweeps per chain pair and outcome | Capacity and usage, no addresses | Kept |
+| Daily counts of page steps: pages opened, MetaMask connects, the sweep dialog, the key chosen | To see where people stop before a sweep. Names and totals only, no addresses | Kept |
 | Delivery accuracy per bridge route: amount quoted vs delivered, how long delivery took, the chains and the bridge | To keep the amounts we show at or below what arrives. No addresses, no transaction hashes | Deleted after 400 days |
 
 - **The API stores no IP addresses.** Its request logs record only the method, the route (for example `/balances/:address`, never the address itself), the status and the time taken. It uses your IP address in memory to apply rate limits and does not write it anywhere. (Cloudflare and Render, in front of the API, process connection data to deliver requests; see below.)
@@ -41,7 +43,7 @@ To quote and run a sweep, the API (api.zerodust.xyz) receives your wallet addres
 - **Blockchains.** Every sweep is a public, permanent blockchain transaction. Anyone can see the addresses and amounts involved. This cannot be deleted by anyone.
 - **Chain RPC providers.** Your browser reads balances and sends transactions through each chain's public RPC endpoint. Those providers see your IP address and the requests you make.
 - **Bridges** (Gas.zip, Relay, Across, LI.FI). To quote and deliver a cross-chain sweep, the API sends them your wallet address, the destination address, the chains and the amount. For a MetaMask sweep that Relay carries, your browser also asks Relay for the deposit directly (api.relay.link), with the same details, so Relay sees your IP address.
-- **Our providers.** The API runs on Render, its database on Supabase, and it sits behind Cloudflare. It reads the chains through Alchemy and Infura, which see the wallet addresses it looks up but not your IP address. They process data only to run the service.
+- **Our providers.** The API runs on Render, its database on Supabase, and it sits behind Cloudflare. It reads the chains through Alchemy and Infura, and for a few chains also through dRPC's public endpoints when the chain's own RPC fails; they see the wallet addresses it looks up but not your IP address. They process data only to run the service.
 - **Transfers outside the EEA.** Render, Supabase, Cloudflare, Vercel, Alchemy and Infura are US companies. Transfers to them rely on the EU's standard contractual clauses or the EU-US Data Privacy Framework.
 
 ## Your rights
@@ -52,4 +54,4 @@ You can ask what data ZeroDust holds about your wallet address, and ask for it t
 
 We will update this page when what we collect changes, and change the date below.
 
-Last updated: 8 October 2026.
+Last updated: 11 October 2026.
