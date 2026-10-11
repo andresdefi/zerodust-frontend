@@ -217,6 +217,7 @@ export function useAddressData(address: Address | null, destination: number | nu
       });
       const direct: Record<number, DirectReach> = {};
       await inPool(ready.rows.filter((r) => r.direct && r.chainId !== destination), QUOTE_POOL, async (r) => {
+        if (cancelled) return;
         const probe = (toChainId: number) => directRoute({ chainId: r.chainId, toChainId, from: ready.address, recipient }).catch(() => ({ available: null } as Awaited<ReturnType<typeof directRoute>>));
         let res = await probe(destination);
         for (let i = 0; i < ROUTE_RETRIES && res.available === null && !cancelled; i++) {
@@ -293,6 +294,8 @@ export function useEstimates(address: Address | null, rows: AddressRow[], destin
     let cancelled = false;
     const put = (chainId: number, e: Estimate) => setStore((prev) => (prev.key === key ? { key, values: { ...prev.values, [chainId]: e } } : { key, values: { [chainId]: e } }));
     void inPool(rows, QUOTE_POOL, async (r) => {
+      // A newer run replaced this one (the chain list or destination changed): stop asking
+      if (cancelled) return;
       try {
         if (r.direct) {
           const plan = await preparePlan({ chainId: r.chainId, toChainId: destination, from: address, recipient, mode: 'route' });
@@ -318,12 +321,23 @@ export function useEstimates(address: Address | null, rows: AddressRow[], destin
  * signed; the API asks only the bridges its route check saw serving the chain and repeats an
  * answer for 30 s. The sweep itself still takes a real quote (sweep/useSweep.ts).
  */
-async function estimateQuote(p: { fromChainId: number; toChainId: number; userAddress: Address; destination: Address }): Promise<{ estimatedReceive: string; bridge?: { displayName?: string } }> {
+type Estimated = { estimatedReceive: string; bridge?: { displayName?: string } };
+/** Estimates in flight, so the same chain asked twice at once (a re-render) shares one request */
+const inFlight = new Map<string, Promise<Estimated>>();
+
+function estimateQuote(p: { fromChainId: number; toChainId: number; userAddress: Address; destination: Address }): Promise<Estimated> {
   const query = new URLSearchParams({ fromChainId: String(p.fromChainId), toChainId: String(p.toChainId), userAddress: p.userAddress, destination: p.destination, estimate: 'true' });
-  const res = await fetch(`${API_URL}/quote?${query}`);
-  const body = (await res.json().catch(() => ({}))) as { estimatedReceive?: string; bridge?: { displayName?: string }; error?: string };
-  if (!res.ok || body.estimatedReceive === undefined) throw new Error(body.error ?? 'No quote');
-  return { estimatedReceive: body.estimatedReceive, ...(body.bridge ? { bridge: body.bridge } : {}) };
+  const url = `${API_URL}/quote?${query}`;
+  const pending = inFlight.get(url);
+  if (pending) return pending;
+  const request = (async () => {
+    const res = await fetch(url);
+    const body = (await res.json().catch(() => ({}))) as { estimatedReceive?: string; bridge?: { displayName?: string }; error?: string };
+    if (!res.ok || body.estimatedReceive === undefined) throw new Error(body.error ?? 'No quote');
+    return { estimatedReceive: body.estimatedReceive, ...(body.bridge ? { bridge: body.bridge } : {}) };
+  })().finally(() => inFlight.delete(url));
+  inFlight.set(url, request);
+  return request;
 }
 
 const DIRECT_ROUTE_NAMES: Record<string, string> = { gaszip: 'Gas.zip', relay: 'Relay', across: 'Across', lifi: 'LI.FI', oft: 'LayerZero' };
