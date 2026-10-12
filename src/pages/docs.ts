@@ -23,9 +23,6 @@ export const DOC_NAV: Array<{ slug: string; label: string; group: string }> = [
   { slug: 'sdk-errors', label: 'Errors', group: 'SDK' },
   { slug: 'api', label: 'REST API', group: 'API' },
   { slug: 'direct-chains', label: 'Direct chains', group: 'API' },
-  { slug: 'mcp', label: 'MCP server', group: 'AI agents' },
-  { slug: 'ai-sdk', label: 'Vercel AI SDK', group: 'AI agents' },
-  { slug: 'langchain', label: 'LangChain', group: 'AI agents' },
 ];
 
 /** "API keys" -> "api-keys", "GET /agent/me" -> "get-agentme" */
