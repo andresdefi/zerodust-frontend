@@ -1,6 +1,7 @@
 import { ENDURANCE_ROUTE, HYPERLANE_ROUTES } from '@zerodust/sdk';
 import { TOKEN_EXITS } from '../direct/plan';
 import { OFFLINE } from '../lib/env';
+import { nativeExitOf } from '../sweep/native';
 
 // The address page sorts every chain holding gas into one group by how it is swept and
 // what arrives (owner, 2026-10-08). A sweep acts on one group only: groups differ in
@@ -75,6 +76,8 @@ export function groupOf(chain: AddressChain, routes: ChainRoutes, destination: n
   if (tokenRouteOf(chain.chainId)) return 'token';
   // Not known yet: the gas groups, until a bridge says otherwise
   if (routes.gas === null) return signer;
+  // No route at all: the chain's own bridge, where it has one (owner, 2026-10-12: only then)
+  if (nativeExitOf(chain.chainId)) return 'claim';
   return 'own-chain';
 }
 
@@ -110,6 +113,9 @@ export function groupText(key: GroupKey, destinationName: string | null, opts: {
     case 'own-chain':
       return { title: 'Stays on its own chain', detail: 'Nothing bridges out of these right now. The gas goes to an address you choose on the same chain.' };
     case 'claim':
-      return { title: 'Needs a claim later', tag: 'Native bridge', detail: 'The chain\'s own bridge carries it to Ethereum. It arrives after its waiting period, once you send a claim transaction there.' };
+      return {
+        title: 'Needs a claim later', tag: 'Own bridge',
+        detail: 'No other bridge takes these out. Each chain\'s own bridge sends it to Ethereum, where you claim it after a wait of days. Nothing arrives by itself. Sweep with the key.',
+      };
   }
 }
