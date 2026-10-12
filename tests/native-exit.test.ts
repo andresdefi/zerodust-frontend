@@ -117,7 +117,7 @@ describe('steps, costs and dates', () => {
     expect(lisk.join(' ')).toMatch(/prove the withdrawal/);
     expect(lisk.join(' ')).toMatch(/ZeroDust does not claim for you/);
     const gravity = nativeSteps(NATIVE_EXITS[GRAVITY]!, 'Gravity', '0x22…2222');
-    expect(gravity.join(' ')).not.toMatch(/prove/);
+    expect(gravity.join(' ')).not.toMatch(/prove/i);
     expect(gravity.join(' ')).toMatch(/G, as a token on Ethereum \(not ETH\)/);
     expect(waitText(NATIVE_EXITS[NOVA]!)).toBe('about 6.5 days');
     expect(waitText(NATIVE_EXITS[BLAST]!)).toBe('about a day');

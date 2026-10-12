@@ -78,7 +78,7 @@ export function nativeSteps(exit: NativeExit, chainName: string, recipient: stri
     steps.push(`Wait ${waitText(exit)}, then claim it on Ethereum (one transaction, paid in ETH there).`);
   }
   steps.push(`It arrives as ${arrives}, at ${recipient}. Nothing arrives until it is claimed; ZeroDust does not claim for you.`);
-  steps.push(`Prove and claim on ${exit.bridgeName} (${exit.bridgeUrl}), or any tool that can: anyone may send them, the funds always go to the address above.`);
+  steps.push(`${exit.prove ? 'Prove and claim' : 'Claim'} on ${exit.bridgeName} (${exit.bridgeUrl}), or any tool that can: anyone may send ${exit.prove ? 'them' : 'it'}, the funds always go to the address above.`);
   return steps;
 }
 
