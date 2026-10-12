@@ -70,6 +70,11 @@ export interface PlanContext {
   /** The wallet's balance and next nonce, read by the page from the chain's RPC */
   balance: bigint;
   nonce: number;
+  /**
+   * 'native' only when the owner chose the chain's own bridge (the claim group). A plan through it
+   * that was not asked for is refused: the funds would wait days for a claim nobody was told about.
+   */
+  bridge?: 'native';
 }
 
 const eq = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -167,6 +172,10 @@ function verifyGuardPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
 export function verifyPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
   const fail = (why: string): never => { throw new Error(`Plan refused: ${why}`); };
   if (plan.chainId !== ctx.chainId) fail('it is for another chain');
+  // The own bridge exactly when it was chosen, both ways
+  if ((plan.route === 'native') !== (ctx.bridge === 'native')) {
+    fail(plan.route === 'native' ? 'it uses the chain\'s own bridge, which you did not choose' : 'it does not use the chain\'s own bridge, which you chose');
+  }
   if (BigInt(plan.balance) !== ctx.balance) fail('the balance changed since it was planned; check again');
   if (GUARD_CHAINS[ctx.chainId]) return verifyGuardPlan(plan, ctx);
   if (plan.guard !== undefined) fail('a guard plan on a chain that does not use one');

@@ -52,7 +52,7 @@ describe('verifyPlan: own-bridge plans', () => {
   const BALANCE = 10n ** 18n;
   const FEE = 10n ** 16n;
   const tx = (over: Partial<PlanTx>): PlanTx => ({ kind: 'sweep', to: TO, data: '0x', value: '0', gas: '21000', gasPrice: PRICE.toString(), nonce: 0, ...over });
-  const ctx = (over: Partial<PlanContext> = {}): PlanContext => ({ chainId: GRAVITY, toChainId: 1, from: FROM, recipient: TO, mode: 'route', balance: BALANCE, nonce: 0, ...over });
+  const ctx = (over: Partial<PlanContext> = {}): PlanContext => ({ chainId: GRAVITY, toChainId: 1, from: FROM, recipient: TO, mode: 'route', balance: BALANCE, nonce: 0, bridge: 'native', ...over });
 
   /** Gravity: a fee to ZeroDust, then ArbSys.withdrawEth(recipient) with the rest, 1:1 */
   function gravityPlan(o: { data?: string; receive?: bigint } = {}): DirectPlan {
@@ -66,6 +66,13 @@ describe('verifyPlan: own-bridge plans', () => {
 
   it('accepts a plain chain\'s withdrawal that spends the balance and shows what goes in', () => {
     expect(verifyPlan(gravityPlan(), ctx())).toEqual({ native: true });
+  });
+
+  it('refuses an own-bridge plan nobody chose, and a plan without it when it was chosen', () => {
+    // To Ethereum, the API could otherwise swap a fast bridge for a withdrawal that waits days for a claim
+    expect(() => verifyPlan(gravityPlan(), ctx({ bridge: undefined }))).toThrow(/own bridge, which you did not choose/);
+    const relay = { ...gravityPlan(), route: 'relay' as const };
+    expect(() => verifyPlan(relay, ctx())).toThrow(/does not use the chain's own bridge, which you chose/);
   });
 
   it('refuses one that shows more than goes in, or pays someone else', () => {
@@ -165,5 +172,68 @@ describe('pending claims (this browser only)', () => {
     vi.stubGlobal('localStorage', { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } });
     expect(pendingClaimsOf(FROM)).toEqual([]);
     expect(() => addPendingClaim(claim())).not.toThrow();
+  });
+});
+
+describe('planChecked: Arbitrum-stack own-bridge plans (no fork can run ArbSys)', () => {
+  const PRICE = 1_000_000_000n;
+  const BALANCE = 10n ** 18n;
+  const FEE = 10n ** 16n;
+  const USED = { fee: 21_000n, sweep: 120_000n };
+  const hex = (n: bigint | number) => `0x${n.toString(16)}`;
+  const plan = (feeGas = USED.fee, sweepGas = USED.sweep): DirectPlan => {
+    const value = BALANCE - FEE - feeGas * PRICE - sweepGas * PRICE;
+    const tx = (o: Partial<PlanTx>): PlanTx => ({ kind: 'sweep', to: TO, data: '0x', value: '0', gas: '21000', gasPrice: PRICE.toString(), nonce: 3, ...o });
+    return {
+      chainId: GRAVITY, route: 'native', requestId: null, receive: value.toString(), fee: FEE.toString(), balance: BALANCE.toString(),
+      txs: [tx({ kind: 'fee', to: ZERODUST_ADDRESS, value: FEE.toString(), gas: feeGas.toString() }), tx({ nonce: 4, to: NATIVE_BRIDGE_CONTRACT.arb, data: arbData(TO), value: value.toString(), gas: sweepGas.toString() })],
+    };
+  };
+
+  /** The chain answers eth_call with success exactly when the limit covers what the call uses */
+  function chain(p: DirectPlan) {
+    return vi.fn(async (url: string, init?: RequestInit) => {
+      const reply = (result: unknown) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
+      if (url.includes('/direct/chains')) return new Response(JSON.stringify({ chains: [{ chainId: GRAVITY, name: 'Gravity', token: 'G', decimals: 18, explorerUrl: '', rpcUrl: '', kind: 'arbitrum' }], prices: {} }));
+      if (url.includes('/direct/prepare')) return new Response(JSON.stringify(p));
+      const { method, params } = JSON.parse(String(init!.body)) as { method: string; params: Array<Record<string, string>> };
+      switch (method) {
+        case 'eth_getBalance': return reply(hex(BALANCE));
+        case 'eth_getTransactionCount': return reply(hex(3));
+        case 'eth_gasPrice': return reply(hex(PRICE));
+        case 'eth_getCode': return reply('0x');
+        case 'eth_call': {
+          const call = params[0]!;
+          const used = call.to!.toLowerCase() === NATIVE_BRIDGE_CONTRACT.arb ? USED.sweep : USED.fee;
+          return BigInt(call.gas!) >= used ? reply('0x') : new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'out of gas' } }));
+        }
+        default: return reply('0x');
+      }
+    });
+  }
+  const target = { chainId: GRAVITY, toChainId: 1, from: FROM, recipient: TO };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('accepts a plan whose every limit is exactly what the chain says it uses', async () => {
+    vi.resetModules();
+    vi.stubGlobal('fetch', chain(plan()));
+    const run = await import('../src/direct/run');
+    await expect(run.planChecked(target, 'route', undefined, 'native')).resolves.toMatchObject({ route: 'native' });
+  });
+
+  it('refuses a fee transfer or a withdrawal with more gas than it uses (the refund would be dust)', async () => {
+    for (const p of [plan(USED.fee + 5_000n), plan(USED.fee, USED.sweep + 1n)]) {
+      vi.resetModules();
+      vi.stubGlobal('fetch', chain(p));
+      const run = await import('../src/direct/run');
+      await expect(run.planChecked(target, 'route', undefined, 'native')).rejects.toThrow(/gas limit is not exactly what it uses/);
+    }
+  });
+
+  it('refuses an own-bridge plan the owner did not ask for', async () => {
+    vi.resetModules();
+    vi.stubGlobal('fetch', chain(plan()));
+    const run = await import('../src/direct/run');
+    await expect(run.planChecked(target, 'route')).rejects.toThrow(/did not choose/);
   });
 });
