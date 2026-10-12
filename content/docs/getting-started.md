@@ -100,4 +100,3 @@ The revoke is a separate transaction sent after the sweep, so the code can still
 
 - [Agent](/docs/sdk-agent): batch sweeps, `sweepAll()`, custom RPC URLs, and the checks the agent runs before signing.
 - [API client](/docs/sdk-client): call each endpoint yourself.
-- [MCP server](/docs/mcp): give an AI client the same abilities.

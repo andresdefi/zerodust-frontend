@@ -3,7 +3,7 @@
 Base URL: `https://api.zerodust.xyz`
 
 - JSON in and out. Amounts are strings in wei, chain IDs are numbers.
-- No key is needed. An [API key](#api-keys) raises your rate limits.
+- No key is needed.
 - Browsers may only call the API from the ZeroDust site (CORS). Call it from a server, a script or an agent.
 - Send only signatures. No endpoint takes a private key.
 
@@ -11,14 +11,13 @@ The [SDK](/docs/sdk) wraps the chain, balance, quote and sweep endpoints. Chains
 
 ## Rate limits
 
-Limits are per client IP and per minute unless noted. With an [API key](#api-keys), the read, quote and sweep routes the SDK uses count against the key instead.
+Limits are per client IP and per minute unless noted. With an existing [API key](#api-keys), the read, quote and sweep routes the SDK uses count against the key instead.
 
 | Group | Limit | Routes |
 |---|---|---|
 | Reads | 200 | `/chains`, `/chains/:chainId`, `/bridges/timing`, `/destinations`, `/balances/*`, `/prices`, `/prices/:symbol`, `GET /sweep/:sweepId`, `/sweeps/:address`, `/direct/chains`, `/direct/balances/:address`, `/direct/status` |
 | Quotes | 60 | `/quote`, `POST /quote/:quoteId/relay-route`, `POST /authorization`, `POST /authorization/batch`, `/direct/route`, `/direct/prepare`, `/direct/exit` |
 | Sweep submission | 60, and 60 per wallet address | `POST /sweep` |
-| Key registration | 5 per hour | `POST /agent/register` |
 | Everything else | 100 | |
 
 Responses carry `x-ratelimit-limit`, `x-ratelimit-remaining` and `x-ratelimit-reset`. Over the limit, the API returns 429:
@@ -385,47 +384,21 @@ Query: `limit` (1 to 100, default 20), `offset` (default 0), `status` (one of th
 
 ## API keys
 
-A key gives you your own rate limit, separate from your IP's. Send it as `X-API-Key: <key>` (what the SDK and MCP server send) or `Authorization: Bearer <key>`. Treat a key as a secret; it cannot move funds.
+New keys are paused: no new keys are issued, and the `/agent` routes and the hosted MCP endpoint are switched off. A key issued before keeps working for rate limits.
+
+A key gives you your own rate limit, separate from your IP's. Send it as `X-API-Key: <key>` (what the SDK sends) or `Authorization: Bearer <key>`. Treat a key as a secret; it cannot move funds.
 
 - **Where it applies:** the reads `/chains`, `/chains/:chainId`, `/destinations`, `/balances/*`, `GET /sweep/:sweepId` and `/sweeps/:address`, plus `/quote`, `POST /authorization` and `POST /sweep`. Each route has its own per-minute bucket for the key, at the key's limit (300 for agent keys) and never below the anonymous limit. The 60 sweeps per minute per wallet address still apply.
 - **Where it does not:** `/prices` and the `/direct/*` routes keep the per-IP limits.
 - **One IP, at most two keys an hour.** Further keys used from the same IP get that IP's anonymous limits.
-- **An invalid, revoked or expired key** is treated as no key: the request gets the anonymous limits, not an error. Check a key with `GET /agent/me`.
-- A revoked key can keep its higher limits for up to a minute.
+- **An invalid, revoked or expired key** is treated as no key: the request gets the anonymous limits, not an error.
 
-### POST /agent/register
-
-Issues a key. Limited to 5 per IP per hour.
-
-| Body | Notes |
-|---|---|
-| `name` | Required, 3 to 100 characters |
-| `agentId` | Optional, up to 255 characters |
-| `contactEmail` | Optional |
-| `webhookUrl` | Optional URL, stored with the key |
-| `metadata` | Optional object, up to 20 properties |
-
-Response (201): `apiKey` (shown once, not retrievable later), `keyPrefix`, `keyId`, `keyType` (`agent`), `rateLimits` (`perMinute` 300, `daily` 1000) and `message`.
-
-### GET /agent/me
-
-Requires a key. Returns `keyId`, `keyType`, `agentId`, `rateLimits` (`perMinute`, `daily`, `dailyUsed`, `dailyRemaining`) and `stats` for the last 7 days (`totalRequests`, `successfulRequests`, `failedRequests`, `avgResponseTimeMs`).
-
-### DELETE /agent/key
-
-Requires a key. Revokes it permanently.
-
-Requests to these routes count against the key's own per-minute limit (300 for agent keys) as well as the IP limit. Missing or invalid key: 401.
-
-## MCP and discovery
+## Discovery
 
 | Route | Notes |
 |---|---|
-| `POST /mcp` | Hosted MCP server, JSON-RPC 2.0. See [MCP server](/docs/mcp). |
-| `GET /mcp` | Server info and tool list |
-| `GET /mcp/tools` | Tool definitions as plain JSON |
-| `GET /.well-known/agent-card.json` | A2A agent card |
-| `GET /erc8004/agent.json` | ERC-8004 registration metadata |
+| `GET /.well-known/agent-card.json` | A2A agent card (marked paused) |
+| `GET /erc8004/agent.json` | ERC-8004 registration metadata (marked inactive) |
 
 ## Health
 
