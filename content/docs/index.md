@@ -78,9 +78,6 @@ The website does not offer these routes yet.
 |---|---|
 | Website, [zerodust.xyz](https://zerodust.xyz) | Sweeping a wallet without writing code, with MetaMask or the wallet's key |
 | [TypeScript SDK](/docs/sdk), `@zerodust/sdk` | Apps, scripts and agents that hold their own key |
-| [MCP server](/docs/mcp), `@zerodust/mcp-server` | AI clients that speak the Model Context Protocol; a read-only hosted server needs no install |
-| [Vercel AI SDK tools](/docs/ai-sdk), `@zerodust/ai-sdk` | Read-only tools for `generateText` and `streamText` |
-| [LangChain tools](/docs/langchain), `@zerodust/langchain` | Read-only tools for LangChain agents |
 | [REST API](/docs/api), `https://api.zerodust.xyz` | Any language |
 
 ## Supported chains
@@ -115,6 +112,3 @@ On top of the service fee the sweep pays its gas (including the revoke transacti
 - [Errors](/docs/sdk-errors): `ZeroDustError` and error codes.
 - [REST API](/docs/api): every public endpoint, parameters, responses and rate limits.
 - [Direct chains](/docs/direct-chains): planning endpoints for chains without EIP-7702.
-- [MCP server](/docs/mcp): stdio package and hosted server.
-- [Vercel AI SDK](/docs/ai-sdk): `@zerodust/ai-sdk`.
-- [LangChain](/docs/langchain): `@zerodust/langchain`.
