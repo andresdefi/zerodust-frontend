@@ -10,6 +10,8 @@ import { minimumOf, tooSmallText, useSweep, type Row, type RowState, type SweepM
 import { tokenRouteOf, type GroupKey } from './groups';
 import type { AddressRow } from './useAddress';
 import { OFFLINE } from '../lib/env';
+import { rpcCall } from '../lib/rpc';
+import { claimCostWei, nativeExitOf, nativeSteps, startByMs } from '../sweep/native';
 import { track } from '../lib/events';
 
 // Sweeping one group from the address page (redesign phase 3): pick how to sign, then
@@ -64,8 +66,10 @@ export function SweepWithDialog({ open, plan, address, session, onWallet, onClos
   const status = useServiceStatus();
   const paused = isPaused(status);
   const chains = plan?.chains ?? [];
-  const covered = chains.filter((c) => c.metamask && !c.direct);
-  const left = chains.filter((c) => !c.metamask || c.direct);
+  // A chain's own bridge is signed with the key only (the API refuses it with a MetaMask permission)
+  const keyOnlyGroup = plan?.group === 'claim';
+  const covered = keyOnlyGroup ? [] : chains.filter((c) => c.metamask && !c.direct);
+  const left = keyOnlyGroup ? chains : chains.filter((c) => !c.metamask || c.direct);
   const n = chains.length;
 
   const close = () => { setMode(start); setError(null); onClose(); };
@@ -187,6 +191,8 @@ export function SweepSession({ wallet, plan, onProgress, onEnd }: {
         model.setChoice(c.chainId, 'elsewhere', plan.elsewhereChain);
       } else if (plan.group === 'own-chain' && plan.ownChainAddress) {
         model.setChoice(c.chainId, 'address', undefined, plan.ownChainAddress);
+      } else if (plan.group === 'claim') {
+        model.setChoice(c.chainId, 'native');
       }
     }
     model.select(new Set(ids));
@@ -242,6 +248,18 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
 }) {
   const ref = useDialog(open);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // A chain's own bridge: the steps after the sweep must be read and accepted before it is signed
+  const [understood, setUnderstood] = useState(false);
+  const [ethGasPrice, setEthGasPrice] = useState<bigint | null>(null);
+  // When the dialog opened, for "start by" dates (read once, not during render)
+  const [openedAt, setOpenedAt] = useState(0);
+  const ownBridge = plan.group === 'claim';
+  useEffect(() => {
+    if (!open || !ownBridge) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOpenedAt(Date.now());
+    void rpcCall<string>(1, 'eth_gasPrice', []).then((p) => setEthGasPrice(BigInt(p)), () => setEthGasPrice(null));
+  }, [open, ownBridge]);
   // Closing the dialog fires its close event: after a confirm that is not a cancel (cancelling
   // there unmounted the running sweep and froze its rows)
   const confirmed = useRef(false);
@@ -280,7 +298,8 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
   const totals = m.readyTotals;
   const totalText = totals.map((t) => `${formatAmount(t.amount, t.decimals)} ${t.symbol}${t.dest.chainId !== plan.destination ? ` on ${t.dest.name}` : ''}`).join(' + ');
   const totalUsd = totals.reduce((s, t) => s + (usdValue(t.amount, t.decimals, m.prices[t.isToken ? t.symbol : t.dest.token]) ?? 0), 0);
-  const title = plan.group === 'own-chain' ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} to an address on ${n === 1 ? 'its' : 'each'} chain?`
+  const title = ownBridge ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} through ${n === 1 ? 'its' : 'their'} own bridge to Ethereum?`
+    : plan.group === 'own-chain' ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} to an address on ${n === 1 ? 'its' : 'each'} chain?`
     : plan.group === 'token' ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} as tokens?`
     : `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} to ${plan.group === 'elsewhere' ? m.destOf(plan.elsewhereChain!)?.name ?? 'another chain' : destName}?`;
 
@@ -322,16 +341,48 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
           </div>
         )}
       </div>
+      {ownBridge && n > 0 && (
+        <div className="zd-native" role="note">
+          <p className="zd-native-h">Nothing arrives by itself. After the sweep:</p>
+          {ready.map((r) => {
+            const exit = nativeExitOf(r.chainId);
+            if (!exit) return null;
+            const row = plan.chains.find((c) => c.chainId === r.chainId);
+            const cost = ethGasPrice !== null ? claimCostWei(exit, ethGasPrice) : null;
+            const costUsd = cost !== null ? usdValue(cost, 18, m.prices.ETH) : null;
+            const startBy = row?.closing ? startByMs(exit, Date.parse(row.closing.closesAt)) : null;
+            return (
+              <div key={r.chainId} className="zd-native-chain">
+                <p className="zd-native-name"><ChainIcon chainId={r.chainId} name={r.name} size={18} /> {r.name}</p>
+                <ol>{nativeSteps(exit, r.name, shortAddress(m.recipient)).map((t) => <li key={t}>{t}</li>)}</ol>
+                <p className="zd-native-cost">
+                  Your {exit.prove ? 'two transactions' : 'transaction'} on Ethereum: {cost !== null ? `about ${formatAmount(cost, 18)} ETH${costUsd !== null ? ` (${formatUsd(costUsd)})` : ''} at today's gas` : 'cost unknown right now'}.
+                  {costUsd !== null && row?.usd && costUsd > row.usd / 2 ? ' That is a large share of what you sweep.' : ''}
+                </p>
+                {startBy !== null && (
+                  <p className="zd-native-warn">{r.name} closes on {new Date(Date.parse(row!.closing!.closesAt)).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}. {startBy > openedAt
+                    ? `Start by ${new Date(startBy).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}: the ${exit.prove ? 'prove' : 'claim'} needs the chain still running.`
+                    : `It may be too late: the ${exit.prove ? 'prove' : 'claim'} needs the chain still running.`}</p>
+                )}
+              </div>
+            );
+          })}
+          <label className="zd-native-ok">
+            <input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} />
+            I understand: the funds arrive only after I {ready.some((r) => nativeExitOf(r.chainId)?.prove) ? 'prove and ' : ''}claim on Ethereum, and ZeroDust does not do it for me.
+          </label>
+        </div>
+      )}
       <div className="zd-confirm-bottom">
         {eaten.length > 0 && (
           <p className="zd-note">{eaten.length === 1 ? '1 chain loses' : `${eaten.length} chains lose`} most of its value to the bridge: {eaten.map((r) => `${r.name} (${Math.round(takes(r) * 100)}%)`).join(', ')}. Untick {eaten.length === 1 ? 'it' : 'them'} on the page to keep {eaten.length === 1 ? 'it' : 'them'}.</p>
         )}
         {n > 0 && totals.length > 0 && (
-          <p className="zd-total"><span>You receive at least, at {m.toSelf ? 'your wallet' : shortAddress(m.recipient)}{plan.group !== 'token' ? ` on ${plan.group === 'elsewhere' ? m.destOf(plan.elsewhereChain!)?.name : destName}` : ''}</span><b>{totalText}{totalUsd > 0 ? ` (${formatUsd(totalUsd)})` : ''}</b></p>
+          <p className="zd-total"><span>{ownBridge ? 'You can claim' : 'You receive at least'}, at {m.toSelf ? 'your wallet' : shortAddress(m.recipient)}{plan.group !== 'token' ? ` on ${ownBridge ? 'Ethereum' : plan.group === 'elsewhere' ? m.destOf(plan.elsewhereChain!)?.name : destName}` : ''}</span><b>{totalText}{totalUsd > 0 ? ` (${formatUsd(totalUsd)})` : ''}</b></p>
         )}
         <div className="btns">
           <button type="button" className="btn btn-ghost" onClick={onCancel}>{n === 0 ? 'Close' : 'Back'}</button>
-          {n > 0 && <button type="button" className="btn btn-primary" onClick={() => { confirmed.current = true; onConfirm(); }}>Sweep {n} {n === 1 ? 'chain' : 'chains'}</button>}
+          {n > 0 && <button type="button" className="btn btn-primary" disabled={ownBridge && !understood} onClick={() => { confirmed.current = true; onConfirm(); }}>Sweep {n} {n === 1 ? 'chain' : 'chains'}</button>}
         </div>
       </div>
     </dialog>
