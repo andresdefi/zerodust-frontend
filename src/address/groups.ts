@@ -97,7 +97,7 @@ export function groupChains<T extends AddressChain>(chains: T[], routesOf: (chai
 }
 
 /** Copy for each group (provisional, rewritten with the rest of the site's copy) */
-export function groupText(key: GroupKey, destinationName: string | null, opts: { keyOnly?: number } = {}): { title: string; detail: string; tag?: string } {
+export function groupText(key: GroupKey, destinationName: string | null, opts: { keyOnly?: number; relayed?: 'all' | 'some' } = {}): { title: string; detail: string; tag?: string } {
   switch (key) {
     case 'gas':
       return {
@@ -115,7 +115,11 @@ export function groupText(key: GroupKey, destinationName: string | null, opts: {
     case 'claim':
       return {
         title: 'Native bridges only',
-        detail: 'Needs a claim later. No other bridge takes these out, so each chain\'s own bridge sends it to Ethereum, where you claim it after a wait of days. Nothing arrives by itself. Sweep with the key.',
+        detail: opts.relayed === 'all'
+          ? 'No other bridge takes these out, so each chain\'s own bridge sends it to Ethereum. It arrives by itself, about an hour later. Sweep with the key.'
+          : opts.relayed === 'some'
+            ? 'No other bridge takes these out, so each chain\'s own bridge sends it to Ethereum. Most need a claim there later, after a wait of days; the rows say which. Sweep with the key.'
+            : 'Needs a claim later. No other bridge takes these out, so each chain\'s own bridge sends it to Ethereum, where you claim it after a wait of days. Nothing arrives by itself. Sweep with the key.',
       };
   }
 }

@@ -21,6 +21,10 @@ const CASES: Array<{ name: string; chainId: number; txHash: Hex }> = [
   { name: 'blast ready to claim', chainId: 81457, txHash: '0x47997fdabe39a3801544c7bd5b1d12927c0af20a5ac37d6a4d052f797de19a63' },
   { name: 'nova ready to claim', chainId: 42170, txHash: '0x5005738cf3298408f5df57983f37db4c9796187ec04ab58c8331ceb0703070c3' },
   { name: 'abstract ready to claim', chainId: 2741, txHash: '0x29c765a0c4bb0746abd4c5c20579f42f8458696e5b0f2f7ec80e6e866e8445fd' },
+  { name: 'fraxtal ready to prove', chainId: 252, txHash: '0xfd31580dbff577c68ba9ad1ccbb2242b2ec53c50590a248d67ccbbcaf22d58b1' },
+  { name: 'fraxtal ready to claim', chainId: 252, txHash: '0x6f6375bd500c72a5291c48005f5efbb89494ff248113be3c51ce7c61c6c88148' },
+  // Taiko: delivered by its relayer (a withdrawal of 2026-10-12, someone else's)
+  { name: 'taiko delivered', chainId: 167000, txHash: '0x6c81f53469d6e8dc1a8d7847f725238b6f89c3dc2c557d78a8dae56da07a3cda' },
 ];
 
 const FROM = '0x000000000000000000000000000000000000dEaD';

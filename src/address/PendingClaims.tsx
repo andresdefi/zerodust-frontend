@@ -45,7 +45,7 @@ export function PendingClaims({ address, version }: { address: Address; version:
 
   const add = async (txHash: Hex): Promise<string | null> => {
     const w = await findWithdrawal(txHash);
-    if (!w) return 'No withdrawal through a chain\'s own bridge in that transaction (Lisk, Arbitrum Nova, Blast, Abstract, Gravity).';
+    if (!w) return 'No withdrawal through a chain\'s own bridge in that transaction (Lisk, Arbitrum Nova, Blast, Abstract, Gravity, Taiko, Fraxtal).';
     const exit = nativeExitOf(w.chainId)!;
     addPendingClaim({
       chainId: w.chainId, chainName: exit.chainName, explorerUrl: exit.explorerUrl, symbol: exit.token?.symbol ?? 'ETH', decimals: exit.token?.decimals ?? 18,
@@ -146,6 +146,10 @@ function AddClaim({ onAdd }: { onAdd: (txHash: Hex) => Promise<string | null> })
 
 function statusTag(c: PendingClaim, l: Live | undefined): { text: string; tone: string } {
   if (!l) return { text: 'Checking…', tone: 'plain' };
+  if (nativeExitOf(c.chainId)?.relayed && !l.error && l.withdrawal) {
+    if (l.state?.stage === 'claimed') return { text: 'Arrived', tone: 'ok' };
+    return l.state?.stage === 'waiting' && l.state.until ? { text: `Arrives about ${day(l.state.until)}`, tone: 'plain' } : { text: 'Not arrived yet', tone: 'warn' };
+  }
   if (l.error) return { text: `Claim from about ${day(claimableFrom(c))}`, tone: 'plain' };
   if (l.withdrawal === null) return { text: 'No withdrawal found', tone: 'warn' };
   const s = l.state!;
@@ -162,6 +166,12 @@ function detailText(c: PendingClaim, l: Live | undefined): string {
   const exit = nativeExitOf(c.chainId)!;
   if (l?.error) return 'Could not read it from the chain right now; the date is the usual wait.';
   if (l?.withdrawal === null) return 'This transaction holds no withdrawal.';
+  if (exit.relayed) {
+    if (l?.state?.stage === 'claimed') return `Delivered on Ethereum by ${c.chainName}'s relayer.`;
+    return l?.state?.stage === 'waiting' && l.state.until
+      ? `${c.chainName}'s relayer delivers it; nothing to claim.`
+      : `${c.chainName}'s relayer has not delivered it yet. If it does not within a few hours, claim it on ${exit.bridgeName} with the recipient's wallet.`;
+  }
   switch (l?.state?.stage) {
     case 'prove': return `${c.chainName}'s state covering it is on Ethereum: prove it now to start the wait.`;
     case 'proved': return 'Proved on Ethereum. Claim when the wait ends.';

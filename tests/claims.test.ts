@@ -81,7 +81,7 @@ describe('own-bridge withdrawals, read from the chain and Ethereum', () => {
   it('sends every call to the pinned contract of its chain', () => {
     for (const c of fixture.cases.filter((x) => x.call)) {
       const k = CLAIM_CONTRACTS[c.chainId]!;
-      const pinned = k.kind === 'arb' ? k.outbox : k.kind === 'zk' ? k.nullifier : k.portal;
+      const pinned = k.kind === 'arb' ? k.outbox : k.kind === 'zk' ? k.nullifier : k.kind === 'taiko' ? k.l1Bridge : k.portal;
       expect(c.call!.to).toBe(pinned);
     }
   });
@@ -158,6 +158,14 @@ describe('only the chains\' own contracts count (a pasted hash may be anyone\'s 
     const twice = receiptOf('lisk proved, waiting');
     twice.logs = [...twice.logs, ...twice.logs.filter((l) => l.address.toLowerCase() === PASSER)];
     expect(withdrawalOf(1135, twice, 0)).toBeNull();
+  });
+
+  it('Taiko: a MessageSent from any other contract is not a withdrawal', () => {
+    const real = receiptOf('taiko delivered');
+    expect(withdrawalOf(167000, real, 0)?.amount).toBe(6n * 10n ** 15n);
+    const fake = receiptOf('taiko delivered');
+    for (const l of fake.logs) if (l.address.toLowerCase() === '0x1670000000000000000000000000000000000001') l.address = '0x000000000000000000000000000000000000bEEF';
+    expect(withdrawalOf(167000, fake, 0)).toBeNull();
   });
 
   it('OP stack: a bridge event whose amount is not the message\'s value is refused', () => {

@@ -216,7 +216,8 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
       )}
 
       {groups.map((g) => {
-        const text = groupText(g.key, destName, { keyOnly: g.chains.filter((c) => !OFFLINE && (!c.metamask || c.direct)).length });
+        const relayedN = g.key === 'claim' ? g.chains.filter((c) => nativeExitOf(c.chainId)?.relayed).length : 0;
+        const text = groupText(g.key, destName, { keyOnly: g.chains.filter((c) => !OFFLINE && (!c.metamask || c.direct)).length, relayed: relayedN === 0 ? undefined : relayedN === g.chains.length ? 'all' : 'some' });
         const isActive = g.key === activeGroup;
         const chosen = isActive ? g.chains.filter((c) => selectedIds.has(c.chainId) && !finished.has(c.chainId)) : [];
         const subtotal = g.chains.reduce((s, c) => s + (c.usd ?? 0), 0);
@@ -542,7 +543,9 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
     receive = 'Pick another chain';
   } else if (group === 'claim' && nativeExitOf(row.chainId)) {
     const exit = nativeExitOf(row.chainId)!;
-    route = { text: `Native bridge · claim in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to Ethereum: you claim it there on ${exit.bridgeName}` };
+    route = exit.relayed
+      ? { text: `Native bridge · arrives in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to Ethereum: its relayer delivers it, nothing to claim` }
+      : { text: `Native bridge · claim in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to Ethereum: you claim it there on ${exit.bridgeName}` };
     receive = exit.token ? `as ${exit.token.symbol} on Ethereum` : 'on Ethereum, once claimed';
   } else {
     route = { text: 'Same chain only', tone: 'plain' };
