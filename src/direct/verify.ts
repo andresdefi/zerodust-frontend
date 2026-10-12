@@ -1,6 +1,7 @@
 import { verifyAcrossDeposit } from './across';
 import { decodeFunctionData, parseAbi } from 'viem';
 import { tokenExitFor } from './plan';
+import { nativeExitOf } from '../sweep/native';
 import {
   BURN_ADDRESS, GASLIMIT_CHAINS, GASZIP_DEPOSIT, GUARD_CHAINS, LIFI_DIAMOND, PAYMASTER_GENERAL, RELAY_DEPOSIT_NATIVE,
   relayDepositoryFor, ZERODUST_ADDRESS, ZERODUST_GUARD, ZK_PAYMASTERS, type DirectPlan, type PlanMode,
@@ -17,6 +18,43 @@ const ETHERLINK_FEE_PER_BYTE = 4_000_000_000_000n;
  */
 export const GUARD_MAX_GAS = 300_000n;
 export const GUARD_SWEEP = parseAbi(['function sweep(address target, uint256 fee, bytes data) payable']);
+/** A chain's own bridge to Ethereum: the contract each stack withdraws through, at its fixed address */
+export const NATIVE_BRIDGE_CONTRACT = {
+  op: '0x4200000000000000000000000000000000000010', // L2StandardBridge
+  arb: '0x0000000000000000000000000000000000000064', // ArbSys
+  zk: '0x000000000000000000000000000000000000800A', // L2BaseToken
+} as const;
+const NATIVE_OP = parseAbi(['function bridgeETHTo(address _to, uint32 _minGasLimit, bytes _extraData) payable']);
+const NATIVE_ARB = parseAbi(['function withdrawEth(address destination) payable returns (uint256)']);
+const NATIVE_ZK = parseAbi(['function withdraw(address _l1Receiver) payable']);
+/** The gas the withdrawal's message gets on Ethereum (what bridge sites use for ETH) */
+const NATIVE_MIN_GAS_LIMIT = 200_000;
+
+/** The call into the chain's own bridge withdraws to exactly the recipient, on the chain it goes to */
+export function checkNativeCall(chainId: number, toChainId: number, to: string, data: string, recipient: string): void {
+  const fail = (why: string): never => { throw new Error(`Plan refused: ${why}`); };
+  const exit = nativeExitOf(chainId);
+  if (!exit) return fail('this chain has no own bridge this page knows');
+  if (toChainId !== exit.toChainId) fail('its own bridge only goes to Ethereum');
+  if (!eq(to, NATIVE_BRIDGE_CONTRACT[exit.stack])) fail('the withdrawal does not go to the chain\'s own bridge contract');
+  let payee: string;
+  try {
+    if (exit.stack === 'op') {
+      const [p, minGas, extra] = decodeFunctionData({ abi: NATIVE_OP, data: data as `0x${string}` }).args;
+      if (minGas !== NATIVE_MIN_GAS_LIMIT || extra !== '0x') fail('the withdrawal asks for other gas or carries extra data');
+      payee = p;
+    } else if (exit.stack === 'arb') {
+      [payee] = decodeFunctionData({ abi: NATIVE_ARB, data: data as `0x${string}` }).args;
+    } else {
+      [payee] = decodeFunctionData({ abi: NATIVE_ZK, data: data as `0x${string}` }).args;
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Plan refused')) throw error;
+    return fail('the call is not the bridge\'s withdrawal');
+  }
+  if (!eq(payee, recipient)) fail('the withdrawal pays someone else');
+}
+
 const OFT_SEND = parseAbi(['function sendFrom(address from, uint16 dstChainId, bytes32 toAddress, uint256 amount, (address refundAddress, address zroPaymentAddress, bytes adapterParams) callParams) payable']);
 
 // The API is untrusted input: before anything is signed, the page checks the
@@ -32,6 +70,11 @@ export interface PlanContext {
   /** The wallet's balance and next nonce, read by the page from the chain's RPC */
   balance: bigint;
   nonce: number;
+  /**
+   * 'native' only when the owner chose the chain's own bridge (the claim group). A plan through it
+   * that was not asked for is refused: the funds would wait days for a claim nobody was told about.
+   */
+  bridge?: 'native';
 }
 
 const eq = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -48,6 +91,8 @@ export const MAX_FEE_SHARE = 20n; // 1/20 = 5%
 export interface PlanChecks {
   /** Across: the destination swap's 0x Settler (confirm in 0x's registry) and when the deposit expires */
   across?: { settler: string; expiresAt: number };
+  /** A withdrawal through the chain's own bridge (no delivery to follow; the user claims on Ethereum) */
+  native?: true;
 }
 
 /**
@@ -90,7 +135,9 @@ function verifyGuardPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
   // the estimate, which is at most the estimate itself
   if (fee > ctx.balance / MAX_FEE_SHARE + l1Fee) fail('the fee is above 5% of the balance');
   const bridge = ctx.mode === 'route' && ctx.toChainId !== ctx.chainId;
-  if (g.absorb !== (bridge ? 'fee' : 'amount')) fail('it moves the L1 fee difference into the wrong amount');
+  // The own bridge takes whatever it is sent (no quoted amount to keep): the difference moves the amount
+  const native = bridge && plan.route === 'native';
+  if (g.absorb !== (bridge && !native ? 'fee' : 'amount')) fail('it moves the L1 fee difference into the wrong amount');
 
   switch (ctx.mode) {
     case 'burn':
@@ -109,6 +156,11 @@ function verifyGuardPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
     if (BigInt(plan.receive) !== forwarded) fail('the amount shown is not the amount sent');
     return {};
   }
+  if (native) {
+    checkNativeCall(ctx.chainId, ctx.toChainId, target, data, ctx.recipient);
+    if (BigInt(plan.receive) !== forwarded) fail('the amount shown is not the amount sent into the bridge');
+    return { native: true };
+  }
   // Relay only: Gas.zip and LI.FI pay refunds to msg.sender, which would be the guard
   if (plan.route !== 'relay' || !eq(target, relayDepositoryFor(ctx.chainId))) fail('the deposit does not go to Relay\'s depository');
   if (!data.toLowerCase().startsWith(RELAY_DEPOSIT_NATIVE) || data.length !== 2 + 8 + 128) fail('the Relay call is not a plain deposit');
@@ -120,6 +172,10 @@ function verifyGuardPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
 export function verifyPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
   const fail = (why: string): never => { throw new Error(`Plan refused: ${why}`); };
   if (plan.chainId !== ctx.chainId) fail('it is for another chain');
+  // The own bridge exactly when it was chosen, both ways
+  if ((plan.route === 'native') !== (ctx.bridge === 'native')) {
+    fail(plan.route === 'native' ? 'it uses the chain\'s own bridge, which you did not choose' : 'it does not use the chain\'s own bridge, which you chose');
+  }
   if (BigInt(plan.balance) !== ctx.balance) fail('the balance changed since it was planned; check again');
   if (GUARD_CHAINS[ctx.chainId]) return verifyGuardPlan(plan, ctx);
   if (plan.guard !== undefined) fail('a guard plan on a chain that does not use one');
@@ -223,6 +279,12 @@ export function verifyPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
     if (plan.route !== 'transfer' || !eq(last.to, ctx.recipient) || last.data !== '0x') fail('the transfer does not go to the address you set');
     if (eq(ctx.recipient, ctx.from)) fail('a same-chain sweep needs another address');
     return {};
+  }
+  if (plan.route === 'native') {
+    checkNativeCall(ctx.chainId, ctx.toChainId, last.to, last.data, ctx.recipient);
+    // 1:1: what goes in is what is claimed
+    if (BigInt(plan.receive) !== BigInt(last.value) || BigInt(last.value) <= 0n) fail('the amount shown is not the amount sent into the bridge');
+    return { native: true };
   }
   if (plan.route === 'gaszip') {
     if (!eq(last.to, GASZIP_DEPOSIT)) fail('the deposit does not go to Gas.zip');

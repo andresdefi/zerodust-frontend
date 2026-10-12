@@ -6,6 +6,7 @@ import { ChainIcon } from '../components/ChainIcon';
 import { DestinationPicker } from '../components/DestinationPicker';
 import { formatAmount, formatUsd, shortAddress } from '../lib/format';
 import { groupChains, groupOf, groupText, tokenRouteOf, type GroupKey } from './groups';
+import { claimableFrom, nativeExitOf, pendingClaimsOf, removePendingClaim, waitText, type PendingClaim } from '../sweep/native';
 import { announcementHref, closesLong, closesShort, cutoffLong, stillSwept } from './closing';
 import { isListedScam, resolveName, useAddressData, useEstimates, useResolved, type AddressRow, type ChainOption, type Estimate } from './useAddress';
 import { SweepSession, SweepWithDialog, type SweepPlan } from './SweepSession';
@@ -293,6 +294,8 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
         </div>
       )}
 
+      <PendingClaims address={address} version={finished.size} />
+
       <DestinationPicker
         open={pickingElsewhere}
         dests={data.chainOptions.filter((c) => c.chainId !== destination).map((c) => ({ ...c, reachableFrom: 0 }))}
@@ -536,6 +539,10 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
   } else if (group === 'elsewhere') {
     route = { text: `Not to ${destName}`, tone: 'warn' };
     receive = 'Pick another chain';
+  } else if (group === 'claim' && nativeExitOf(row.chainId)) {
+    const exit = nativeExitOf(row.chainId)!;
+    route = { text: `Own bridge · claim in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to Ethereum: you claim it there on ${exit.bridgeName}` };
+    receive = exit.token ? `as ${exit.token.symbol} on Ethereum` : 'on Ethereum, once claimed';
   } else {
     route = { text: 'Same chain only', tone: 'plain' };
     receive = `to an address on ${row.name}`;
@@ -603,5 +610,52 @@ function ProgressRow({ row, state, bridge, arrivalExplorer, arrivalName }: { row
         {state.arrivalTx && arrivalExplorer && <a href={tx(arrivalExplorer, state.arrivalTx)} target="_blank" rel="noreferrer">Arrived ↗</a>}
       </span>
     </li>
+  );
+}
+
+/**
+ * Withdrawals sent into a chain's own bridge from this browser, still to be claimed on Ethereum
+ * (sweep/native.ts). Phase 1: when each should open and a link to the chain's bridge site, where it
+ * is proved and claimed; the site has the exact state.
+ */
+function PendingClaims({ address, version }: { address: Address; version: number }) {
+  const [list, setList] = useState<PendingClaim[]>([]);
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setList(pendingClaimsOf(address));
+    setNow(Date.now());
+  }, [address, version]);
+  if (list.length === 0) return null;
+  const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return (
+    <section className="ap-card ap-claims" aria-label="Waiting to be claimed">
+      <header className="ap-grp-h">
+        <div className="ap-grp-t">
+          <h2>Waiting to be claimed<span className="tag acc">On Ethereum</span></h2>
+          <p>Sent into each chain&apos;s own bridge from this browser. Nothing arrives until it is {list.some((c) => nativeExitOf(c.chainId)?.prove) ? 'proved and ' : ''}claimed on Ethereum. Keep the transaction links: they are all you need on the bridge site.</p>
+        </div>
+      </header>
+      <ul className="ap-rows">
+        {list.map((c) => {
+          const exit = nativeExitOf(c.chainId)!;
+          const opens = claimableFrom(c);
+          const open = now >= opens;
+          return (
+            <li key={c.txHash} className="ap-row ap-claim">
+              <span className="ap-chain"><ChainIcon chainId={c.chainId} name={c.chainName} size={28} /><span>{c.chainName}</span></span>
+              <span className="ap-bal">{formatAmount(BigInt(c.amount), c.decimals)} {c.symbol}<small>sent {day(c.sentAt)}</small></span>
+              <span className="ap-route"><span className={`tag ${open ? 'ok' : 'plain'}`}>{open ? 'Should be claimable' : `Claim from about ${day(opens)}`}</span></span>
+              <span className="ap-prog-detail">{exit.prove ? 'Prove it first (any time after a few hours), then claim. ' : ''}To {shortAddress(c.recipient)} on Ethereum{exit.token ? `, as ${exit.token.symbol}` : ''}.</span>
+              <span className="ap-links-tx">
+                {c.explorerUrl && <a href={`${c.explorerUrl.replace(/\/$/, '')}/tx/${c.txHash}`} target="_blank" rel="noreferrer">Withdrawal ↗</a>}
+                <a href={exit.bridgeUrl} target="_blank" rel="noreferrer">{exit.prove && !open ? 'Prove' : 'Claim'} on {exit.bridgeName} ↗</a>
+                <button type="button" className="linkbtn" onClick={() => { removePendingClaim(c.txHash); setList(pendingClaimsOf(address)); }}>Remove</button>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

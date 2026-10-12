@@ -11,6 +11,7 @@ import { formatAmountUp } from '../lib/format';
 import { sendReport, type SweepReport } from './report';
 import { permissionQuote, sweepBatchWithPermissions, sweepStatus, type MetaMaskSession } from './metamask';
 import { durationText, expectedTime, fetchTimings, NO_TIMINGS, type BridgeTimings, type ExpectedTime } from './timing';
+import { addPendingClaim, nativeExitOf, waitText } from './native';
 
 // Mirrors the local sweeper (local-sweeper/src/App.tsx), which is proven with
 // real funds: ZeroDust's sponsored (EIP-7702) chains through the SDK, and
@@ -31,10 +32,11 @@ const ROUTE_RETRY_MS = 3000;
  * with a swap route can also swap out; the few cents of gas reserve the swap
  * leaves are then donated or burned, so the wallet still ends at exactly 0.
  */
-export type Choice = 'exit-donate' | 'exit-burn' | 'donate' | 'burn' | 'elsewhere' | 'address';
+/** 'native': the chain's own bridge to Ethereum, for a chain no other route takes out (sweep/native.ts) */
+export type Choice = 'exit-donate' | 'exit-burn' | 'donate' | 'burn' | 'elsewhere' | 'address' | 'native';
 export const isExit = (c?: Choice) => c === 'exit-donate' || c === 'exit-burn';
 /** The balance reaches the recipient (on the chosen chain, or on another one for 'elsewhere') */
-export const isRouted = (c?: Choice) => !c || isExit(c) || c === 'elsewhere' || c === 'address';
+export const isRouted = (c?: Choice) => !c || isExit(c) || c === 'elsewhere' || c === 'address' || c === 'native';
 
 /**
  * Chains offered instead when a source cannot reach the chosen destination
@@ -480,6 +482,7 @@ export function useSweep(wallet: Wallet) {
     if (choice === 'donate') return { toChainId: row.chainId, recipient: ZERODUST_ADDRESS };
     if (choice === 'elsewhere') return { toChainId: elsewhere[row.chainId]!, recipient };
     if (choice === 'address') return { toChainId: row.chainId, recipient: addressOf[row.chainId]! };
+    if (choice === 'native') return { toChainId: nativeExitOf(row.chainId)!.toChainId, recipient };
     // A chain's own token bridge delivers on one fixed chain, whatever the destination (Telos: TLOS on Base)
     if (isExit(choice) && TOKEN_EXITS[row.chainId]) return { toChainId: TOKEN_EXITS[row.chainId]!.toChainId, recipient };
     return { toChainId: destination!, recipient };
@@ -492,6 +495,24 @@ export function useSweep(wallet: Wallet) {
   };
 
   const directTarget = (row: Row) => ({ chainId: row.chainId, from: address, ...targetFor(row) });
+  /** The chain's own bridge, when that is the row's way out */
+  const bridgeFor = (row: Row): 'native' | undefined => (choices[row.chainId] === 'native' ? 'native' : undefined);
+  /** What arrives: a token route's token, or the token a chain's own bridge delivers (Gravity: G) */
+  const tokenFor = (row: Row, toChainId: number): RowState['token'] => {
+    const exit = choices[row.chainId] === 'native' ? nativeExitOf(row.chainId) : undefined;
+    return exit?.token ? { symbol: exit.token.symbol, decimals: exit.token.decimals } : rowToken(row.chainId, toChainId);
+  };
+  /** Saves a withdrawal through a chain's own bridge, to be claimed on Ethereum later (this browser only) */
+  const notePending = (row: Row, txHash: string | undefined, amount: bigint | undefined) => {
+    if (!txHash || amount === undefined) return;
+    const exit = nativeExitOf(row.chainId);
+    addPendingClaim({
+      chainId: row.chainId, chainName: row.name, explorerUrl: row.explorerUrl,
+      symbol: exit?.token?.symbol ?? row.token, decimals: exit?.token?.decimals ?? row.decimals,
+      from: address, recipient: getAddress(targetFor(row).recipient), amount: amount.toString(), txHash, sentAt: nowMs(),
+    });
+  };
+  const nativeDoneText = (row: Row) => `Balance reads 0 on-chain. Withdrawn into ${row.name}'s own bridge: claim it on Ethereum in ${waitText(nativeExitOf(row.chainId)!)} (see "Waiting to be claimed")`;
 
   /** Real quotes, checked and replayed (direct) or signed and verified by the SDK (sponsored); nothing sent */
   const check = async () => {
@@ -503,11 +524,11 @@ export function useSweep(wallet: Wallet) {
         try {
           const mode = planModeFor(row);
           setState(row.chainId, { phase: 'quoting', detail: 'Replaying on a fork of the chain' });
-          const plan = await planChecked(directTarget(row), mode, feePaid.current[row.chainId]);
-          setBridge(row.chainId, DIRECT_BRIDGE_NAMES[plan.route]);
+          const plan = await planChecked(directTarget(row), mode, feePaid.current[row.chainId], bridgeFor(row));
+          setBridge(row.chainId, plan.route === 'native' ? `${row.name}'s own bridge` : DIRECT_BRIDGE_NAMES[plan.route]);
           setState(row.chainId, {
             phase: 'ready', choice, fee: BigInt(plan.fee),
-            ...(mode === 'burn' || mode === 'donate' ? {} : { receive: BigInt(plan.receive), toChainId: targetFor(row).toChainId, token: rowToken(row.chainId, targetFor(row).toChainId) }),
+            ...(mode === 'burn' || mode === 'donate' ? {} : { receive: BigInt(plan.receive), toChainId: targetFor(row).toChainId, token: tokenFor(row, targetFor(row).toChainId) }),
           });
         } catch (error) {
           setState(row.chainId, { phase: 'no-route', detail: error instanceof Error ? error.message : 'No route' });
@@ -516,6 +537,10 @@ export function useSweep(wallet: Wallet) {
       }
       const target = targetFor(row);
       if (session) {
+        if (choice === 'native') {
+          setState(row.chainId, { phase: 'no-route', detail: 'A chain\'s own bridge needs the key: MetaMask cannot sign it here' });
+          return;
+        }
         // A permission quote: nothing is signed until the sweep
         try {
           const quote = await permissionQuote({ fromChainId: row.chainId, toChainId: target.toChainId, user: address, destination: getAddress(target.recipient) });
@@ -529,10 +554,12 @@ export function useSweep(wallet: Wallet) {
         return;
       }
       const result = await agent!.sweep(
-        { fromChainId: row.chainId, toChainId: target.toChainId, destination: getAddress(target.recipient) },
+        { fromChainId: row.chainId, toChainId: target.toChainId, destination: getAddress(target.recipient), ...(bridgeFor(row) ? { bridge: bridgeFor(row) } : {}) },
         { dryRun: true }
       );
-      if (result.success && result.quote) {
+      if (result.success && result.quote && bridgeFor(row) && bridgeName(result.quote) !== 'native') {
+        setState(row.chainId, { phase: 'no-route', detail: 'Refused: the quote does not use the chain\'s own bridge, which this group needs' });
+      } else if (result.success && result.quote) {
         setBridge(row.chainId, quoteBridge(result.quote));
         setState(row.chainId, isRouted(choice) && !isExit(choice)
           ? { phase: 'ready', choice, receive: BigInt(result.quote.estimatedReceive), toChainId: target.toChainId, token: rowToken(row.chainId, target.toChainId) }
@@ -568,7 +595,7 @@ export function useSweep(wallet: Wallet) {
     };
     try {
       update({ phase: 'sweeping', detail: 'Checking' });
-      const plan = await planChecked(directTarget(row), mode, feePaid.current[row.chainId]);
+      const plan = await planChecked(directTarget(row), mode, feePaid.current[row.chainId], bridgeFor(row));
       const fee = BigInt(plan.fee);
       const receive = mode === 'burn' || mode === 'donate' ? undefined : BigInt(plan.receive);
       setBridge(row.chainId, DIRECT_BRIDGE_NAMES[plan.route]);
@@ -606,6 +633,12 @@ export function useSweep(wallet: Wallet) {
         return;
       }
       delete feePaid.current[row.chainId];
+      if (plan.route === 'native') {
+        // Nothing to follow: the withdrawal exists now and is claimed on Ethereum later
+        notePending(row, hash, receive);
+        update({ phase: 'done', receive, fee, detail: nativeDoneText(row) });
+        return;
+      }
       if (mode === 'burn' || mode === 'donate' || plan.route === 'transfer') {
         update({ phase: 'done', receive, fee, detail: 'Balance reads 0 on-chain' });
         return;
@@ -744,14 +777,14 @@ export function useSweep(wallet: Wallet) {
       const choice = choices[row.chainId];
       const target = targetFor(row);
       const toChainId = target.toChainId;
-      const token = rowToken(row.chainId, toChainId);
+      const token = tokenFor(row, toChainId);
       setState(row.chainId, { phase: 'sweeping', detail: 'Signing', choice });
       // Where the sweep must leave the wallet: no delegation, or back on MetaMask's smart-account
       // delegate when it is one (the SDK signs the same rule; a failed read only loosens the check
       // to "ZeroDust's delegation is gone")
       const closing = await readState(row.chainId, address).then((st) => closingDelegateFor(st.code)).catch(() => null);
       const result = await agent!.sweep(
-        { fromChainId: row.chainId, toChainId: target.toChainId, destination: getAddress(target.recipient) },
+        { fromChainId: row.chainId, toChainId: target.toChainId, destination: getAddress(target.recipient), ...(bridgeFor(row) ? { bridge: bridgeFor(row) } : {}) },
         { timeoutMs: 300_000, onStatusChange: (s) => setState(row.chainId, { phase: 'sweeping', detail: s.status, choice }) }
       );
       const sponsored = (st: RowState) => report(row, st, {
@@ -771,7 +804,7 @@ export function useSweep(wallet: Wallet) {
       // the sweep confirms, so allow it up to two minutes.
       setBridge(row.chainId, quoteBridge(result.quote));
       setState(row.chainId, { phase: 'sweeping', detail: 'Checking on-chain', txHash: result.txHash, choice });
-      const receive = result.quote && (!choice || choice === 'elsewhere') ? BigInt(result.quote.estimatedReceive) : undefined;
+      const receive = result.quote && (!choice || choice === 'elsewhere' || choice === 'native') ? BigInt(result.quote.estimatedReceive) : undefined;
       try {
         const ended = (code: string) => endedWhereSigned(code, closing);
         let onChain = await readState(row.chainId, address);
@@ -781,6 +814,7 @@ export function useSweep(wallet: Wallet) {
         }
         const zero = onChain.balance === 0n;
         const revoked = ended(onChain.code);
+        if (zero && choice === 'native') notePending(row, result.txHash, receive);
         const final: RowState = {
           phase: zero && revoked ? 'done' : 'failed',
           txHash: result.txHash,
@@ -790,7 +824,7 @@ export function useSweep(wallet: Wallet) {
           token,
           choice,
           detail: zero && revoked
-            ? 'Balance reads 0 on-chain'
+            ? choice === 'native' ? nativeDoneText(row) : 'Balance reads 0 on-chain'
             : [zero ? '' : 'Sent, but the chain shows a balance left', revoked ? '' : 'ZeroDust\'s access to this wallet was not removed yet; it is retried automatically'].filter(Boolean).join('. '),
         };
         setState(row.chainId, final);

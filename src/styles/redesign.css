@@ -225,3 +225,28 @@
   .ap-prog > .ap-prog-detail { grid-area: detail; }
   .ap-prog > .ap-links-tx { grid-area: links; }
 }
+
+/* A chain's own bridge: the steps after the sweep, accepted before signing (sweep/native.ts) */
+.zd-native { margin: 0 22px 12px; padding: 14px 16px; border-radius: 12px; background: var(--accent-soft); color: var(--ink); font-size: 14px; line-height: 1.45; max-height: 40dvh; overflow-y: auto; }
+.zd-native-h { margin: 0 0 8px; font-weight: 600; }
+.zd-native-chain + .zd-native-chain { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.zd-native-name { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-weight: 600; }
+.zd-native ol { margin: 0 0 6px; padding-left: 20px; }
+.zd-native ol li + li { margin-top: 3px; }
+.zd-native-cost { margin: 0; color: var(--muted); }
+.zd-native-warn { margin: 6px 0 0; color: var(--warn); font-weight: 600; }
+.zd-native-ok { display: flex; gap: 10px; align-items: flex-start; margin-top: 12px; font-weight: 600; cursor: pointer; }
+.zd-native-ok input { margin-top: 3px; flex: none; }
+.ap-claims .ap-claim { grid-template-columns: minmax(160px, 1.1fr) minmax(130px, 0.9fr) auto; grid-template-areas: 'chain bal route' 'detail detail links'; row-gap: 6px; }
+.ap-claim > .ap-chain { grid-area: chain; }
+.ap-claim > .ap-bal { grid-area: bal; }
+.ap-claim > .ap-route { grid-area: route; justify-self: end; }
+.ap-claim > .ap-prog-detail { grid-area: detail; color: var(--muted); font-size: 14px; }
+.ap-claim > .ap-links-tx { grid-area: links; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: flex-end; }
+@media (max-width: 900px) {
+  .ap-claims .ap-claim { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'chain' 'route' 'bal' 'detail' 'links'; }
+  .ap-claim > * { min-width: 0; }
+  .ap-claim > .ap-route { justify-self: start; }
+  .ap-claim > .ap-bal { text-align: left; }
+  .ap-claim > .ap-links-tx { justify-content: flex-start; }
+}
