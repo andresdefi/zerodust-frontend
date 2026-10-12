@@ -1,0 +1,169 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { encodeFunctionData, parseAbi, type Hex } from 'viem';
+import { groupOf, type AddressChain } from '../src/address/groups';
+import { ZERODUST_ADDRESS, ZK_PAYMASTERS, type DirectPlan, type PlanTx } from '../src/direct/plan';
+import { checkNativeCall, NATIVE_BRIDGE_CONTRACT, verifyPlan, type PlanContext } from '../src/direct/verify';
+import {
+  addPendingClaim, claimableFrom, claimCostWei, NATIVE_EXITS, nativeSteps, pendingClaimsOf, removePendingClaim, startByMs, waitText,
+  type PendingClaim,
+} from '../src/sweep/native';
+
+// A chain's own bridge to Ethereum (owner, 2026-10-12: only where no other route exists). The page
+// pins the chains and checks each plan's withdrawal itself: contract, recipient, 1:1 amount.
+
+const FROM = '0x1111111111111111111111111111111111111111';
+const TO = '0x2222222222222222222222222222222222222222';
+const STRANGER = '0x3333333333333333333333333333333333333333';
+const NOVA = 42170;
+const GRAVITY = 1625;
+const ABSTRACT = 2741;
+const BLAST = 81457;
+const LISK = 1135;
+
+const OP = parseAbi(['function bridgeETHTo(address _to, uint32 _minGasLimit, bytes _extraData) payable']);
+const ARB = parseAbi(['function withdrawEth(address destination) payable returns (uint256)']);
+const ZK = parseAbi(['function withdraw(address _l1Receiver) payable']);
+const opData = (to: string, gas = 200_000, extra: Hex = '0x') => encodeFunctionData({ abi: OP, functionName: 'bridgeETHTo', args: [to as Hex, gas, extra] });
+const arbData = (to: string) => encodeFunctionData({ abi: ARB, functionName: 'withdrawEth', args: [to as Hex] });
+const zkData = (to: string) => encodeFunctionData({ abi: ZK, functionName: 'withdraw', args: [to as Hex] });
+
+describe('checkNativeCall', () => {
+  it('accepts each stack\'s withdrawal to the recipient, on Ethereum', () => {
+    expect(() => checkNativeCall(BLAST, 1, NATIVE_BRIDGE_CONTRACT.op, opData(TO), TO)).not.toThrow();
+    expect(() => checkNativeCall(GRAVITY, 1, NATIVE_BRIDGE_CONTRACT.arb, arbData(TO), TO)).not.toThrow();
+    expect(() => checkNativeCall(ABSTRACT, 1, NATIVE_BRIDGE_CONTRACT.zk, zkData(TO), TO)).not.toThrow();
+  });
+
+  const refusals: Array<[string, () => void]> = [
+    ['a withdrawal to someone else', () => checkNativeCall(GRAVITY, 1, NATIVE_BRIDGE_CONTRACT.arb, arbData(STRANGER), TO)],
+    ['another contract', () => checkNativeCall(GRAVITY, 1, STRANGER, arbData(TO), TO)],
+    ['another stack\'s contract', () => checkNativeCall(GRAVITY, 1, NATIVE_BRIDGE_CONTRACT.op, opData(TO), TO)],
+    ['other message gas', () => checkNativeCall(BLAST, 1, NATIVE_BRIDGE_CONTRACT.op, opData(TO, 1), TO)],
+    ['extra data', () => checkNativeCall(BLAST, 1, NATIVE_BRIDGE_CONTRACT.op, opData(TO, 200_000, '0x01'), TO)],
+    ['calldata that is not the withdrawal', () => checkNativeCall(GRAVITY, 1, NATIVE_BRIDGE_CONTRACT.arb, '0xdeadbeef', TO)],
+    ['a chain the page does not know', () => checkNativeCall(8453, 1, NATIVE_BRIDGE_CONTRACT.op, opData(TO), TO)],
+    ['another destination than Ethereum', () => checkNativeCall(GRAVITY, 8453, NATIVE_BRIDGE_CONTRACT.arb, arbData(TO), TO)],
+  ];
+  for (const [why, run] of refusals) it(`refuses ${why}`, () => expect(run).toThrow(/Plan refused/));
+});
+
+describe('verifyPlan: own-bridge plans', () => {
+  const PRICE = 1_000_000_000n;
+  const BALANCE = 10n ** 18n;
+  const FEE = 10n ** 16n;
+  const tx = (over: Partial<PlanTx>): PlanTx => ({ kind: 'sweep', to: TO, data: '0x', value: '0', gas: '21000', gasPrice: PRICE.toString(), nonce: 0, ...over });
+  const ctx = (over: Partial<PlanContext> = {}): PlanContext => ({ chainId: GRAVITY, toChainId: 1, from: FROM, recipient: TO, mode: 'route', balance: BALANCE, nonce: 0, ...over });
+
+  /** Gravity: a fee to ZeroDust, then ArbSys.withdrawEth(recipient) with the rest, 1:1 */
+  function gravityPlan(o: { data?: string; receive?: bigint } = {}): DirectPlan {
+    const gas = 120_000n;
+    const value = BALANCE - FEE - 21_000n * PRICE - gas * PRICE;
+    return {
+      chainId: GRAVITY, route: 'native', requestId: null, receive: (o.receive ?? value).toString(), fee: FEE.toString(), balance: BALANCE.toString(),
+      txs: [tx({ kind: 'fee', to: ZERODUST_ADDRESS, value: FEE.toString() }), tx({ nonce: 1, to: NATIVE_BRIDGE_CONTRACT.arb, data: o.data ?? arbData(TO), value: value.toString(), gas: gas.toString() })],
+    };
+  }
+
+  it('accepts a plain chain\'s withdrawal that spends the balance and shows what goes in', () => {
+    expect(verifyPlan(gravityPlan(), ctx())).toEqual({ native: true });
+  });
+
+  it('refuses one that shows more than goes in, or pays someone else', () => {
+    expect(() => verifyPlan(gravityPlan({ receive: 1n }), ctx())).toThrow(/amount shown/);
+    expect(() => verifyPlan(gravityPlan({ data: arbData(STRANGER) }), ctx())).toThrow(/pays someone else/);
+  });
+
+  it('accepts a ZK withdrawal paid through the paymaster', () => {
+    const paymaster = ZK_PAYMASTERS[ABSTRACT]!;
+    const pm = { paymaster, paymasterInput: `0x8c5a3445${'0'.repeat(64)}`, gasPerPubdata: '800' };
+    const gasFee = 10n ** 14n;
+    const value = BALANCE - FEE - gasFee;
+    const plan: DirectPlan = {
+      chainId: ABSTRACT, route: 'native', requestId: null, receive: value.toString(), fee: FEE.toString(), gasFee: gasFee.toString(), balance: BALANCE.toString(),
+      txs: [tx({ kind: 'fee', to: paymaster, value: (FEE + gasFee).toString(), gas: '50000', ...pm }), tx({ nonce: 1, to: NATIVE_BRIDGE_CONTRACT.zk, data: zkData(TO), value: value.toString(), gas: '50000', ...pm })],
+    };
+    expect(verifyPlan(plan, ctx({ chainId: ABSTRACT }))).toEqual({ native: true });
+  });
+});
+
+describe('groupOf: the claim group', () => {
+  const chain = (chainId: number, over: Partial<AddressChain> = {}): AddressChain => ({ chainId, name: String(chainId), token: 'ETH', decimals: 18, balance: 1n, explorerUrl: '', direct: false, metamask: false, ...over });
+
+  it('takes a chain with its own bridge only when nothing else takes it out', () => {
+    expect(groupOf(chain(NOVA), { gas: false }, 8453)).toBe('claim');
+    expect(groupOf(chain(GRAVITY, { direct: true }), { gas: false }, 8453)).toBe('claim');
+  });
+
+  it('leaves it where a bridge, another destination or a minimum still applies', () => {
+    expect(groupOf(chain(NOVA), { gas: true }, 8453)).toBe('gas');
+    expect(groupOf(chain(LISK), { gas: false, notToDestination: true }, 8453)).toBe('elsewhere');
+    expect(groupOf(chain(BLAST, { direct: true }), { gas: false, minimum: 10n }, 8453)).toBe('gas');
+    expect(groupOf(chain(BLAST, { direct: true }), { gas: null }, 8453)).toBe('gas');
+    // No own bridge: stays on its chain
+    expect(groupOf(chain(8217), { gas: false }, 8453)).toBe('own-chain');
+  });
+});
+
+describe('steps, costs and dates', () => {
+  it('says every step before signing, the prove where there is one, and what arrives', () => {
+    const lisk = nativeSteps(NATIVE_EXITS[LISK]!, 'Lisk', '0x22…2222');
+    expect(lisk.join(' ')).toMatch(/prove the withdrawal/);
+    expect(lisk.join(' ')).toMatch(/ZeroDust does not claim for you/);
+    const gravity = nativeSteps(NATIVE_EXITS[GRAVITY]!, 'Gravity', '0x22…2222');
+    expect(gravity.join(' ')).not.toMatch(/prove/);
+    expect(gravity.join(' ')).toMatch(/G, as a token on Ethereum \(not ETH\)/);
+    expect(waitText(NATIVE_EXITS[NOVA]!)).toBe('about 6.5 days');
+    expect(waitText(NATIVE_EXITS[BLAST]!)).toBe('about a day');
+  });
+
+  it('prices the prove and the claim at the given gas', () => {
+    expect(claimCostWei(NATIVE_EXITS[LISK]!, 1n)).toBe(600_000n);
+    expect(claimCostWei(NATIVE_EXITS[NOVA]!, 2n)).toBe(300_000n);
+    expect(claimCostWei(NATIVE_EXITS[ABSTRACT]!, 1n)).toBe(190_000n);
+  });
+
+  it('starts a closing chain early enough for every step that reads it', () => {
+    const closes = Date.parse('2026-11-01T00:00:00Z');
+    // Gravity: the claim's proof comes from the chain once confirmed (156 h), plus a day
+    expect(new Date(startByMs(NATIVE_EXITS[GRAVITY]!, closes)).toISOString()).toBe('2026-10-24T12:00:00.000Z');
+    // Lisk: only the prove needs the chain (12 h), plus a day
+    expect(new Date(startByMs(NATIVE_EXITS[LISK]!, closes)).toISOString()).toBe('2026-10-30T12:00:00.000Z');
+  });
+});
+
+describe('pending claims (this browser only)', () => {
+  let store: Record<string, string>;
+  beforeEach(() => {
+    store = {};
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => { store[k] = v; },
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+  const claim = (over: Partial<PendingClaim> = {}): PendingClaim => ({
+    chainId: NOVA, chainName: 'Arbitrum Nova', explorerUrl: 'https://nova.arbiscan.io', symbol: 'ETH', decimals: 18,
+    from: FROM, recipient: TO, amount: '1730925974698840', txHash: '0xa6f1', sentAt: Date.parse('2026-10-10T19:06:21Z'), ...over,
+  });
+
+  it('keeps each withdrawal once, lists them per swept wallet, newest first, and forgets on request', () => {
+    addPendingClaim(claim());
+    addPendingClaim(claim());
+    addPendingClaim(claim({ txHash: '0xb2', sentAt: Date.parse('2026-10-11T00:00:00Z') }));
+    addPendingClaim(claim({ txHash: '0xc3', from: STRANGER }));
+    expect(pendingClaimsOf(FROM.toUpperCase().replace('0X', '0x')).map((c) => c.txHash)).toEqual(['0xb2', '0xa6f1']);
+    removePendingClaim('0xB2');
+    expect(pendingClaimsOf(FROM).map((c) => c.txHash)).toEqual(['0xa6f1']);
+    expect(new Date(claimableFrom(claim())).toISOString()).toBe('2026-10-17T07:06:21.000Z');
+  });
+
+  it('drops unknown chains and survives broken storage', () => {
+    store['zd.pending-claims.v1'] = JSON.stringify([claim({ chainId: 8453 }), claim()]);
+    expect(pendingClaimsOf(FROM)).toHaveLength(1);
+    store['zd.pending-claims.v1'] = '{not json';
+    expect(pendingClaimsOf(FROM)).toEqual([]);
+    vi.stubGlobal('localStorage', { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } });
+    expect(pendingClaimsOf(FROM)).toEqual([]);
+    expect(() => addPendingClaim(claim())).not.toThrow();
+  });
+});

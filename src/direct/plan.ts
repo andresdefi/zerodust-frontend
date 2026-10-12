@@ -112,7 +112,7 @@ export const PAYMASTER_GENERAL = '0x8c5a3445';
  */
 export const TX_GAP_BLOCKS: Readonly<Record<number, number>> = { 143: 4 };
 
-export type DirectRoute = 'gaszip' | 'relay' | 'across' | 'transfer' | 'burn' | 'donate' | 'lifi' | 'oft';
+export type DirectRoute = 'gaszip' | 'relay' | 'across' | 'transfer' | 'burn' | 'donate' | 'lifi' | 'oft' | 'native';
 export type PlanMode = 'route' | 'burn' | 'donate' | 'exit';
 
 export interface PlanTx {
@@ -220,7 +220,8 @@ export const directBalances = (address: string) => get<DirectBalance[]>(`balance
 /** minimumBalanceWei: too small for every bridge, this balance would go through (AMOUNT_TOO_LOW) */
 export const directRoute = (t: Target) => get<{ available: boolean | null; exit?: boolean; reason?: string; minimumBalanceWei?: string }>('route', { ...t });
 
-export const preparePlan = (t: Target & { mode: Exclude<PlanMode, 'exit'>; feePaidTx?: string }) =>
+/** bridge 'native': the chain's own bridge to Ethereum (sweep/native.ts), only where no other route exists */
+export const preparePlan = (t: Target & { mode: Exclude<PlanMode, 'exit'>; feePaidTx?: string; bridge?: 'native' }) =>
   get<DirectPlan>('prepare', { ...t, mode: t.mode === 'route' ? undefined : t.mode });
 
 export const prepareExit = (t: Target & { feePaidTx?: string }) => get<DirectPlan>('exit', { ...t });

@@ -1,0 +1,138 @@
+// A chain's own bridge to Ethereum ("Needs a claim later"). Offered only for a chain no other route
+// takes out (owner, 2026-10-12). The funds leave the chain at once but arrive only after the
+// recipient proves (OP stack) and claims the withdrawal on Ethereum, days later; ZeroDust does not
+// claim for them yet. The page pins these chains itself: the API's word decides nothing here.
+
+export type NativeStack = 'op' | 'arb' | 'zk';
+
+export interface NativeExit {
+  stack: NativeStack;
+  /** Where the withdrawal is claimed (Ethereum for every chain today) */
+  toChainId: 1;
+  /** The chain's own bridge site, where the withdrawal is proved and claimed */
+  bridgeUrl: string;
+  bridgeName: string;
+  /** Hours from the withdrawal until it can be claimed (OP: the prove's wait included) */
+  claimAfterHours: number;
+  /** OP stack: a prove transaction on Ethereum first, once the chain has posted its state */
+  prove: boolean;
+  /** What arrives when it is not ETH: the chain's gas token as an ERC-20 on Ethereum */
+  token?: { symbol: string; address: string; decimals: number };
+}
+
+const ETHEREUM = 1 as const;
+
+export const NATIVE_EXITS: Readonly<Record<number, NativeExit>> = {
+  // Lisk: dispute games about every 6 h, then 7 days after the prove
+  1135: { stack: 'op', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.lisk.com', bridgeName: 'Lisk Bridge', claimAfterHours: 7 * 24 + 6, prove: true },
+  // Arbitrum Nova: the assertion that holds the withdrawal is confirmed about 6.4 days later
+  42170: { stack: 'arb', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.arbitrum.io', bridgeName: 'Arbitrum Bridge', claimAfterHours: 156, prove: false },
+  // Blast: its L2OutputOracle posts state hourly; claimable 1 day after the prove
+  81457: { stack: 'op', toChainId: ETHEREUM, bridgeUrl: 'https://blast.io/en/bridge', bridgeName: 'Blast Bridge', claimAfterHours: 26, prove: true },
+  // Abstract (ZK Stack): claimable once its batch is executed on Ethereum, hours later
+  2741: { stack: 'zk', toChainId: ETHEREUM, bridgeUrl: 'https://native-bridge.abs.xyz/bridge/', bridgeName: 'Abstract Native Bridge', claimAfterHours: 24, prove: false },
+  // Gravity (Arbitrum Orbit): G arrives as an ERC-20 on Ethereum, confirmed about 6.4 days later
+  1625: {
+    stack: 'arb', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.gravity.xyz', bridgeName: 'Gravity Bridge', claimAfterHours: 156, prove: false,
+    token: { symbol: 'G', address: '0x9C7BEBa8F6eF6643aBd725e45a4E8387eF260649', decimals: 18 },
+  },
+};
+
+export const nativeExitOf = (chainId: number): NativeExit | undefined => NATIVE_EXITS[chainId];
+
+/** Gas on Ethereum for the user's own steps (measured: proves 342k-463k, a ZK finalize 182.5k) */
+export const PROVE_GAS = 450_000n;
+export const CLAIM_GAS: Readonly<Record<NativeStack, bigint>> = { op: 150_000n, arb: 150_000n, zk: 190_000n };
+
+/** Wei the user's own transactions on Ethereum cost at this gas price */
+export function claimCostWei(exit: NativeExit, gasPrice: bigint): bigint {
+  return (CLAIM_GAS[exit.stack] + (exit.prove ? PROVE_GAS : 0n)) * gasPrice;
+}
+
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
+
+/**
+ * The latest day to start on a closing chain. Every step that reads the chain must happen while it
+ * runs: an OP prove needs the chain's state, an Arbitrum claim a proof from its node (built when the
+ * withdrawal is confirmed), a ZK claim a proof from its node. A day of margin on top.
+ */
+export function startByMs(exit: NativeExit, closesAtMs: number): number {
+  const needsChainUntil = exit.stack === 'arb' ? exit.claimAfterHours * HOUR : exit.prove ? 12 * HOUR : exit.claimAfterHours * HOUR;
+  return closesAtMs - needsChainUntil - DAY;
+}
+
+export function waitText(exit: NativeExit): string {
+  const h = exit.claimAfterHours;
+  return h < 48 ? `about ${h < 30 ? 'a day' : `${Math.round(h / 24)} days`}` : `about ${Math.round((h / 24) * 2) / 2} days`;
+}
+
+/** What happens after the sweep, step by step, before anything is signed */
+export function nativeSteps(exit: NativeExit, chainName: string, recipient: string): string[] {
+  const arrives = exit.token ? `${exit.token.symbol}, as a token on Ethereum (not ETH)` : 'ETH on Ethereum';
+  const steps = [`The sweep sends everything into ${chainName}'s own bridge. The wallet on ${chainName} ends at exactly 0.`];
+  if (exit.prove) {
+    steps.push(`Within a few hours, prove the withdrawal on Ethereum (one transaction, paid in ETH there).`);
+    steps.push(`Wait ${waitText(exit)} in total, then claim it on Ethereum (a second transaction).`);
+  } else {
+    steps.push(`Wait ${waitText(exit)}, then claim it on Ethereum (one transaction, paid in ETH there).`);
+  }
+  steps.push(`It arrives as ${arrives}, at ${recipient}. Nothing arrives until it is claimed; ZeroDust does not claim for you.`);
+  steps.push(`Prove and claim on ${exit.bridgeName} (${exit.bridgeUrl}), or any tool that can: anyone may send them, the funds always go to the address above.`);
+  return steps;
+}
+
+// ---- Withdrawals waiting to be claimed, kept in this browser only ----
+
+export interface PendingClaim {
+  chainId: number;
+  chainName: string;
+  /** The chain's explorer, for the withdrawal's link (a swept chain leaves the page's list) */
+  explorerUrl: string;
+  /** What was sent, in the chain's gas token (what arrives: ETH, or exit.token) */
+  symbol: string;
+  decimals: number;
+  /** The swept wallet (the page lists the claims of the address it shows) */
+  from: string;
+  recipient: string;
+  /** Wei (or the token's units) sent into the bridge */
+  amount: string;
+  txHash: string;
+  sentAt: number;
+}
+
+const STORE = 'zd.pending-claims.v1';
+
+function load(): PendingClaim[] {
+  try {
+    const raw = localStorage.getItem(STORE);
+    const list = raw ? (JSON.parse(raw) as PendingClaim[]) : [];
+    return Array.isArray(list) ? list.filter((c) => typeof c?.txHash === 'string' && NATIVE_EXITS[c.chainId]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function save(list: PendingClaim[]): void {
+  try {
+    localStorage.setItem(STORE, JSON.stringify(list));
+  } catch {
+    // Private mode or storage off: the sweep result still shows the transaction to keep
+  }
+}
+
+export function pendingClaimsOf(address: string): PendingClaim[] {
+  return load().filter((c) => c.from.toLowerCase() === address.toLowerCase()).sort((a, b) => b.sentAt - a.sentAt);
+}
+
+export function addPendingClaim(claim: PendingClaim): void {
+  const list = load().filter((c) => c.txHash.toLowerCase() !== claim.txHash.toLowerCase());
+  save([...list, claim]);
+}
+
+export function removePendingClaim(txHash: string): void {
+  save(load().filter((c) => c.txHash.toLowerCase() !== txHash.toLowerCase()));
+}
+
+/** When the claim opens, by the chain's usual wait (an estimate: the bridge site has the exact state) */
+export const claimableFrom = (c: PendingClaim): number => c.sentAt + NATIVE_EXITS[c.chainId]!.claimAfterHours * HOUR;
