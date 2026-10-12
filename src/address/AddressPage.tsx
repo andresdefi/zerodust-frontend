@@ -541,7 +541,7 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
     receive = 'Pick another chain';
   } else if (group === 'claim' && nativeExitOf(row.chainId)) {
     const exit = nativeExitOf(row.chainId)!;
-    route = { text: `Own bridge · claim in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to Ethereum: you claim it there on ${exit.bridgeName}` };
+    route = { text: `Native bridge · claim in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to Ethereum: you claim it there on ${exit.bridgeName}` };
     receive = exit.token ? `as ${exit.token.symbol} on Ethereum` : 'on Ethereum, once claimed';
   } else {
     route = { text: 'Same chain only', tone: 'plain' };

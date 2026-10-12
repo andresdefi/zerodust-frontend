@@ -251,3 +251,15 @@ test('MetaMask: one session for the site, shown in the header and reused by the 
   await expect(header.getByRole('button', { name: 'Connect MetaMask' })).toBeVisible();
   await expect(page.locator('.ap-badges')).toContainText('Not connected');
 });
+
+test('"Native bridges only": a chain no other bridge takes out, with its claim said up front', async ({ page }) => {
+  const user = privateKeyToAccount(generatePrivateKey()).address;
+  await mockNetwork(page, user, { nova: true });
+  await page.goto(`/address/${user}`);
+  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'Native bridges only' }) });
+  await expect(group).toContainText('Needs a claim later.');
+  await expect(group.locator('.ap-row', { hasText: 'Arbitrum Nova' })).toContainText('Native bridge · claim in');
+  // Scroll has no own bridge pinned: it stays on its own chain
+  await expect(page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'Stays on its own chain' }) })).toContainText('Scroll');
+  if (process.env.SHOT) await group.screenshot({ path: process.env.SHOT });
+});
