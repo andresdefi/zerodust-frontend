@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { decodeFunctionData, keccak256, parseAbi, type Hex } from 'viem';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ETHEREUM_FALLBACK_RPC, RPC_URLS } from '../src/chains/rpcs';
-import { CLAIM_CONTRACTS, claimCall, claimState, findWithdrawal, proveCall, readWithdrawal, type ClaimState } from '../src/sweep/claims';
+import { formatTransactionReceipt, toEventSelector, type TransactionReceipt } from 'viem';
+import { CLAIM_CONTRACTS, claimCall, claimState, findWithdrawal, proveCall, readWithdrawal, withdrawalOf, type ClaimState } from '../src/sweep/claims';
 
 // Own-bridge withdrawals read from the chain and Ethereum (sweep/claims.ts), replayed from real
 // RPC answers (scripts/record-claim-fixtures.mts, 2026-10-12): ZeroDust's own test withdrawals at
@@ -118,6 +119,53 @@ describe('own-bridge withdrawals, read from the chain and Ethereum', () => {
 
   it('reads nothing on a chain without a pinned own bridge', async () => {
     expect(await readWithdrawal(10, byName('lisk ready to prove').txHash)).toBeNull();
+  });
+});
+
+describe('only the chains\' own contracts count (a pasted hash may be anyone\'s transaction)', () => {
+  /** The recorded receipt of a case, as viem returns it, for doctoring */
+  const receiptOf = (name: string): TransactionReceipt => {
+    const c = byName(name);
+    const key = Object.keys(fixture.responses).find((k) => k.includes('eth_getTransactionReceipt') && k.includes(c.txHash))!;
+    return formatTransactionReceipt(structuredClone(fixture.responses[key]!.result) as never);
+  };
+  const ARB_SYS = '0x0000000000000000000000000000000000000064';
+  const PASSER = '0x4200000000000000000000000000000000000016';
+  const L2_BRIDGE = '0x4200000000000000000000000000000000000010';
+  const ETH_BRIDGE_INITIATED = toEventSelector('ETHBridgeInitiated(address,address,uint256,bytes)');
+  const bridgeEvent = (r: TransactionReceipt) => r.logs.find((l) => l.address.toLowerCase() === L2_BRIDGE && l.topics[0] === ETH_BRIDGE_INITIATED)!;
+
+  it('reads the real receipts', () => {
+    expect(withdrawalOf(42170, receiptOf('nova waiting'), 0)?.recipient).toBe(TEST_WALLET);
+    expect(withdrawalOf(1135, receiptOf('lisk proved, waiting'), 0)?.recipient).toBe(TEST_WALLET);
+  });
+
+  it('Arbitrum: an L2ToL1Tx from any other contract is ignored, and two withdrawals are refused', () => {
+    const fake = receiptOf('nova waiting');
+    for (const l of fake.logs) if (l.address.toLowerCase() === ARB_SYS) l.address = '0x000000000000000000000000000000000000beef';
+    expect(withdrawalOf(42170, fake, 0)).toBeNull();
+    const twice = receiptOf('nova waiting');
+    twice.logs = [...twice.logs, ...twice.logs.filter((l) => l.address.toLowerCase() === ARB_SYS)];
+    expect(withdrawalOf(42170, twice, 0)).toBeNull();
+  });
+
+  it('OP stack: a bridge event from another contract cannot name the recipient', () => {
+    const fake = receiptOf('lisk proved, waiting');
+    const bridgeLog = bridgeEvent(fake);
+    // Someone else's contract emits the same event naming another recipient
+    fake.logs.push({ ...bridgeLog, address: '0x000000000000000000000000000000000000bEEF', topics: [bridgeLog.topics[0]!, bridgeLog.topics[1]!, `0x${'00'.repeat(12)}${'ee'.repeat(20)}`] });
+    expect(withdrawalOf(1135, fake, 0)?.recipient).toBe(TEST_WALLET);
+    const twice = receiptOf('lisk proved, waiting');
+    twice.logs = [...twice.logs, ...twice.logs.filter((l) => l.address.toLowerCase() === PASSER)];
+    expect(withdrawalOf(1135, twice, 0)).toBeNull();
+  });
+
+  it('OP stack: a bridge event whose amount is not the message\'s value is refused', () => {
+    const r = receiptOf('lisk proved, waiting');
+    const bridgeLog = bridgeEvent(r);
+    // amount is the first word of the event's data
+    bridgeLog.data = `0x${(1n).toString(16).padStart(64, '0')}${bridgeLog.data.slice(66)}`;
+    expect(withdrawalOf(1135, r, 0)).toBeNull();
   });
 });
 

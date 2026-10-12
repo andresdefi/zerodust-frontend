@@ -74,36 +74,62 @@ export interface Withdrawal {
 
 /** The withdrawal a sweep's transaction made, or null when it holds none (another of the sweep's transactions) */
 export async function readWithdrawal(chainId: number, txHash: Hex): Promise<Withdrawal | null> {
-  const c = CLAIM_CONTRACTS[chainId];
-  if (!c) return null;
+  if (!CLAIM_CONTRACTS[chainId]) return null;
   const l2 = client(chainId);
   const receipt = await l2.getTransactionReceipt({ hash: txHash });
   if (receipt.status !== 'success') return null;
   const block = await l2.getBlock({ blockNumber: receipt.blockNumber });
-  const base = { chainId, txHash, sentAt: Number(block.timestamp) * 1000 };
+  return withdrawalOf(chainId, receipt, Number(block.timestamp) * 1000);
+}
+
+// The chains' system contracts: only their events count (any contract can emit one with the same
+// signature, and a pasted hash may be anyone's transaction)
+const OP_MESSAGE_PASSER: Address = '0x4200000000000000000000000000000000000016';
+const OP_L2_BRIDGE: Address = '0x4200000000000000000000000000000000000010';
+/** Blast also has its own ETH bridge (L2BlastBridge), which emits the same event */
+const BLAST_L2_BRIDGE: Address = '0x4300000000000000000000000000000000000005';
+const OP_L2_MESSENGER: Address = '0x4200000000000000000000000000000000000007';
+const ARB_SYS: Address = '0x0000000000000000000000000000000000000064';
+const logsFrom = (receipt: TransactionReceipt, address: Address) => receipt.logs.filter((l) => isAddressEqual(l.address, address));
+
+/**
+ * The one withdrawal in a receipt, from the chain's own contracts' events. A transaction with more
+ * than one is refused: which amount goes to which recipient could not be shown for sure.
+ */
+export function withdrawalOf(chainId: number, receipt: TransactionReceipt, sentAt: number): Withdrawal | null {
+  const c = CLAIM_CONTRACTS[chainId];
+  if (!c) return null;
+  const base = { chainId, txHash: receipt.transactionHash, sentAt };
   if (c.kind === 'arb') {
-    const [ev] = parseEventLogs({ abi: L2_TO_L1_TX, logs: receipt.logs });
-    if (!ev) return null;
-    const a = ev.args;
+    const events = parseEventLogs({ abi: L2_TO_L1_TX, logs: logsFrom(receipt, ARB_SYS) });
+    if (events.length !== 1) return null;
+    const a = events[0]!.args;
     return { ...base, recipient: a.destination, amount: a.callvalue, arb: { position: a.position, caller: a.caller, destination: a.destination, arbBlockNum: a.arbBlockNum, ethBlockNum: a.ethBlockNum, timestamp: a.timestamp, callvalue: a.callvalue, data: a.data } };
   }
   if (c.kind === 'zk') return readZk(receipt as ZkReceipt, base);
-  const [w] = getWithdrawals(receipt);
-  if (!w) return null;
-  // Through L2StandardBridge the message goes to Ethereum's messenger; the bridge's event names the user
-  const [bridged] = parseEventLogs({ abi: ETH_BRIDGE_INITIATED, logs: receipt.logs });
-  const recipient = bridged ? bridged.args.to : w.target;
-  const amount = bridged ? bridged.args.amount : w.value;
+  const withdrawals = getWithdrawals({ logs: logsFrom(receipt, OP_MESSAGE_PASSER) });
+  if (withdrawals.length !== 1) return null;
+  const w = withdrawals[0]!;
+  // Through L2StandardBridge the message goes to Ethereum's messenger; the bridge's event names the
+  // user. It counts only when it is the message the messenger passed (same value).
+  const bridges = c.kind === 'op-oracle' ? [OP_L2_BRIDGE, BLAST_L2_BRIDGE] : [OP_L2_BRIDGE];
+  const bridged = parseEventLogs({ abi: ETH_BRIDGE_INITIATED, logs: bridges.flatMap((b) => logsFrom(receipt, b)) });
+  const viaBridge = bridged.length === 1 && isAddressEqual(w.sender, OP_L2_MESSENGER) && bridged[0]!.args.amount === w.value ? bridged[0]!.args : undefined;
+  if (bridged.length > 0 && !viaBridge) return null;
+  const recipient = viaBridge ? viaBridge.to : w.target;
+  const amount = viaBridge ? viaBridge.amount : w.value;
   return { ...base, recipient, amount, op: { tx: { nonce: w.nonce, sender: w.sender, target: w.target, value: w.value, gasLimit: w.gasLimit, data: w.data }, hash: w.withdrawalHash, block: receipt.blockNumber } };
 }
 
 type ZkReceipt = TransactionReceipt & { l1BatchNumber: Hex | bigint | null; l1BatchTxIndex: Hex | bigint | null; l2ToL1Logs: Array<{ sender: Address }> };
 
 function readZk(receipt: ZkReceipt, base: Pick<Withdrawal, 'chainId' | 'txHash' | 'sentAt'>): Withdrawal | null {
-  const [ev] = parseEventLogs({ abi: ZK_WITHDRAWAL, logs: receipt.logs.filter((l) => isAddressEqual(l.address, ZK_BASE_TOKEN)) });
-  const log = receipt.logs.find((l) => isAddressEqual(l.address, L1_MESSENGER) && l.topics[0] === L1_MESSAGE_SENT);
+  const events = parseEventLogs({ abi: ZK_WITHDRAWAL, logs: logsFrom(receipt, ZK_BASE_TOKEN) });
+  const messages = logsFrom(receipt, L1_MESSENGER).filter((l) => l.topics[0] === L1_MESSAGE_SENT);
   const logIndex = (receipt.l2ToL1Logs ?? []).findIndex((l) => isAddressEqual(l.sender, L1_MESSENGER));
-  if (!ev || !log || logIndex < 0) return null;
+  if (events.length !== 1 || messages.length !== 1 || logIndex < 0) return null;
+  const ev = events[0]!;
+  const log = messages[0]!;
   const [message] = decodeAbiParameters([{ type: 'bytes' }], log.data);
   const big = (v: Hex | bigint | null) => (v === null || v === undefined ? null : BigInt(v));
   return {
