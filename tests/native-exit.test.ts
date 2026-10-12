@@ -124,7 +124,8 @@ describe('steps, costs and dates', () => {
   });
 
   it('prices the prove and the claim at the given gas', () => {
-    expect(claimCostWei(NATIVE_EXITS[LISK]!, 1n)).toBe(600_000n);
+    // OP stack: a prove (450k) and a claim (250k: our Blast claims used 244k)
+    expect(claimCostWei(NATIVE_EXITS[LISK]!, 1n)).toBe(700_000n);
     expect(claimCostWei(NATIVE_EXITS[NOVA]!, 2n)).toBe(300_000n);
     expect(claimCostWei(NATIVE_EXITS[ABSTRACT]!, 1n)).toBe(190_000n);
   });
