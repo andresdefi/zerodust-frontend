@@ -122,6 +122,20 @@ describe('verifyPlan: guard chains', () => {
     expect(verifyPlan(guardPlan({ target: '0x000000000000000000000000000000000000dEaD', data: '0x', route: 'burn', absorb: 'amount', fee: 0n }), ctx({ mode: 'burn' }))).toEqual({});
   });
 
+  it('accepts its own bridge through the guard when chosen: 1:1 to the recipient, the amount moving', () => {
+    const data = encodeFunctionData({ abi: parseAbi(['function bridgeETHTo(address _to, uint32 _minGasLimit, bytes _extraData) payable']), functionName: 'bridgeETHTo', args: [OTHER, 200_000, '0x'] });
+    const plan = guardPlan({ target: '0x4200000000000000000000000000000000000010', data, route: 'native', absorb: 'amount' });
+    plan.receive = plan.guard!.forwarded;
+    expect(verifyPlan(plan, ctx({ toChainId: 1, bridge: 'native' }))).toEqual({ native: true });
+    // Not chosen, a fee moving the amount, or a withdrawal to someone else
+    expect(() => verifyPlan(plan, ctx({ toChainId: 1 }))).toThrow(/did not choose/);
+    expect(() => verifyPlan({ ...plan, guard: { ...plan.guard!, absorb: 'fee' } }, ctx({ toChainId: 1, bridge: 'native' }))).toThrow(/wrong amount/);
+    const stranger = encodeFunctionData({ abi: parseAbi(['function bridgeETHTo(address _to, uint32 _minGasLimit, bytes _extraData) payable']), functionName: 'bridgeETHTo', args: [FROM as Hex, 200_000, '0x'] });
+    const other = guardPlan({ target: '0x4200000000000000000000000000000000000010', data: stranger, route: 'native', absorb: 'amount' });
+    other.receive = other.guard!.forwarded;
+    expect(() => verifyPlan(other, ctx({ toChainId: 1, bridge: 'native' }))).toThrow(/pays someone else/);
+  });
+
   const refusals: Array<[string, () => DirectPlan, Partial<PlanContext>?]> = [
     ['no guard plan', () => ({ ...guardPlan(), guard: undefined })],
     ['another contract', () => { const p = guardPlan(); p.txs[0]!.to = OTHER; return p; }],

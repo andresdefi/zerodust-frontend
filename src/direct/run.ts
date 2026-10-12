@@ -70,7 +70,6 @@ const expired = (plan: DirectPlan, marginS: number) => plan.expiresAt !== undefi
  */
 export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string, bridge?: 'native'): Promise<DirectPlan> {
   const plan = mode === 'exit' ? await prepareExit({ ...t, feePaidTx }) : await preparePlan({ ...t, mode, feePaidTx, ...(bridge ? { bridge } : {}) });
-  if (bridge === 'native' && plan.route !== 'native') throw new Error('Plan refused: it does not use the chain\'s own bridge, which you chose');
   const [wallet, kinds] = await Promise.all([readWallet(t.chainId, t.from), apiChainKinds()]);
   // The page's own list decides how a plan is checked; the API must agree with it
   if ((kinds[t.chainId] === 'gaslimit') !== GASLIMIT_CHAINS.has(t.chainId)) throw new Error('Plan refused: the API and this page disagree on how this chain charges gas');
@@ -90,7 +89,7 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string,
     const wrapped = await rpc<string>(t.chainId, 'eth_call', [{ to: tokenExit.oft, data: `0x70a08231${t.from.slice(2).toLowerCase().padStart(64, '0')}` }, 'latest']);
     if (BigInt(wrapped) !== 0n) throw new Error(`Plan refused: this wallet holds wrapped ${tokenExit.token.symbol} on the bridge; unwrap it first`);
   }
-  const checks = verifyPlan(plan, { ...t, mode, ...wallet });
+  const checks = verifyPlan(plan, { ...t, mode, ...wallet, ...(bridge ? { bridge } : {}) });
   if (tokenExit) {
     // What the bridge keeps as its fee (value - amount, refunded beyond the real fee to ZeroDust) may
     // be at most LayerZero's own quote, read here, plus 10% and the rounding to shared decimals
@@ -120,11 +119,13 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string,
     // ArbSys is a native precompile (its code reads 0xfe), so no EVM fork can run the withdrawal.
     // The chain itself answers instead: the sweep must succeed with exactly its gas limit and fail
     // with one unit less, so it uses all of it and no refund is left behind (as on a fork replay)
-    const sweep = plan.txs.at(-1)!;
-    const call = (gas: bigint) => rpc<string>(t.chainId, 'eth_call', [{ from: t.from, to: sweep.to, data: sweep.data, value: `0x${BigInt(sweep.value).toString(16)}`, gas: `0x${gas.toString(16)}` }, 'latest'])
-      .then(() => true, () => false);
-    const gas = BigInt(sweep.gas);
-    if (!(await call(gas)) || (await call(gas - 1n))) throw new Error('Plan refused: the withdrawal\'s gas limit is not exactly what it uses, so it could leave dust');
+    // Every transaction in the set (the fee transfer too): a limit above what it uses is refunded as dust
+    for (const tx of plan.txs) {
+      const call = (gas: bigint) => rpc<string>(t.chainId, 'eth_call', [{ from: t.from, to: tx.to, data: tx.data, value: `0x${BigInt(tx.value).toString(16)}`, gas: `0x${gas.toString(16)}` }, 'latest'])
+        .then(() => true, () => false);
+      const gas = BigInt(tx.gas);
+      if (!(await call(gas)) || (await call(gas - 1n))) throw new Error(`Plan refused: the ${tx.kind === 'fee' ? 'fee transfer' : 'withdrawal'}'s gas limit is not exactly what it uses, so it could leave dust`);
+    }
     return plan;
   }
   // Never the API's expiry: the one in the deposit itself (or none)
