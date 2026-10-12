@@ -3,7 +3,7 @@
 // recipient proves (OP stack) and claims the withdrawal on Ethereum, days later; ZeroDust does not
 // claim for them yet. The page pins these chains itself: the API's word decides nothing here.
 
-export type NativeStack = 'op' | 'arb' | 'zk';
+export type NativeStack = 'op' | 'arb' | 'zk' | 'taiko';
 
 export interface NativeExit {
   stack: NativeStack;
@@ -18,6 +18,8 @@ export interface NativeExit {
   claimAfterHours: number;
   /** OP stack: a prove transaction on Ethereum first, once the chain has posted its state */
   prove: boolean;
+  /** The bridge's relayer delivers it on Ethereum for a fee paid in the sweep: nothing to claim (Taiko) */
+  relayed?: boolean;
   /** What arrives when it is not ETH: the chain's gas token as an ERC-20 on Ethereum */
   token?: { symbol: string; address: string; decimals: number };
 }
@@ -34,6 +36,13 @@ export const NATIVE_EXITS: Readonly<Record<number, NativeExit>> = {
   // Abstract (ZK Stack): claimable once its batch is executed on Ethereum, hours later
   2741: { chainName: 'Abstract', explorerUrl: 'https://abscan.org', stack: 'zk', toChainId: ETHEREUM, bridgeUrl: 'https://native-bridge.abs.xyz/bridge/', bridgeName: 'Abstract Native Bridge', claimAfterHours: 24, prove: false },
   // Gravity (Arbitrum Orbit): G arrives as an ERC-20 on Ethereum, confirmed about 6.4 days later
+  // Fraxtal: L2OutputOracle outputs hourly, claimable 7 days after the prove; FRAX is paid out as FXS (an ERC-20)
+  252: {
+    chainName: 'Fraxtal', explorerUrl: 'https://fraxscan.com', stack: 'op', toChainId: ETHEREUM, bridgeUrl: 'https://docs.frax.com/fraxtal/tools/bridges', bridgeName: 'Fraxtal\'s bridges', claimAfterHours: 7 * 24 + 1, prove: true,
+    token: { symbol: 'FXS', address: '0x3432B6A60D23Ca0dFCa7761B7ab56459D9C964D0', decimals: 18 },
+  },
+  // Taiko: its relayer processes the message on Ethereum for the fee the sweep pays (measured 24-53 min)
+  167000: { chainName: 'Taiko', explorerUrl: 'https://taikoscan.io', stack: 'taiko', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.taiko.xyz', bridgeName: 'Taiko Bridge', claimAfterHours: 1, prove: false, relayed: true },
   1625: {
     chainName: 'Gravity', explorerUrl: 'https://explorer.gravity.xyz', stack: 'arb', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.gravity.xyz', bridgeName: 'Gravity Bridge', claimAfterHours: 156, prove: false,
     token: { symbol: 'G', address: '0x9C7BEBa8F6eF6643aBd725e45a4E8387eF260649', decimals: 18 },
@@ -44,10 +53,11 @@ export const nativeExitOf = (chainId: number): NativeExit | undefined => NATIVE_
 
 /** Gas on Ethereum for the user's own steps (measured: proves 315k-463k, OP claims 244k, a ZK finalize 175k, a Nova claim 113k) */
 export const PROVE_GAS = 450_000n;
-export const CLAIM_GAS: Readonly<Record<NativeStack, bigint>> = { op: 250_000n, arb: 150_000n, zk: 190_000n };
+export const CLAIM_GAS: Readonly<Record<NativeStack, bigint>> = { op: 250_000n, arb: 150_000n, zk: 190_000n, taiko: 0n };
 
 /** Wei the user's own transactions on Ethereum cost at this gas price */
 export function claimCostWei(exit: NativeExit, gasPrice: bigint): bigint {
+  if (exit.relayed) return 0n;
   return (CLAIM_GAS[exit.stack] + (exit.prove ? PROVE_GAS : 0n)) * gasPrice;
 }
 
@@ -66,12 +76,20 @@ export function startByMs(exit: NativeExit, closesAtMs: number): number {
 
 export function waitText(exit: NativeExit): string {
   const h = exit.claimAfterHours;
+  if (h < 12) return h <= 1 ? 'about an hour' : `about ${h} hours`;
   return h < 48 ? `about ${h < 30 ? 'a day' : `${Math.round(h / 24)} days`}` : `about ${Math.round((h / 24) * 2) / 2} days`;
 }
 
 /** What happens after the sweep, step by step, before anything is signed */
 export function nativeSteps(exit: NativeExit, chainName: string, recipient: string): string[] {
   const arrives = exit.token ? `${exit.token.symbol}, as a token on Ethereum (not ETH)` : 'ETH on Ethereum';
+  if (exit.relayed) {
+    return [
+      `The sweep sends everything into ${chainName}'s own bridge, with a fee for its relayer taken from the balance. The wallet on ${chainName} ends at exactly 0.`,
+      `${chainName}'s relayer delivers it as ${arrives} in ${waitText(exit)}, at ${recipient}, with the part of its fee it did not use. Nothing to claim.`,
+      `If it has not arrived after a few hours, claim it on ${exit.bridgeName} (${exit.bridgeUrl}) with the wallet at ${recipient}.`,
+    ];
+  }
   const steps = [`The sweep sends everything into ${chainName}'s own bridge. The wallet on ${chainName} ends at exactly 0.`];
   if (exit.prove) {
     steps.push(`Within a few hours, prove the withdrawal on Ethereum (one transaction, paid in ETH there).`);

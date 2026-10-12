@@ -512,7 +512,12 @@ export function useSweep(wallet: Wallet) {
       from: address, recipient: getAddress(targetFor(row).recipient), amount: amount.toString(), txHash, sentAt: nowMs(),
     });
   };
-  const nativeDoneText = (row: Row) => `Balance reads 0 on-chain. Withdrawn into ${row.name}'s own bridge: claim it on Ethereum in ${waitText(nativeExitOf(row.chainId)!)} (see "Waiting to be claimed")`;
+  const nativeDoneText = (row: Row) => {
+    const exit = nativeExitOf(row.chainId)!;
+    return exit.relayed
+      ? `Balance reads 0 on-chain. Sent into ${row.name}'s own bridge: its relayer delivers it on Ethereum in ${waitText(exit)}`
+      : `Balance reads 0 on-chain. Withdrawn into ${row.name}'s own bridge: claim it on Ethereum in ${waitText(exit)} (see "Waiting to be claimed")`;
+  };
 
   /** Real quotes, checked and replayed (direct) or signed and verified by the SDK (sponsored); nothing sent */
   const check = async () => {
