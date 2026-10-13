@@ -220,6 +220,12 @@ export const directBalances = (address: string) => get<DirectBalance[]>(`balance
 
 /** Before any check: can a bridge take it there (false + exit: only a swap can), null = unknown */
 /** minimumBalanceWei: too small for every bridge, this balance would go through (AMOUNT_TOO_LOW) */
+/**
+ * Relay was over its rate limit, so the route is unknown for now (the API's "Relay: busy"):
+ * asking other destinations would only add to it (2026-10-13)
+ */
+export const relayBusy = (r: { reason?: string } | object) => 'reason' in r && typeof r.reason === 'string' && /Relay: busy/.test(r.reason);
+
 export const directRoute = (t: Target) => get<{ available: boolean | null; exit?: boolean; reason?: string; minimumBalanceWei?: string; bridge?: string; bridgeFeeWei?: string }>('route', { ...t });
 
 /** bridge 'native': the chain's own bridge to Ethereum (sweep/native.ts), only where no other route exists */
