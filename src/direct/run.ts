@@ -10,6 +10,7 @@ import {
 } from './plan';
 import { checkReplay, replay } from './replay';
 import { GUARD_SWEEP, MAX_FEE_SHARE, verifyPlan } from './verify';
+import { requestMesonSwap } from './meson';
 
 /** An Across deposit must still have this long to live when the page signs it, and when it sends it */
 export const ACROSS_SIGN_MARGIN_S = 10;
@@ -90,6 +91,15 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string,
     if (BigInt(wrapped) !== 0n) throw new Error(`Plan refused: this wallet holds wrapped ${tokenExit.token.symbol} on the bridge; unwrap it first`);
   }
   const checks = verifyPlan(plan, { ...t, mode, ...wallet, ...(bridge ? { bridge } : {}) });
+  if (checks.mesonFee !== undefined) {
+    // Meson: the swap the page signs is one it asked Meson for, to the recipient it shows
+    const g = plan.guard!;
+    const tx = plan.txs[0]!;
+    const own = await requestMesonSwap(t.chainId, t.toChainId, t.from, t.recipient, BigInt(g.forwarded), checks.mesonFee);
+    const { args: [target, fee] } = decodeFunctionData({ abi: GUARD_SWEEP, data: tx.data as Hex });
+    plan.guard = { ...g, data: own };
+    plan.txs[0] = { ...tx, data: encodeFunctionData({ abi: GUARD_SWEEP, functionName: 'sweep', args: [target, fee, own as Hex] }) };
+  }
   if (tokenExit) {
     // What the bridge keeps as its fee (value - amount, refunded beyond the real fee to ZeroDust) may
     // be at most LayerZero's own quote, read here, plus 10% and the rounding to shared decimals
