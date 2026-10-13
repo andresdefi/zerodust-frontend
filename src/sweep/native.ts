@@ -4,7 +4,7 @@
 // days later; ZeroDust does not claim for them yet. The page pins these chains itself: the API's word
 // decides nothing here.
 
-export type NativeStack = 'op' | 'arb' | 'zk' | 'taiko';
+export type NativeStack = 'op' | 'arb' | 'zk' | 'taiko' | 'agglayer';
 
 export interface NativeExit {
   stack: NativeStack;
@@ -56,6 +56,12 @@ export const NATIVE_EXITS: Readonly<Record<number, NativeExit>> = {
   // opBNB: its own bridge to BNB Chain while Meson (its fast route) is paused; outputs every 3,600
   // blocks (about 15 min), claimable 7 days after the prove; BNB arrives as native BNB
   204: { chainName: 'opBNB', explorerUrl: 'https://opbnb.bscscan.com', stack: 'op', toChainId: BNB_CHAIN, bridgeUrl: 'https://opbnb-bridge.bnbchain.org', bridgeName: 'opBNB Bridge', claimAfterHours: 7 * 24 + 1, prove: true },
+  // X Layer: the AggLayer bridge; its exit root reaches Ethereum about every 15 min, then OKB is claimed
+  // there as the OKB ERC-20 (the claim's proofs are built on this page, sweep/agglayer.ts)
+  196: {
+    chainName: 'X Layer', explorerUrl: 'https://www.okx.com/web3/explorer/xlayer', stack: 'agglayer', toChainId: ETHEREUM, bridgeUrl: 'https://web3.okx.com/xlayer/bridge', bridgeName: 'X Layer Bridge', claimAfterHours: 1, prove: false,
+    token: { symbol: 'OKB', name: 'OKB', address: '0x75231F58b43240C9718Dd58B4967c5114342a86c', decimals: 18 },
+  },
   // Gravity (Arbitrum Orbit): G arrives as an ERC-20 on Ethereum, confirmed about 6.4 days later
   1625: {
     chainName: 'Gravity', explorerUrl: 'https://explorer.gravity.xyz', stack: 'arb', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.gravity.xyz', bridgeName: 'Gravity Bridge', claimAfterHours: 156, prove: false,
@@ -67,7 +73,7 @@ export const nativeExitOf = (chainId: number): NativeExit | undefined => NATIVE_
 
 /** Gas on the parent chain for the user's own steps (measured: proves 315k-463k, OP claims 244k, a ZK finalize 175k, a Nova claim 113k) */
 export const PROVE_GAS = 450_000n;
-export const CLAIM_GAS: Readonly<Record<NativeStack, bigint>> = { op: 250_000n, arb: 150_000n, zk: 190_000n, taiko: 0n };
+export const CLAIM_GAS: Readonly<Record<NativeStack, bigint>> = { op: 250_000n, arb: 150_000n, zk: 190_000n, taiko: 0n, agglayer: 250_000n };
 
 /** Wei the user's own transactions on the parent chain cost at its gas price */
 export function claimCostWei(exit: NativeExit, gasPrice: bigint): bigint {

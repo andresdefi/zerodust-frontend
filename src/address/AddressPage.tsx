@@ -219,7 +219,8 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
         const relayedN = g.key === 'claim' ? g.chains.filter((c) => nativeExitOf(c.chainId)?.relayed).length : 0;
         const text = groupText(g.key, destName, { keyOnly: g.chains.filter((c) => !OFFLINE && (!c.metamask || c.direct)).length, relayed: relayedN === 0 ? undefined : relayedN === g.chains.length ? 'all' : 'some',
           tokens: g.key === 'claim' ? g.chains.flatMap((c) => { const t = nativeExitOf(c.chainId)?.token; return t ? [{ chain: c.name, symbol: t.symbol }] : []; }) : undefined,
-          parents: g.key === 'claim' ? g.chains.flatMap((c) => { const e = nativeExitOf(c.chainId); return e ? [{ chain: c.name, parent: parentOf(e).name, symbol: e.token?.symbol ?? parentOf(e).symbol }] : []; }) : undefined });
+          parents: g.key === 'claim' ? g.chains.flatMap((c) => { const e = nativeExitOf(c.chainId); return e ? [{ chain: c.name, parent: parentOf(e).name, symbol: e.token?.symbol ?? parentOf(e).symbol }] : []; }) : undefined,
+          claimHours: g.key === 'claim' ? g.chains.flatMap((c) => { const e = nativeExitOf(c.chainId); return e && !e.relayed ? [e.claimAfterHours] : []; }) : undefined });
         const isActive = g.key === activeGroup;
         const chosen = isActive ? g.chains.filter((c) => selectedIds.has(c.chainId) && !finished.has(c.chainId)) : [];
         const subtotal = g.chains.reduce((s, c) => s + (c.usd ?? 0), 0);

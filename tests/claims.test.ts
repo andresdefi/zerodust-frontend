@@ -81,7 +81,7 @@ describe('own-bridge withdrawals, read from the chain and Ethereum', () => {
   it('sends every call to the pinned contract of its chain', () => {
     for (const c of fixture.cases.filter((x) => x.call)) {
       const k = CLAIM_CONTRACTS[c.chainId]!;
-      const pinned = k.kind === 'arb' ? k.outbox : k.kind === 'zk' ? k.nullifier : k.kind === 'taiko' ? k.l1Bridge : k.portal;
+      const pinned = k.kind === 'arb' ? k.outbox : k.kind === 'zk' ? k.nullifier : k.kind === 'taiko' ? k.l1Bridge : k.kind === 'agglayer' ? k.bridge : k.portal;
       expect(c.call!.to).toBe(pinned);
     }
   });
