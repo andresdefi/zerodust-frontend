@@ -170,6 +170,53 @@ describe('verifyPlan: guard chains', () => {
   }
 });
 
+describe('verifyPlan: opBNB through the guard into Meson', () => {
+  const OPBNB = 204;
+  const BSC = 56;
+  const MESON = '0x25aB3Efd52e6470681CE037cD546Dc60726948D3';
+  const FIXED = 510n * 10n ** 12n; // 0.00051 BNB
+  const encode = (units: bigint, o: { inChain?: string; outToken?: string; feeUnits?: bigint } = {}) => `0x264849e7${[
+    '01', units.toString(16).padStart(10, '0'), 'd8000000000012345678', (o.feeUnits ?? 510n).toString(16).padStart(10, '0'),
+    '006ace218a', '02ca', o.outToken ?? 'fb', o.inChain ?? '00cc', 'fb',
+  ].join('')}`;
+  /** BAL here is 0.0001 BNB scaled up to 0.003 BNB so Meson's minimum is met */
+  function mesonPlan(o: { data?: (units: bigint) => string; receive?: (forwarded: bigint) => bigint; bridgeFee?: string | null } = {}): DirectPlan {
+    const bal = 3n * 10n ** 15n;
+    const value = bal - GAS * PRICE - L1;
+    const forwarded = ((value - FEE) / 10n ** 12n) * 10n ** 12n;
+    const fee = value - forwarded;
+    const data = (o.data ?? encode)(forwarded / 10n ** 12n);
+    return {
+      chainId: OPBNB, route: 'meson', requestId: null, fee: fee.toString(), balance: bal.toString(),
+      receive: (o.receive ? o.receive(forwarded) : forwarded - FIXED).toString(),
+      ...(o.bridgeFee === null ? {} : { bridgeFee: o.bridgeFee ?? FIXED.toString() }),
+      txs: [{ kind: 'sweep', to: GUARD, data: encodeFunctionData({ abi: SWEEP, functionName: 'sweep', args: [MESON, fee, data as Hex] }), value: value.toString(), gas: GAS.toString(), gasPrice: PRICE.toString(), nonce: 0 }],
+      guard: { address: GUARD, target: MESON, data, forwarded: forwarded.toString(), l1Fee: L1.toString(), absorb: 'fee', l1Formula: 'fjord' },
+    };
+  }
+  const mctx = (o: Partial<PlanContext> = {}) => ctx({ chainId: OPBNB, toChainId: BSC, balance: 3n * 10n ** 15n, ...o });
+
+  it('accepts exactly the forwarded amount into Meson, receiving it less Meson\'s fixed fee, and reports that fee', () => {
+    expect(verifyPlan(mesonPlan(), mctx())).toEqual({ mesonFee: FIXED });
+  });
+
+  const refusals: Array<[string, () => DirectPlan, Partial<PlanContext>?]> = [
+    ['a swap for another amount', () => mesonPlan({ data: (u) => encode(u + 1n) })],
+    ['a swap from another chain', () => mesonPlan({ data: (u) => encode(u, { inChain: '003c' }) })],
+    ['a swap paying out another token', () => mesonPlan({ data: (u) => encode(u, { outToken: '01' }) })],
+    ['a receive that hides Meson\'s fee', () => mesonPlan({ receive: (f) => f })],
+    ['a fee shown that is not Meson\'s', () => mesonPlan({ bridgeFee: '1' })],
+    ['no fee shown at all', () => mesonPlan({ bridgeFee: null })],
+    ['a destination Meson does not serve from opBNB', () => mesonPlan(), { toChainId: BASE }],
+    ['Relay where Meson is pinned', () => { const p = mesonPlan(); p.route = 'relay'; return p; }],
+  ];
+  for (const [why, plan, over] of refusals) {
+    it(`refuses ${why}`, () => {
+      expect(() => verifyPlan(plan(), mctx(over))).toThrow(/Plan refused/);
+    });
+  }
+});
+
 // ------------------------------------------------------------ planChecked and signPlan, offline
 
 const ORACLE = parseAbi(['function isFjord() view returns (bool)', 'function isIsthmus() view returns (bool)', 'function l1BaseFee() view returns (uint256)', 'function blobBaseFee() view returns (uint256)', 'function baseFeeScalar() view returns (uint32)', 'function blobBaseFeeScalar() view returns (uint32)']);
