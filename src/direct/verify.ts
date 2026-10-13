@@ -36,6 +36,8 @@ export function checkNativeCall(chainId: number, toChainId: number, to: string, 
   const exit = nativeExitOf(chainId);
   if (!exit) return fail('this chain has no own bridge this page knows');
   if (toChainId !== exit.toChainId) fail('its own bridge only goes to Ethereum');
+  // Taiko is sponsored: the SDK checks its sendMessage, never a direct plan
+  if (exit.stack === 'taiko') return fail('this chain\'s own bridge is not swept directly');
   if (!eq(to, NATIVE_BRIDGE_CONTRACT[exit.stack])) fail('the withdrawal does not go to the chain\'s own bridge contract');
   let payee: string;
   try {
