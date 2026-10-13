@@ -11,7 +11,7 @@ import { formatAmountUp } from '../lib/format';
 import { sendReport, type SweepReport } from './report';
 import { permissionQuote, sweepBatchWithPermissions, sweepStatus, type MetaMaskSession } from './metamask';
 import { durationText, expectedTime, fetchTimings, NO_TIMINGS, type BridgeTimings, type ExpectedTime } from './timing';
-import { addPendingClaim, nativeExitOf, waitText } from './native';
+import { addPendingClaim, nativeExitOf, parentOf, waitText } from './native';
 
 // Mirrors the local sweeper (local-sweeper/src/App.tsx), which is proven with
 // real funds: ZeroDust's sponsored (EIP-7702) chains through the SDK, and
@@ -32,7 +32,7 @@ const ROUTE_RETRY_MS = 3000;
  * with a swap route can also swap out; the few cents of gas reserve the swap
  * leaves are then donated or burned, so the wallet still ends at exactly 0.
  */
-/** 'native': the chain's own bridge to Ethereum, for a chain no other route takes out (sweep/native.ts) */
+/** 'native': the chain's own bridge to its parent (Ethereum; BNB Chain for opBNB), for a chain no other route takes out (sweep/native.ts) */
 export type Choice = 'exit-donate' | 'exit-burn' | 'donate' | 'burn' | 'elsewhere' | 'address' | 'native';
 export const isExit = (c?: Choice) => c === 'exit-donate' || c === 'exit-burn';
 /** The balance reaches the recipient (on the chosen chain, or on another one for 'elsewhere') */
@@ -502,7 +502,7 @@ export function useSweep(wallet: Wallet) {
     const exit = choices[row.chainId] === 'native' ? nativeExitOf(row.chainId) : undefined;
     return exit?.token ? { symbol: exit.token.symbol, decimals: exit.token.decimals } : rowToken(row.chainId, toChainId);
   };
-  /** Saves a withdrawal through a chain's own bridge, to be claimed on Ethereum later (this browser only) */
+  /** Saves a withdrawal through a chain's own bridge, to be claimed on its parent chain later (this browser only) */
   const notePending = (row: Row, txHash: string | undefined, amount: bigint | undefined) => {
     if (!txHash || amount === undefined) return;
     const exit = nativeExitOf(row.chainId);
@@ -515,8 +515,8 @@ export function useSweep(wallet: Wallet) {
   const nativeDoneText = (row: Row) => {
     const exit = nativeExitOf(row.chainId)!;
     return exit.relayed
-      ? `Balance reads 0 on-chain. Sent into ${row.name}'s own bridge: its relayer delivers it on Ethereum in ${waitText(exit)}`
-      : `Balance reads 0 on-chain. Withdrawn into ${row.name}'s own bridge: claim it on Ethereum in ${waitText(exit)} (see "Waiting to be claimed")`;
+      ? `Balance reads 0 on-chain. Sent into ${row.name}'s own bridge: its relayer delivers it on ${parentOf(exit).name} in ${waitText(exit)}`
+      : `Balance reads 0 on-chain. Withdrawn into ${row.name}'s own bridge: claim it on ${parentOf(exit).name} in ${waitText(exit)} (see "Waiting to be claimed")`;
   };
 
   /** Real quotes, checked and replayed (direct) or signed and verified by the SDK (sponsored); nothing sent */
@@ -639,7 +639,7 @@ export function useSweep(wallet: Wallet) {
       }
       delete feePaid.current[row.chainId];
       if (plan.route === 'native') {
-        // Nothing to follow: the withdrawal exists now and is claimed on Ethereum later
+        // Nothing to follow: the withdrawal exists now and is claimed on its parent chain later
         notePending(row, hash, receive);
         update({ phase: 'done', receive, fee, detail: nativeDoneText(row) });
         return;

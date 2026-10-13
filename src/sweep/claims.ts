@@ -1,5 +1,5 @@
-// Withdrawals through a chain's own bridge (sweep/native.ts), read from the chain and from
-// Ethereum: where each one stands, and the prove and claim transactions to send there (phase 2,
+// Withdrawals through a chain's own bridge (sweep/native.ts), read from the chain and from its
+// parent (Ethereum; BNB Chain for opBNB): where each one stands, and the prove and claim transactions to send there (phase 2,
 // owner 2026-10-12). Anyone may send them; the funds always go to the withdrawal's recipient.
 // Every contract is pinned here, nothing comes from the API.
 import {
@@ -10,11 +10,12 @@ import { buildProveWithdrawal, getWithdrawals } from 'viem/op-stack';
 import { DIRECT_RPC_URLS, ETHEREUM_FALLBACK_RPC, RPC_URLS } from '../chains/rpcs';
 import { nativeExitOf } from './native';
 
-// ---- Pinned contracts on Ethereum ----
+// ---- Pinned contracts on the parent chain ----
 
 interface OpGames { kind: 'op-games'; portal: Address; factory: Address }
 /** The older portal with an L2OutputOracle; Blast's adds a yield checkpoint to its proofs and claims */
-interface OpOracle { kind: 'op-oracle'; portal: Address; oracle: Address; yieldManager?: Address }
+/** latestOutput: prove against the newest output (opBNB: its nodes keep proofs for minutes, not days) */
+interface OpOracle { kind: 'op-oracle'; portal: Address; oracle: Address; yieldManager?: Address; latestOutput?: true }
 interface Arb { kind: 'arb'; rollup: Address; outbox: Address }
 interface Zk { kind: 'zk'; nullifier: Address }
 /** Taiko: its relayer processes the message on Ethereum; the page only reads whether it did */
@@ -33,6 +34,8 @@ export const CLAIM_CONTRACTS: Readonly<Record<number, Contracts>> = {
   // Abstract: the ZK Stack's L1Nullifier (behind its shared bridge)
   2741: { kind: 'zk', nullifier: '0xD7f9f54194C633F36CCD5F3da84ad4a1c38cB2cB' },
   167000: { kind: 'taiko', l1Bridge: '0xd60247c6848B7Ca29eDdF63AA924E53dB6Ddd8EC' },
+  // opBNB, on BNB Chain: OptimismPortal 1.6.0 and L2OutputOracle 1.3.0 (outputs every 3,600 blocks)
+  204: { kind: 'op-oracle', portal: '0x1876EA7702C0ad0C6A2ae6036DE7733edfBca519', oracle: '0x153CAB79f4767E2ff862C94aa49573294B13D169', latestOutput: true },
 };
 
 const rpcOf = (chainId: number) => RPC_URLS[chainId] ?? DIRECT_RPC_URLS[chainId];
@@ -51,6 +54,9 @@ function client(chainId: number): PublicClient {
   return c;
 }
 export const l1 = () => client(1);
+/** The chain a withdrawal is proved and claimed on: Ethereum, or BNB Chain for opBNB */
+export const parentChainId = (chainId: number): number => nativeExitOf(chainId)?.toChainId ?? 1;
+export const parent = (chainId: number) => client(parentChainId(chainId));
 
 // ---- The withdrawal, from its transaction on the chain ----
 
@@ -199,6 +205,7 @@ const PORTAL1_STD = parseAbi([
 ]);
 const ORACLE = parseAbi([
   'function latestBlockNumber() view returns (uint256)',
+  'function latestOutputIndex() view returns (uint256)',
   'function FINALIZATION_PERIOD_SECONDS() view returns (uint256)',
   'function getL2OutputIndexAfter(uint256) view returns (uint256)',
   'function getL2Output(uint256) view returns ((bytes32 outputRoot, uint128 timestamp, uint128 l2BlockNumber))',
@@ -217,6 +224,7 @@ const NULLIFIER = parseAbi([
 
 export async function claimState(w: Withdrawal, now = Date.now()): Promise<ClaimState> {
   const c = CLAIM_CONTRACTS[w.chainId]!;
+  const l1 = () => parent(w.chainId);
   const estimate = (): ClaimState => {
     const until = w.sentAt + (nativeExitOf(w.chainId)?.claimAfterHours ?? 0) * HOUR;
     return { stage: 'waiting', ...(until > now ? { until } : {}) };
@@ -224,7 +232,7 @@ export async function claimState(w: Withdrawal, now = Date.now()): Promise<Claim
   if (c.kind === 'op-games') {
     const { hash, block } = w.op!;
     if (await l1().readContract({ address: c.portal, abi: PORTAL2, functionName: 'finalizedWithdrawals', args: [hash] })) return { stage: 'claimed' };
-    const submitter = await provedBy(c, hash);
+    const submitter = await provedBy(w.chainId, c, hash);
     if (submitter) {
       const [[, proved], delay] = await Promise.all([
         l1().readContract({ address: c.portal, abi: PORTAL2, functionName: 'provenWithdrawals', args: [hash, submitter] }),
@@ -240,7 +248,7 @@ export async function claimState(w: Withdrawal, now = Date.now()): Promise<Claim
         return { stage: 'proved', until: now + HOUR };
       }
     }
-    return (await latestGame(c)).l2BlockNumber >= block ? { stage: 'prove' } : { stage: 'waiting' };
+    return (await latestGame(w.chainId, c)).l2BlockNumber >= block ? { stage: 'prove' } : { stage: 'waiting' };
   }
   if (c.kind === 'op-oracle') {
     const { hash, block } = w.op!;
@@ -278,14 +286,16 @@ export async function claimState(w: Withdrawal, now = Date.now()): Promise<Claim
 
 // ---- OP stack ----
 
-async function provedBy(c: OpGames, hash: Hex): Promise<Address | undefined> {
+async function provedBy(chainId: number, c: OpGames, hash: Hex): Promise<Address | undefined> {
+  const l1 = () => parent(chainId);
   const n = await l1().readContract({ address: c.portal, abi: PORTAL2, functionName: 'numProofSubmitters', args: [hash] });
   if (n === 0n) return undefined;
   return l1().readContract({ address: c.portal, abi: PORTAL2, functionName: 'proofSubmitters', args: [hash, n - 1n] });
 }
 
 /** The newest game of the type the portal accepts (a few recent ones are checked) */
-async function latestGame(c: OpGames): Promise<{ index: bigint; l2BlockNumber: bigint }> {
+async function latestGame(chainId: number, c: OpGames): Promise<{ index: bigint; l2BlockNumber: bigint }> {
+  const l1 = () => parent(chainId);
   const [count, type] = await Promise.all([
     l1().readContract({ address: c.factory, abi: FACTORY, functionName: 'gameCount' }),
     l1().readContract({ address: c.portal, abi: PORTAL2, functionName: 'respectedGameType' }),
@@ -301,20 +311,23 @@ async function latestGame(c: OpGames): Promise<{ index: bigint; l2BlockNumber: b
 
 export interface L1Call { to: Address; data: Hex }
 
-/** OP stack: the prove transaction, against the newest state on Ethereum that covers the withdrawal */
+/** OP stack: the prove transaction, against the state on the parent chain that covers the withdrawal */
 export async function proveCall(w: Withdrawal): Promise<L1Call> {
   const c = CLAIM_CONTRACTS[w.chainId]!;
+  const l1 = () => parent(w.chainId);
   const { tx, block } = w.op!;
   const withdrawal = { ...tx, withdrawalHash: w.op!.hash };
   const l2 = client(w.chainId);
   if (c.kind === 'op-games') {
-    const game = await latestGame(c);
+    const game = await latestGame(w.chainId, c);
     if (game.l2BlockNumber < block) throw new Error('not provable yet');
     const args = await buildProveWithdrawal(l2 as never, { withdrawal, game } as never);
     return { to: c.portal, data: encodeFunctionData({ abi: PORTAL2, functionName: 'proveWithdrawalTransaction', args: [tx, game.index, args.outputRootProof, [...args.withdrawalProof]] }) };
   }
   if (c.kind === 'op-oracle') {
-    const outputIndex = await l1().readContract({ address: c.oracle, abi: ORACLE, functionName: 'getL2OutputIndexAfter', args: [block] });
+    const outputIndex = c.latestOutput
+      ? await l1().readContract({ address: c.oracle, abi: ORACLE, functionName: 'latestOutputIndex' })
+      : await l1().readContract({ address: c.oracle, abi: ORACLE, functionName: 'getL2OutputIndexAfter', args: [block] });
     const out = await l1().readContract({ address: c.oracle, abi: ORACLE, functionName: 'getL2Output', args: [outputIndex] });
     const args = await buildProveWithdrawal(l2 as never, { withdrawal, output: { outputIndex, l2BlockNumber: out.l2BlockNumber } } as never);
     return { to: c.portal, data: encodeFunctionData({ abi: PORTAL1, functionName: 'proveWithdrawalTransaction', args: [tx, outputIndex, args.outputRootProof, [...args.withdrawalProof]] }) };
@@ -322,11 +335,12 @@ export async function proveCall(w: Withdrawal): Promise<L1Call> {
   throw new Error('only OP stack withdrawals are proved');
 }
 
-/** The claim transaction on Ethereum */
+/** The claim transaction on the parent chain */
 export async function claimCall(w: Withdrawal): Promise<L1Call> {
   const c = CLAIM_CONTRACTS[w.chainId]!;
+  const l1 = () => parent(w.chainId);
   if (c.kind === 'op-games') {
-    const submitter = await provedBy(c, w.op!.hash);
+    const submitter = await provedBy(w.chainId, c, w.op!.hash);
     if (!submitter) throw new Error('not proved yet');
     return { to: c.portal, data: encodeFunctionData({ abi: PORTAL2, functionName: 'finalizeWithdrawalTransactionExternalProof', args: [w.op!.tx, submitter] }) };
   }
@@ -383,6 +397,7 @@ const LEGACY_EVENT = parseAbi([GLOBAL, 'struct ExecutionState { GlobalState glob
 
 /** The rollup's latest confirmed state on Ethereum: its send root (held by the Outbox) and how many withdrawals it covers */
 async function confirmedArb(chainId: number, c: Arb): Promise<{ sendRoot: Hex; sendCount: bigint }> {
+  const l1 = () => parent(chainId);
   const raw = await l1().call({ to: c.rollup, data: '0x65f7f80d' }); // latestConfirmed()
   const value = BigInt(raw.data ?? '0x0');
   let after: { blockHash: Hex; sendRoot: Hex } | undefined;
