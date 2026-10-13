@@ -8,8 +8,9 @@ import {
   directChains, FIXED_PRICE_CHAINS, GASLIMIT_CHAINS, GUARD_CHAINS, MAX_GAS_PRICE_FACTOR, OFT_FEE_MARGIN_PERCENT, tokenExitFor, ZERODUST_GUARD, ZERODUST_GUARD_CODEHASH, ZK_PAYMASTERS,
   prepareExit, preparePlan, TX_GAP_BLOCKS, type DirectPlan, type PlanMode, type Target,
 } from './plan';
-import { checkReplay, replay } from './replay';
+import { checkReplay, replay, rpc as rpcAt } from './replay';
 import { GUARD_SWEEP, MAX_FEE_SHARE, verifyPlan } from './verify';
+import { requestMesonSwap } from './meson';
 
 /** An Across deposit must still have this long to live when the page signs it, and when it sends it */
 export const ACROSS_SIGN_MARGIN_S = 10;
@@ -18,13 +19,11 @@ export const ACROSS_SEND_MARGIN_S = 4;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const nowS = () => Date.now() / 1000;
 
+/** The chain's own RPC; a node behind the block just read is waited out (replay.ts) */
 async function rpc<T>(chainId: number, method: string, params: unknown[]): Promise<T> {
   const url = DIRECT_RPC_URLS[chainId];
   if (!url) throw new Error(`No RPC for chain ${chainId}`);
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
-  const body = (await res.json()) as { result?: T; error?: { message: string } };
-  if (body.error || body.result === undefined) throw new Error(body.error?.message ?? `${method}: no result`);
-  return body.result;
+  return rpcAt<T>(url, method, params);
 }
 
 /** Balance and next nonce, read by the page from the chain itself */
@@ -90,6 +89,15 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string,
     if (BigInt(wrapped) !== 0n) throw new Error(`Plan refused: this wallet holds wrapped ${tokenExit.token.symbol} on the bridge; unwrap it first`);
   }
   const checks = verifyPlan(plan, { ...t, mode, ...wallet, ...(bridge ? { bridge } : {}) });
+  if (checks.mesonFee !== undefined) {
+    // Meson: the swap the page signs is one it asked Meson for, to the recipient it shows
+    const g = plan.guard!;
+    const tx = plan.txs[0]!;
+    const own = await requestMesonSwap(t.chainId, t.toChainId, t.from, t.recipient, BigInt(g.forwarded), checks.mesonFee);
+    const { args: [target, fee] } = decodeFunctionData({ abi: GUARD_SWEEP, data: tx.data as Hex });
+    plan.guard = { ...g, data: own };
+    plan.txs[0] = { ...tx, data: encodeFunctionData({ abi: GUARD_SWEEP, functionName: 'sweep', args: [target, fee, own as Hex] }) };
+  }
   if (tokenExit) {
     // What the bridge keeps as its fee (value - amount, refunded beyond the real fee to ZeroDust) may
     // be at most LayerZero's own quote, read here, plus 10% and the rounding to shared decimals
@@ -110,8 +118,16 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string,
     if (code === '0x' || keccak256(code) !== ZERODUST_GUARD_CODEHASH) throw new Error('Plan refused: ZeroDust\'s guard is not deployed on this chain as expected');
     // The fork charges no L1 fee: replay with the planned L1 fee added to the value, so the wallet
     // is at 0 while the guard runs, as on-chain; the guard must then burn every unit of its gas
-    const l1Fee = BigInt(plan.guard!.l1Fee);
-    const txs = plan.txs.map((tx) => ({ ...tx, value: (BigInt(tx.value) + l1Fee).toString() }));
+    // A bridge deposit keeps its exact amount (Meson reverts on any other): there the L1 fee joins
+    // ZeroDust's fee in the replay, as the difference does when the page signs
+    const g = plan.guard!;
+    const l1Fee = BigInt(g.l1Fee);
+    const txs = plan.txs.map((tx) => {
+      const value = (BigInt(tx.value) + l1Fee).toString();
+      if (g.absorb !== 'fee') return { ...tx, value };
+      const { args: [target, fee, data] } = decodeFunctionData({ abi: GUARD_SWEEP, data: tx.data as Hex });
+      return { ...tx, value, data: encodeFunctionData({ abi: GUARD_SWEEP, functionName: 'sweep', args: [target, fee + l1Fee, data] }) };
+    });
     checkReplay(t.chainId, txs, await replay(t.chainId, t.from, txs), null);
     return plan;
   }
@@ -278,6 +294,31 @@ export interface Broadcast {
   reason?: string;
   /** A fee transfer that landed: passed to the next plan so a retry is not charged twice */
   feePaidTx?: string;
+  /** Guard chains: plan and send again (the guard refused the sweep as the L1 fee moved, spending only its gas, or the plan's balance was stale and nothing was sent) */
+  guardRefused?: true;
+}
+
+/**
+ * Guard chains: sweeps signed and sent before the page gives up when the L1 fee keeps moving.
+ * On opBNB the L1 origin changes about every 2 blocks (0.25 s) and the L1 fee moved in 28 of 124
+ * blocks (2026-10-13), so one attempt often lands under another fee; each refusal costs only its
+ * gas (about 0.00000003 BNB there).
+ */
+export const GUARD_ATTEMPTS = 5;
+
+/**
+ * After the guard refused a sweep: reads until the chain's latest state includes it (the nonce
+ * moved past it), so the next plan spends the balance it left. A load-balanced RPC can answer
+ * from a node a few blocks behind (opBNB, 2026-10-13: a retry planned on the balance before the
+ * refusal, and the send was rejected). False if it never shows.
+ */
+export async function waitForNonce(chainId: number, address: string, next: number): Promise<boolean> {
+  for (let tries = 0; tries < 40; tries++) {
+    const latest = Number(BigInt(await rpc<string>(chainId, 'eth_getTransactionCount', [address, 'latest']).catch(() => '0x0')));
+    if (latest >= next) return true;
+    await sleep(500);
+  }
+  return false;
 }
 
 /** Per chain: the block of the last transaction this page landed (for TX_GAP_BLOCKS) */
@@ -308,7 +349,16 @@ export async function broadcast(plan: DirectPlan, raws: Hex[], onSent?: (hash: s
     if (plan.txs[i]!.kind === 'sweep' && expired(plan, ACROSS_SEND_MARGIN_S)) {
       return { ...out, ok: false, reason: 'The Across quote expired before the sweep could be sent, so it was not sent. Check again (a fee already paid is not charged twice)' };
     }
-    const hash = await rpc<string>(plan.chainId, 'eth_sendRawTransaction', [raw]);
+    let hash: string;
+    try {
+      hash = await rpc<string>(plan.chainId, 'eth_sendRawTransaction', [raw]);
+    } catch (error) {
+      // Guard chains: planned on a balance read from a node behind the chain; nothing was sent, plan again
+      if (GUARD_CHAINS[plan.chainId] && /insufficient funds/i.test(String((error as Error).message))) {
+        return { ...out, ok: false, guardRefused: true, reason: 'The balance changed while it was planned; nothing was sent' };
+      }
+      throw error;
+    }
     out.hashes.push(hash);
     onSent?.(hash, i);
     let receipt: { status: string; blockNumber?: string } | null = null;
@@ -318,7 +368,7 @@ export async function broadcast(plan: DirectPlan, raws: Hex[], onSent?: (hash: s
     }
     if (receipt?.blockNumber) lastBlock[plan.chainId] = BigInt(receipt.blockNumber);
     if (receipt && receipt.status !== '0x1' && GUARD_CHAINS[plan.chainId]) {
-      return { ...out, ok: false, reason: 'The L1 fee changed between signing and inclusion, so ZeroDust\'s guard refused the sweep. Only this attempt\'s gas was spent; sweep again' };
+      return { ...out, ok: false, guardRefused: true, reason: 'The L1 fee changed between signing and inclusion, so ZeroDust\'s guard refused the sweep. Only this attempt\'s gas was spent; sweep again' };
     }
     if (!receipt || receipt.status !== '0x1') return { ...out, ok: false };
     if (plan.txs[i]!.kind === 'fee') out.feePaidTx = hash;

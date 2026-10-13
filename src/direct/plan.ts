@@ -80,7 +80,7 @@ export const TOKEN_EXITS: Readonly<Record<number, {
  * signs (l1fee.ts). Pinned here; the page refuses a plan when /direct/chains disagrees, and refuses
  * to sign when the chain's own oracle reports another formula.
  */
-export const GUARD_CHAINS: Readonly<Record<number, L1Formula>> = { 81457: 'ecotone', 288: 'fjord' };
+export const GUARD_CHAINS: Readonly<Record<number, L1Formula>> = { 81457: 'ecotone', 288: 'fjord', 204: 'fjord' };
 /** ZeroDustGuard (zerodust contracts/src/ZeroDustGuard.yul): CREATE2, the same address on every guard chain */
 export const ZERODUST_GUARD = '0x2f95e6ED90a7dD67fc3Fae5c5628647E6A83e48e';
 /** keccak256 of its runtime code: the page checks the code at the address before signing */
@@ -112,7 +112,7 @@ export const PAYMASTER_GENERAL = '0x8c5a3445';
  */
 export const TX_GAP_BLOCKS: Readonly<Record<number, number>> = { 143: 4 };
 
-export type DirectRoute = 'gaszip' | 'relay' | 'across' | 'transfer' | 'burn' | 'donate' | 'lifi' | 'oft' | 'native';
+export type DirectRoute = 'gaszip' | 'relay' | 'across' | 'transfer' | 'burn' | 'donate' | 'lifi' | 'oft' | 'native' | 'meson';
 export type PlanMode = 'route' | 'burn' | 'donate' | 'exit';
 
 export interface PlanTx {
@@ -150,6 +150,8 @@ export interface DirectPlan {
   expiresAt?: number;
   /** Token exits: what arrives is this token, not gas (the page uses its own pinned TOKEN_EXITS) */
   receiveToken?: { chainId: number; symbol: string; address: string; decimals: number };
+  /** A fixed fee the bridge keeps from what arrives, whatever the amount (Meson), in wei; already out of receive */
+  bridgeFee?: string;
   /** Guard chains: the one transaction through ZeroDustGuard (sweep(target, fee, data)) */
   guard?: GuardPlan;
 }
@@ -218,7 +220,7 @@ export const directBalances = (address: string) => get<DirectBalance[]>(`balance
 
 /** Before any check: can a bridge take it there (false + exit: only a swap can), null = unknown */
 /** minimumBalanceWei: too small for every bridge, this balance would go through (AMOUNT_TOO_LOW) */
-export const directRoute = (t: Target) => get<{ available: boolean | null; exit?: boolean; reason?: string; minimumBalanceWei?: string }>('route', { ...t });
+export const directRoute = (t: Target) => get<{ available: boolean | null; exit?: boolean; reason?: string; minimumBalanceWei?: string; bridge?: string; bridgeFeeWei?: string }>('route', { ...t });
 
 /** bridge 'native': the chain's own bridge to Ethereum (sweep/native.ts), only where no other route exists */
 export const preparePlan = (t: Target & { mode: Exclude<PlanMode, 'exit'>; feePaidTx?: string; bridge?: 'native' }) =>

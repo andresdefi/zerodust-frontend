@@ -52,6 +52,21 @@ describe('replay (offline fork)', () => {
     expect(r.after).toBe(PRICE);
     expect(() => checkReplay(43114, txs, r, null)).toThrow(/use 21000 gas, not its limit 21001/);
   });
+
+  it('waits out a load-balanced RPC node that is behind the block it forks from ("header not found")', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const inner = fakeRpc();
+    let behind = 3;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      const { method } = JSON.parse(String(init.body)) as { method: string };
+      if (method === 'eth_getCode' && behind-- > 0) return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'header not found' } }));
+      return inner(url, init);
+    }));
+    const run = replay(43114, FROM, [transfer(21_000n)]);
+    await vi.runAllTimersAsync();
+    expect((await run).after).toBe(0n);
+    vi.useRealTimers();
+  });
 });
 
 describe('checkReplay', () => {

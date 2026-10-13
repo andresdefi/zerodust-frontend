@@ -8,7 +8,7 @@ import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { directBalances, directChains, directRoute, preparePlan } from '../direct/plan';
 import { inPool } from '../lib/pool';
 import { API_URL } from '../sweep/constants';
-import type { AddressChain, ChainRoutes } from './groups';
+import type { AddressChain, ChainRoutes, FixedFee } from './groups';
 
 // Read-only data for one address: no wallet, no key, nothing signed. Balances and
 // prices come from the API; routes from its route status (sponsored chains) or a
@@ -34,6 +34,8 @@ interface DirectReach {
   elsewhere?: boolean;
   /** Below every bridge's minimum: the least that would go */
   minimum?: bigint;
+  /** Its bridge keeps a fixed fee whatever the amount (Meson), to the destination or the chain found instead */
+  fixedFee?: FixedFee;
 }
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -232,13 +234,17 @@ export function useAddressData(address: Address | null, destination: number | nu
         // No bridge to the chosen chain, or none answering after the retries: does one take it
         // somewhere else? Unconfirmed counts as blocked only when another chain is confirmed instead
         let elsewhere = false;
+        const feeOf = (answer: typeof res, toChainId: number): FixedFee | undefined =>
+          answer.bridgeFeeWei && answer.bridge ? { amount: BigInt(answer.bridgeFeeWei), bridge: answer.bridge, toChainId } : undefined;
+        let fixedFee = res.available === true ? feeOf(res, destination) : undefined;
         if (res.available !== true) {
           for (const alt of ALT_CANDIDATES.filter((id) => id !== destination && id !== r.chainId)) {
             if (cancelled) break;
-            if ((await probe(alt)).available === true) { elsewhere = true; break; }
+            const other = await probe(alt);
+            if (other.available === true) { elsewhere = true; fixedFee = feeOf(other, alt); break; }
           }
         }
-        direct[r.chainId] = { available: res.available, elsewhere };
+        direct[r.chainId] = { available: res.available, elsewhere, ...(fixedFee ? { fixedFee } : {}) };
       });
       if (!cancelled) setDestRoutes({ key: destKey, unreachable, direct });
     })();
@@ -255,7 +261,7 @@ export function useAddressData(address: Address | null, destination: number | nu
       const reach = routes.direct[chainId];
       const gas = reach?.available ?? null;
       if (reach?.minimum !== undefined) return { gas: false, minimum: reach.minimum };
-      if (reach?.elsewhere) return { gas: false, notToDestination: true };
+      if (reach?.elsewhere) return { gas: false, notToDestination: true, ...(reach.fixedFee ? { fixedFee: reach.fixedFee } : {}) };
       return gas === null ? { gas: null, unknown: true } : { gas };
     }
     const c = ready.info.get(chainId);
@@ -281,6 +287,8 @@ export interface Estimate {
   receive?: bigint;
   /** The bridge that carries it, or "Same chain" */
   route?: string;
+  /** A fixed fee the bridge keeps whatever the amount (Meson), in the chain's token; already out of receive */
+  bridgeFee?: bigint;
   error?: string;
 }
 
@@ -299,7 +307,7 @@ export function useEstimates(address: Address | null, rows: AddressRow[], destin
       try {
         if (r.direct) {
           const plan = await preparePlan({ chainId: r.chainId, toChainId: destination, from: address, recipient, mode: 'route' });
-          if (!cancelled) put(r.chainId, { receive: BigInt(plan.receive), route: plan.route === 'transfer' ? 'Same chain' : DIRECT_ROUTE_NAMES[plan.route] ?? plan.route });
+          if (!cancelled) put(r.chainId, { receive: BigInt(plan.receive), route: plan.route === 'transfer' ? 'Same chain' : DIRECT_ROUTE_NAMES[plan.route] ?? plan.route, ...(plan.bridgeFee ? { bridgeFee: BigInt(plan.bridgeFee) } : {}) });
         } else {
           const q = await estimateQuote({ fromChainId: r.chainId, toChainId: destination, userAddress: address, destination: recipient });
           const bridge = (q as { bridge?: { displayName?: string } }).bridge?.displayName;
@@ -340,4 +348,6 @@ function estimateQuote(p: { fromChainId: number; toChainId: number; userAddress:
   return request;
 }
 
-const DIRECT_ROUTE_NAMES: Record<string, string> = { gaszip: 'Gas.zip', relay: 'Relay', across: 'Across', lifi: 'LI.FI', oft: 'LayerZero' };
+/** A direct plan's bridge as people know it */
+export const directRouteName = (route: string): string => DIRECT_ROUTE_NAMES[route] ?? route;
+const DIRECT_ROUTE_NAMES: Record<string, string> = { gaszip: 'Gas.zip', relay: 'Relay', across: 'Across', lifi: 'LI.FI', oft: 'LayerZero', meson: 'Meson' };

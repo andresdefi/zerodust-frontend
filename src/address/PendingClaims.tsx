@@ -3,7 +3,7 @@ import type { Address, Hex } from 'viem';
 import { ChainIcon } from '../components/ChainIcon';
 import { formatAmount, shortAddress } from '../lib/format';
 import { claimState, findWithdrawal, readWithdrawal, type ClaimState, type Withdrawal } from '../sweep/claims';
-import { addPendingClaim, claimableFrom, nativeExitOf, pendingClaimsOf, removePendingClaim, type PendingClaim } from '../sweep/native';
+import { addPendingClaim, claimableFrom, nativeExitOf, parentOf, pendingClaimsOf, removePendingClaim, type PendingClaim } from '../sweep/native';
 import { ClaimDialog, type ClaimStep } from './ClaimDialog';
 
 interface Live {
@@ -16,8 +16,8 @@ interface Live {
 const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 /**
- * Withdrawals sent into a chain's own bridge from this browser, still to be claimed on Ethereum
- * (sweep/native.ts). Each one's stage is read from the chain and Ethereum (sweep/claims.ts), and
+ * Withdrawals sent into a chain's own bridge from this browser, still to be claimed on its parent
+ * chain (sweep/native.ts). Each one's stage is read from the chain and the parent (sweep/claims.ts), and
  * the prove and claim are sent from here; the chain's bridge site stays linked as the fallback.
  */
 export function PendingClaims({ address, version }: { address: Address; version: number }) {
@@ -48,7 +48,7 @@ export function PendingClaims({ address, version }: { address: Address; version:
     if (!w) return 'No withdrawal through a chain\'s own bridge in that transaction (Lisk, Arbitrum Nova, Blast, Abstract, Gravity, Taiko, Fraxtal).';
     const exit = nativeExitOf(w.chainId)!;
     addPendingClaim({
-      chainId: w.chainId, chainName: exit.chainName, explorerUrl: exit.explorerUrl, symbol: exit.token?.symbol ?? 'ETH', decimals: exit.token?.decimals ?? 18,
+      chainId: w.chainId, chainName: exit.chainName, explorerUrl: exit.explorerUrl, symbol: exit.token?.symbol ?? parentOf(exit).symbol, decimals: exit.token?.decimals ?? 18,
       from: address, recipient: w.recipient, amount: w.amount.toString(), txHash, sentAt: w.sentAt,
     });
     setList(pendingClaimsOf(address));
@@ -58,12 +58,15 @@ export function PendingClaims({ address, version }: { address: Address; version:
 
   if (list.length === 0) return <AddClaim onAdd={add} />;
   const needsProve = list.some((c) => nativeExitOf(c.chainId)?.prove);
+  // Where they are claimed: Ethereum, BNB Chain (opBNB), or both
+  const parents = [...new Set(list.map((c) => parentOf(nativeExitOf(c.chainId)!).name))];
+  const on = parents.join(' or ');
   return (
     <section className="ap-card ap-claims" aria-label="Waiting to be claimed">
       <header className="ap-grp-h">
         <div className="ap-grp-t">
-          <h2>Waiting to be claimed<span className="tag acc">On Ethereum</span></h2>
-          <p>Withdrawals into a chain&apos;s own bridge, kept in this browser. Nothing arrives until it is {needsProve ? 'proved and ' : ''}claimed on Ethereum, from here or on the chain&apos;s bridge site. Any wallet can pay that gas; the funds go to the recipient either way.</p>
+          <h2>Waiting to be claimed<span className="tag acc">On {on}</span></h2>
+          <p>Withdrawals into a chain&apos;s own bridge, kept in this browser. Nothing arrives until it is {needsProve ? 'proved and ' : ''}claimed on {parents.length > 1 ? 'the chain it settles on' : on}, from here or on the chain&apos;s bridge site. Any wallet can pay that gas; the funds go to the recipient either way.</p>
         </div>
       </header>
       <ul className="ap-rows">
@@ -77,7 +80,7 @@ export function PendingClaims({ address, version }: { address: Address; version:
               <span className="ap-chain"><ChainIcon chainId={c.chainId} name={c.chainName} size={28} /><span>{c.chainName}</span></span>
               <span className="ap-bal">{formatAmount(BigInt(c.amount), c.decimals)} {c.symbol}<small>sent {day(c.sentAt)}</small></span>
               <span className="ap-route"><span className={`tag ${tag.tone}`}>{tag.text}</span></span>
-              <span className="ap-prog-detail">{detailText(c, l)} To {shortAddress(c.recipient)} on Ethereum{exit.token ? `, as ${exit.token.symbol}` : ''}.</span>
+              <span className="ap-prog-detail">{detailText(c, l)} To {shortAddress(c.recipient)} on {parentOf(exit).name}{exit.token ? `, as ${exit.token.symbol}` : ''}.</span>
               <span className="ap-links-tx">
                 {c.explorerUrl && <a href={`${c.explorerUrl.replace(/\/$/, '')}/tx/${c.txHash}`} target="_blank" rel="noreferrer">Withdrawal ↗</a>}
                 {s?.stage !== 'claimed' && <a href={exit.bridgeUrl} target="_blank" rel="noreferrer">{exit.bridgeName} ↗</a>}
@@ -167,17 +170,17 @@ function detailText(c: PendingClaim, l: Live | undefined): string {
   if (l?.error) return 'Could not read it from the chain right now; the date is the usual wait.';
   if (l?.withdrawal === null) return 'This transaction holds no withdrawal.';
   if (exit.relayed) {
-    if (l?.state?.stage === 'claimed') return `Delivered on Ethereum by ${c.chainName}'s relayer.`;
+    if (l?.state?.stage === 'claimed') return `Delivered on ${parentOf(exit).name} by ${c.chainName}'s relayer.`;
     return l?.state?.stage === 'waiting' && l.state.until
       ? `${c.chainName}'s relayer delivers it; nothing to claim.`
       : `${c.chainName}'s relayer has not delivered it yet. If it does not within a few hours, claim it on ${exit.bridgeName} with the recipient's wallet.`;
   }
   switch (l?.state?.stage) {
-    case 'prove': return `${c.chainName}'s state covering it is on Ethereum: prove it now to start the wait.`;
-    case 'proved': return 'Proved on Ethereum. Claim when the wait ends.';
+    case 'prove': return `${c.chainName}'s state covering it is on ${parentOf(exit).name}: prove it now to start the wait.`;
+    case 'proved': return `Proved on ${parentOf(exit).name}. Claim when the wait ends.`;
     case 'claim': return 'The wait is over.';
-    case 'claimed': return 'Claimed on Ethereum.';
-    case 'waiting': return exit.prove ? `Waiting for ${c.chainName} to post its state on Ethereum; then prove it.` : 'Waiting for Ethereum to confirm it.';
+    case 'claimed': return `Claimed on ${parentOf(exit).name}.`;
+    case 'waiting': return exit.prove ? `Waiting for ${c.chainName} to post its state on ${parentOf(exit).name}; then prove it.` : `Waiting for ${parentOf(exit).name} to confirm it.`;
     default: return '';
   }
 }

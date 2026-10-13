@@ -19,11 +19,13 @@ const GASZIP_CHAIN_MAP = 'https://backend.gas.zip';
  * recipient is the one the page asked for, not one the ZeroDust API could substitute (2026-10-06).
  */
 const RELAY_API = 'https://api.relay.link';
+/** Meson's API: an opBNB sweep asks Meson for the swap itself, for the same reason (2026-10-13) */
+const MESON_API = 'https://relayer.meson.fi';
 
 describe('connect-src', () => {
-  it('is exactly the page itself, the API, the RPC hosts the page reads, the Gas.zip chain map and Relay', () => {
+  it('is exactly the page itself, the API, the RPC hosts the page reads, the Gas.zip chain map, Relay and Meson', () => {
     const rpcOrigins = [...Object.values(RPC_URLS), ...Object.values(DIRECT_RPC_URLS), ETHEREUM_FALLBACK_RPC].map((u) => new URL(u).origin);
-    expect(new Set(connectSrc)).toEqual(new Set(["'self'", 'https://api.zerodust.xyz', GASZIP_CHAIN_MAP, RELAY_API, ...rpcOrigins]));
+    expect(new Set(connectSrc)).toEqual(new Set(["'self'", 'https://api.zerodust.xyz', GASZIP_CHAIN_MAP, RELAY_API, MESON_API, ...rpcOrigins]));
   });
 
   it('only lists https origins without paths', () => {

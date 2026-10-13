@@ -2,6 +2,7 @@ import { verifyAcrossDeposit } from './across';
 import { decodeFunctionData, parseAbi } from 'viem';
 import { tokenExitFor } from './plan';
 import { nativeExitOf } from '../sweep/native';
+import { checkMesonCall, MESON_CONTRACT, MESON_ROUTES } from './meson';
 import {
   BURN_ADDRESS, GASLIMIT_CHAINS, GASZIP_DEPOSIT, GUARD_CHAINS, LIFI_DIAMOND, PAYMASTER_GENERAL, RELAY_DEPOSIT_NATIVE,
   relayDepositoryFor, ZERODUST_ADDRESS, ZERODUST_GUARD, ZK_PAYMASTERS, type DirectPlan, type PlanMode,
@@ -35,7 +36,7 @@ export function checkNativeCall(chainId: number, toChainId: number, to: string, 
   const fail = (why: string): never => { throw new Error(`Plan refused: ${why}`); };
   const exit = nativeExitOf(chainId);
   if (!exit) return fail('this chain has no own bridge this page knows');
-  if (toChainId !== exit.toChainId) fail('its own bridge only goes to Ethereum');
+  if (toChainId !== exit.toChainId) fail('its own bridge only goes to its parent chain');
   // Taiko is sponsored: the SDK checks its sendMessage, never a direct plan
   if (exit.stack === 'taiko') return fail('this chain\'s own bridge is not swept directly');
   if (!eq(to, NATIVE_BRIDGE_CONTRACT[exit.stack])) fail('the withdrawal does not go to the chain\'s own bridge contract');
@@ -95,6 +96,8 @@ export interface PlanChecks {
   across?: { settler: string; expiresAt: number };
   /** A withdrawal through the chain's own bridge (no delivery to follow; the user claims on Ethereum) */
   native?: true;
+  /** Meson: its fixed fee in wei, out of what arrives (said before signing) */
+  mesonFee?: bigint;
 }
 
 /**
@@ -163,7 +166,21 @@ function verifyGuardPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
     if (BigInt(plan.receive) !== forwarded) fail('the amount shown is not the amount sent into the bridge');
     return { native: true };
   }
-  // Relay only: Gas.zip and LI.FI pay refunds to msg.sender, which would be the guard
+  // Meson where it has the chain (opBNB): exactly the forwarded amount, its fee out of what arrives
+  if (MESON_ROUTES[ctx.chainId]) {
+    if (plan.route !== 'meson' || !eq(target, MESON_CONTRACT)) fail('the deposit does not go to Meson');
+    let swap: ReturnType<typeof checkMesonCall>;
+    try {
+      swap = checkMesonCall(ctx.chainId, ctx.toChainId, data, forwarded);
+    } catch (error) {
+      return fail((error as Error).message);
+    }
+    if (BigInt(plan.receive) !== swap.amount - swap.fee) fail('the amount shown is not the swap less Meson\'s fee');
+    if (plan.bridgeFee === undefined || BigInt(plan.bridgeFee) !== swap.fee) fail('Meson\'s fee is not the one shown');
+    if (fee === 0n) fail('a bridge plan needs a fee to take the L1 fee difference');
+    return { mesonFee: swap.fee };
+  }
+  // Relay otherwise: Gas.zip and LI.FI pay refunds to msg.sender, which would be the guard
   if (plan.route !== 'relay' || !eq(target, relayDepositoryFor(ctx.chainId))) fail('the deposit does not go to Relay\'s depository');
   if (!data.toLowerCase().startsWith(RELAY_DEPOSIT_NATIVE) || data.length !== 2 + 8 + 128) fail('the Relay call is not a plain deposit');
   if (data.slice(34, 74).toLowerCase() !== ctx.from.slice(2).toLowerCase()) fail('the Relay deposit does not credit this wallet');
