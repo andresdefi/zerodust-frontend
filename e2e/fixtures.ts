@@ -43,6 +43,8 @@ export const FUNDED = [8453, 10, 534352];
 /** Arbitrum Nova: no bridge takes it out, only its own bridge to Ethereum (claimed there later) */
 export const NOVA = 42170;
 const NOVA_CHAIN = { chainId: NOVA, name: 'Arbitrum Nova', nativeToken: 'ETH', explorerUrl: 'https://nova.arbiscan.io', available: false };
+export const XLAYER = 196;
+const XLAYER_CHAIN = { chainId: XLAYER, name: 'X Layer', nativeToken: 'OKB', explorerUrl: 'https://www.okx.com/web3/explorer/xlayer', available: false };
 export const TAIKO = 167000;
 const TAIKO_CHAIN = { chainId: TAIKO, name: 'Taiko', nativeToken: 'ETH', explorerUrl: 'https://taikoscan.io', available: false };
 export const FRAXTAL = 252;
@@ -272,9 +274,9 @@ function telosLeftoverPlan(nonce: number) {
  * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base);
  * `hiccups`: the first route checks answer "unknown", then the real answer
  */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean; scam?: string[]; scamCheckDown?: boolean; unchecked?: number; closing?: Record<number, 'closing' | 'cutoff'>; nova?: boolean; fraxtal?: boolean; taiko?: boolean; opbnb?: boolean | 'native' } = {}) {
-  const chains = [...CHAINS, ...(opts.mitosis ? [MITOSIS_CHAIN] : []), ...(opts.endurance ? [ENDURANCE_CHAIN] : []), ...(opts.nova ? [NOVA_CHAIN] : []), ...(opts.fraxtal ? [FRAXTAL_CHAIN] : []), ...(opts.taiko ? [TAIKO_CHAIN] : []), ...(opts.opbnb ? [BSC_CHAIN] : [])];
-  const funded = [...FUNDED, ...(opts.mitosis ? [MITOSIS] : []), ...(opts.endurance ? [ENDURANCE] : []), ...(opts.nova ? [NOVA] : []), ...(opts.fraxtal ? [FRAXTAL] : []), ...(opts.taiko ? [TAIKO] : []), ...(opts.unchecked !== undefined ? [42161] : [])];
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean; scam?: string[]; scamCheckDown?: boolean; unchecked?: number; closing?: Record<number, 'closing' | 'cutoff'>; nova?: boolean; fraxtal?: boolean; taiko?: boolean; opbnb?: boolean | 'native'; xlayer?: boolean } = {}) {
+  const chains = [...CHAINS, ...(opts.mitosis ? [MITOSIS_CHAIN] : []), ...(opts.endurance ? [ENDURANCE_CHAIN] : []), ...(opts.nova ? [NOVA_CHAIN] : []), ...(opts.fraxtal ? [FRAXTAL_CHAIN] : []), ...(opts.taiko ? [TAIKO_CHAIN] : []), ...(opts.opbnb ? [BSC_CHAIN] : []), ...(opts.xlayer ? [XLAYER_CHAIN] : [])];
+  const funded = [...FUNDED, ...(opts.mitosis ? [MITOSIS] : []), ...(opts.endurance ? [ENDURANCE] : []), ...(opts.nova ? [NOVA] : []), ...(opts.fraxtal ? [FRAXTAL] : []), ...(opts.taiko ? [TAIKO] : []), ...(opts.xlayer ? [XLAYER] : []), ...(opts.unchecked !== undefined ? [42161] : [])];
   // Chains that announced their shutdown, as GET /chains and /direct/chains report them
   const closingOf = (chainId: number, name: string) => {
     const stage = opts.closing?.[chainId];
