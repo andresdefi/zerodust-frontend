@@ -1,4 +1,4 @@
-// A chain's own bridge to Ethereum ("Needs a claim later"). Offered only for a chain no other route
+// A chain's own bridge to Ethereum ("Native bridges only"). Offered only for a chain no other route
 // takes out (owner, 2026-10-12). The funds leave the chain at once but arrive only after the
 // recipient proves (OP stack) and claims the withdrawal on Ethereum, days later; ZeroDust does not
 // claim for them yet. The page pins these chains itself: the API's word decides nothing here.

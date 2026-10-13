@@ -114,8 +114,8 @@ export function groupText(key: GroupKey, destinationName: string | null, opts: {
       return { title: 'Stays on its own chain', detail: 'Nothing bridges out of these right now. The gas goes to an address you choose on the same chain.' };
     case 'claim':
       return {
-        title: 'Needs a claim later', tag: 'Own bridge',
-        detail: 'No other bridge takes these out. Each chain\'s own bridge sends it to Ethereum, where you claim it after a wait of days. Nothing arrives by itself. Sweep with the key.',
+        title: 'Native bridges only',
+        detail: 'Needs a claim later. No other bridge takes these out, so each chain\'s own bridge sends it to Ethereum, where you claim it after a wait of days. Nothing arrives by itself. Sweep with the key.',
       };
   }
 }
