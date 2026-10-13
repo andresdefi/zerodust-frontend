@@ -371,6 +371,24 @@ describe('planChecked and signPlan on Blast (the real guard bytecode on a fork)'
   });
 });
 
+describe('broadcast on guard chains', () => {
+  it('reports a guard refusal, so the page plans and sends again (the L1 fee moved before inclusion)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      const { method } = JSON.parse(String(init!.body)) as { method: string };
+      const result = method === 'eth_sendRawTransaction' ? `0x${'ab'.repeat(32)}` : { status: '0x0', blockNumber: '0x10' };
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
+    }));
+    const sent = await run.broadcast(guardPlan(), ['0x01']);
+    expect(sent).toMatchObject({ ok: false, guardRefused: true, hashes: [`0x${'ab'.repeat(32)}`] });
+    expect(run.GUARD_ATTEMPTS).toBeGreaterThan(1);
+  });
+
+  it('a send refused for funds (planned on a stale balance) is also planned again; nothing was sent', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'insufficient funds for gas * price + value' } }))));
+    expect(await run.broadcast(guardPlan(), ['0x01'])).toMatchObject({ ok: false, guardRefused: true, hashes: [] });
+  });
+});
+
 describe('ZeroDust fee address', () => {
   it('is the one the guard pays (the constant in its bytecode)', () => {
     expect(GUARD_CODE.toLowerCase()).toContain(ZERODUST.slice(2).toLowerCase());
