@@ -294,6 +294,7 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
     return inUsd && outUsd !== null ? 1 - outUsd / inUsd : 0;
   };
   const eaten = ready.filter((r) => takes(r) > BRIDGE_TAKES_FLAG);
+  const fixedFees = ready.filter((r) => st(r)?.bridgeFee !== undefined);
   const destName = m.destOf(plan.destination)?.name ?? 'the destination';
   const totals = m.readyTotals;
   const totalText = totals.map((t) => `${formatAmount(t.amount, t.decimals)} ${t.symbol}${t.dest.chainId !== plan.destination ? ` on ${t.dest.name}` : ''}`).join(' + ');
@@ -320,7 +321,7 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
                 <p key={r.chainId} className="zd-cl">
                   <ChainIcon chainId={r.chainId} name={r.name} size={22} />
                   <span className="zd-cl-name">{r.name}
-                    <small>{formatAmount(r.balance, r.decimals)} {r.token}{st(r)?.token ? ` · arrives as ${st(r)!.token!.symbol} on ${m.destOf(st(r)!.toChainId!)?.name ?? ''}` : ''}{m.choices[r.chainId] === 'address' ? ` · to ${shortAddress(m.addressOf[r.chainId]!)}` : ''}</small>
+                    <small>{formatAmount(r.balance, r.decimals)} {r.token}{st(r)?.bridgeFee !== undefined ? ` · ${route} keeps a fixed ${formatAmount(st(r)!.bridgeFee!, r.decimals)} ${r.token}` : ''}{st(r)?.token ? ` · arrives as ${st(r)!.token!.symbol} on ${m.destOf(st(r)!.toChainId!)?.name ?? ''}` : ''}{m.choices[r.chainId] === 'address' ? ` · to ${shortAddress(m.addressOf[r.chainId]!)}` : ''}</small>
                   </span>
                   <span>{amountOut(r)}</span>
                 </p>
@@ -374,6 +375,9 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
         </div>
       )}
       <div className="zd-confirm-bottom">
+        {fixedFees.length > 0 && (
+          <p className="zd-note">{fixedFees.map((r) => `${routeOf(r)} keeps a fixed ${formatAmount(st(r)!.bridgeFee!, r.decimals)} ${r.token} of the transfer from ${r.name}`).join('; ')}, whatever the amount. The amounts shown are after it.</p>
+        )}
         {eaten.length > 0 && (
           <p className="zd-note">{eaten.length === 1 ? '1 chain loses' : `${eaten.length} chains lose`} most of its value to the bridge: {eaten.map((r) => `${r.name} (${Math.round(takes(r) * 100)}%)`).join(', ')}. Untick {eaten.length === 1 ? 'it' : 'them'} on the page to keep {eaten.length === 1 ? 'it' : 'them'}.</p>
         )}

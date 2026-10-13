@@ -39,6 +39,16 @@ export interface ChainRoutes {
   unknown?: boolean;
   /** Below every bridge's minimum: the least a bridge takes (stays in its gas group, not selected) */
   minimum?: bigint;
+  /** Its bridge keeps a fixed fee whatever the amount (Meson from opBNB), and the chain it reaches */
+  fixedFee?: FixedFee;
+}
+
+export interface FixedFee {
+  /** In the chain's own token */
+  amount: bigint;
+  /** The API's route name (meson) */
+  bridge: string;
+  toChainId: number;
 }
 
 /** A token the chain's only way out delivers instead of gas, on a fixed chain */

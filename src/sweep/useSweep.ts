@@ -93,10 +93,12 @@ export interface RowState {
    * token on the destination, not its gas
    */
   token?: { symbol: string; decimals: number };
+  /** A fixed fee the bridge keeps whatever the amount (Meson), in the chain's token; already out of receive */
+  bridgeFee?: bigint;
 }
 
 /** Display names of the bridges a direct plan can use (the API's own adapters name the sponsored ones) */
-const DIRECT_BRIDGE_NAMES: Record<string, string> = { gaszip: 'Gas.zip', relay: 'Relay', across: 'Across', lifi: 'LI.FI', oft: 'LayerZero' };
+const DIRECT_BRIDGE_NAMES: Record<string, string> = { gaszip: 'Gas.zip', relay: 'Relay', across: 'Across', lifi: 'LI.FI', oft: 'LayerZero', meson: 'Meson' };
 
 /** The bridge that carries a sponsored quote, as the API names it (none for a same-chain transfer) */
 /** The quote's bridge id (gaszip, relay, across, hyperlane, endurance), for reports */
@@ -527,7 +529,7 @@ export function useSweep(wallet: Wallet) {
           const plan = await planChecked(directTarget(row), mode, feePaid.current[row.chainId], bridgeFor(row));
           setBridge(row.chainId, plan.route === 'native' ? `${row.name}'s own bridge` : DIRECT_BRIDGE_NAMES[plan.route]);
           setState(row.chainId, {
-            phase: 'ready', choice, fee: BigInt(plan.fee),
+            phase: 'ready', choice, fee: BigInt(plan.fee), ...(plan.bridgeFee ? { bridgeFee: BigInt(plan.bridgeFee) } : {}),
             ...(mode === 'burn' || mode === 'donate' ? {} : { receive: BigInt(plan.receive), toChainId: targetFor(row).toChainId, token: tokenFor(row, targetFor(row).toChainId) }),
           });
         } catch (error) {
