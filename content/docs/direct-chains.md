@@ -63,13 +63,16 @@ On OP-stack chains every transaction also pays an L1 data fee, which depends on 
 - The L1 fee's inputs change when the chain's L1 origin moves (about every 12 seconds). Price the transaction at the first block of an origin (`sequenceNumber()` on `0x4200000000000000000000000000000000000015` is 0 or 1) and send it at once. If the origin moves before inclusion, the guard reverts and only that attempt's gas is spent: plan again.
 - Cross-chain goes through Relay, or Meson from opBNB: Gas.zip and LI.FI pay refunds to the sender, which would be the guard. There is no swap exit.
 
-#### Meson (opBNB)
+#### Meson (opBNB): paused
+
+**Paused since 13 October 2026:** the first real sweep through the guard was executed by Meson but not paid out on BNB Chain, so `/direct/route` answers no route out of opBNB and plans use its own bridge instead (below). The rest of this section describes the route for when it is back.
+
 
 Only Meson takes BNB out of opBNB, and only to BNB Chain, where it arrives as native BNB. **Meson keeps a fixed fee from every transfer, whatever the amount: 0.00051 BNB on 13 October 2026** (about $0.38). From a 0.003 BNB balance, about 0.0023 BNB arrives; Meson's minimum is 0.001 BNB, where the fee is about half. `/direct/route` and `/direct/prepare` return the fee (`bridgeFeeWei`, `bridgeFee`), and `receive` is already after it, exactly: Meson pays out the amount less its fee, so no 3% margin applies. Show the fee before anyone signs.
 
 The guard calls Meson's `simpleExecuteSwap(encodedSwap)` (`0x25aB3Efd52e6470681CE037cD546Dc60726948D3`) with exactly the swap's amount: Meson amounts have 6 decimals, so what the guard forwards is a multiple of 10^12 wei, and the remainder joins ZeroDust's fee. Before signing, decode the 32-byte swap and check: version 1, the amount (x 10^12) equals `guard.forwarded`, from opBNB (`0x00cc`) to BNB Chain (`0x02ca`), the native token in and out (index `0xfb`), and `receive` is the amount less the swap's fee. The recipient is registered with Meson's API when the plan asks for the swap, as with a Relay request.
 
-The chain's own bridge to BNB Chain is not offered while Meson works: it is cheaper (about 0.000035 BNB in BNB Chain gas for the prove and the claim) but takes a prove and 7 days.
+opBNB's own bridge to BNB Chain is the alternative: cheaper (about 0.000035 BNB in BNB Chain gas for the prove and the claim) but it takes a prove and 7 days. It is offered while Meson is paused (`bridge=native`, `toChainId` 56).
 - `eth_estimateGas` cannot size a call that burns its gas (it answers the block gas limit); the planner finds the smallest limit `eth_call` accepts and adds 25%.
 
 Monad also keeps a 10 MON reserve: a transaction that takes a wallet below it reverts (and still pays its gas) unless it is the wallet's only transaction in the last 3 blocks and the wallet is not EIP-7702 delegated. So:
@@ -120,7 +123,7 @@ Whether a bridge can take the balance to a destination right now. Quotes only.
 | `toChainId` | Destination chain |
 | `from` | The wallet |
 | `recipient` | Destination address |
-| `bridge` | Optional. `native`: through the chain's own bridge to Ethereum (chains with `nativeExit`; `toChainId` must be `1`) |
+| `bridge` | Optional. `native`: through the chain's own bridge to its parent chain (chains with `nativeExit`; `toChainId` must be its `nativeExit.toChainId`: `1`, or `56` for opBNB) |
 
 Response:
 
@@ -139,7 +142,7 @@ The unsigned transactions that take the chain to exactly 0.
 | `feePaidTx` | Optional hash of an earlier fee transaction |
 
 - `route`: an optional fee transaction, then the sweep. Same chain (`toChainId` = `chainId`) is a plain transfer to `recipient`, which must not be `from`. Cross-chain asks Gas.zip and Relay and keeps the larger output.
-- With `bridge=native` (chains with `nativeExit`): the sweep goes into the chain's own bridge to `recipient` on Ethereum (`route: "native"`, `receive: null`): Blast through ZeroDustGuard into its `L2StandardBridge`, Abstract through the paymaster into `L2BaseToken.withdraw`, Gravity into `ArbSys.withdrawEth` (G arrives on Ethereum as an ERC-20, named in `receiveToken`). Nothing arrives by itself: after the chain's waiting period the recipient proves (Blast) and claims the withdrawal on Ethereum, on the chain's bridge site (`nativeExit.bridgeUrl`).
+- With `bridge=native` (chains with `nativeExit`): the sweep goes into the chain's own bridge to `recipient` on Ethereum (`route: "native"`, `receive: null`): Blast through ZeroDustGuard into its `L2StandardBridge`, Abstract through the paymaster into `L2BaseToken.withdraw`, Gravity into `ArbSys.withdrawEth` (G arrives on Ethereum as an ERC-20, named in `receiveToken`), opBNB through ZeroDustGuard into its `L2StandardBridge` to `recipient` on BNB Chain (native BNB). Nothing arrives by itself: after the chain's waiting period the recipient proves (Blast, opBNB) and claims the withdrawal on the parent chain (Ethereum; BNB Chain for opBNB, paid in BNB there), on the chain's bridge site (`nativeExit.bridgeUrl`) or on zerodust.xyz.
 - `burn`: one transfer of everything to `0x000000000000000000000000000000000000dEaD`. `toChainId` and `recipient` are still required but not used.
 - `donate`: one transfer of everything to ZeroDust.
 
