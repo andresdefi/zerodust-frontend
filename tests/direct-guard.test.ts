@@ -175,9 +175,10 @@ describe('verifyPlan: opBNB through the guard into Meson', () => {
   const BSC = 56;
   const MESON = '0x25aB3Efd52e6470681CE037cD546Dc60726948D3';
   const FIXED = 510n * 10n ** 12n; // 0.00051 BNB
-  const encode = (units: bigint, o: { inChain?: string; outToken?: string; feeUnits?: bigint } = {}) => `0x264849e7${[
-    '01', units.toString(16).padStart(10, '0'), 'd8000000000012345678', (o.feeUnits ?? 510n).toString(16).padStart(10, '0'),
-    '006ace218a', '02ca', o.outToken ?? 'fb', o.inChain ?? '00cc', 'fb',
+  // Salt flags d8 as Meson's API sets them (plain transfer, service fee waived); expiring far ahead
+  const encode = (units: bigint, o: { inChain?: string; outToken?: string; feeUnits?: bigint; flags?: string; expire?: string } = {}) => `0x264849e7${[
+    '01', units.toString(16).padStart(10, '0'), `${o.flags ?? 'd8'}000000000012345678`, (o.feeUnits ?? 510n).toString(16).padStart(10, '0'),
+    o.expire ?? 'ffffffffff', '02ca', o.outToken ?? 'fb', o.inChain ?? '00cc', 'fb',
   ].join('')}`;
   /** BAL here is 0.0001 BNB scaled up to 0.003 BNB so Meson's minimum is met */
   function mesonPlan(o: { data?: (units: bigint) => string; receive?: (forwarded: bigint) => bigint; bridgeFee?: string | null } = {}): DirectPlan {
@@ -204,6 +205,10 @@ describe('verifyPlan: opBNB through the guard into Meson', () => {
     ['a swap for another amount', () => mesonPlan({ data: (u) => encode(u + 1n) })],
     ['a swap from another chain', () => mesonPlan({ data: (u) => encode(u, { inChain: '003c' }) })],
     ['a swap paying out another token', () => mesonPlan({ data: (u) => encode(u, { outToken: '01' }) })],
+    ['a swap releasing to a dapp contract', () => mesonPlan({ data: (u) => encode(u, { flags: '58' }) })],
+    ['a swap charging Meson\'s service fee on top', () => mesonPlan({ data: (u) => encode(u, { flags: '98' }) })],
+    ['a swap sharing part of the payout with a partner', () => mesonPlan({ data: (u) => encode(u, { flags: 'da' }) })],
+    ['a swap that expires in minutes', () => mesonPlan({ data: (u) => encode(u, { expire: Math.floor(Date.now() / 1000 + 300).toString(16).padStart(10, '0') }) })],
     ['a receive that hides Meson\'s fee', () => mesonPlan({ receive: (f) => f })],
     ['a fee shown that is not Meson\'s', () => mesonPlan({ bridgeFee: '1' })],
     ['no fee shown at all', () => mesonPlan({ bridgeFee: null })],
@@ -215,6 +220,26 @@ describe('verifyPlan: opBNB through the guard into Meson', () => {
       expect(() => verifyPlan(plan(), mctx(over))).toThrow(/Plan refused/);
     });
   }
+
+  it('the page asks Meson for the swap it signs, naming the recipient it shows; the fee must not have moved', async () => {
+    const { requestMesonSwap } = await import('../src/direct/meson');
+    const units = 2_850n; // 0.00285 BNB in Meson's 6 decimals
+    const asked: Array<Record<string, string>> = [];
+    const meson = (o: { feeUnits?: bigint; value?: bigint } = {}) => vi.fn(async (_url: string, init?: RequestInit) => {
+      asked.push(JSON.parse(String(init!.body)));
+      const data = encode(units, o);
+      return new Response(JSON.stringify({ result: { encoded: `0x${data.slice(10)}`, tx: { to: MESON, value: (o.value ?? units * 10n ** 12n).toString(), data } } }));
+    });
+    vi.stubGlobal('fetch', meson());
+    const data = await requestMesonSwap(OPBNB, BSC, FROM, OTHER, units * 10n ** 12n, FIXED);
+    expect(data).toBe(encode(units));
+    expect(asked[0]).toEqual({ from: 'opbnb:bnb', to: 'bnb:bnb', amount: '0.002850', fromAddress: FROM, recipient: OTHER });
+    vi.stubGlobal('fetch', meson({ feeUnits: 600n }));
+    await expect(requestMesonSwap(OPBNB, BSC, FROM, OTHER, units * 10n ** 12n, FIXED)).rejects.toThrow(/fee changed/);
+    vi.stubGlobal('fetch', meson({ value: 1n }));
+    await expect(requestMesonSwap(OPBNB, BSC, FROM, OTHER, units * 10n ** 12n, FIXED)).rejects.toThrow(/Plan refused/);
+    await expect(requestMesonSwap(OPBNB, BASE, FROM, OTHER, units * 10n ** 12n, FIXED)).rejects.toThrow(/Plan refused/);
+  });
 });
 
 // ------------------------------------------------------------ planChecked and signPlan, offline
