@@ -67,6 +67,12 @@ describe('groupChains', () => {
       .toContain('Fraxtal arrives as FXS and Gravity as G, tokens on Ethereum, not ETH.');
   });
 
+  it('native bridges only: the wait follows the chains (X Layer about an hour, OP and Arbitrum days)', () => {
+    expect(groupText('claim', null, { claimHours: [1] }).detail).toContain('where you claim it after about an hour');
+    expect(groupText('claim', null, { claimHours: [1, 156] }).detail).toContain('after a wait of an hour to days (the rows say how long)');
+    expect(groupText('claim', null, { claimHours: [156, 169] }).detail).toContain('after a wait of days');
+  });
+
   it('native bridges only: a chain settling on BNB Chain is named; alone, the group says BNB Chain', () => {
     const op = { chain: 'opBNB', parent: 'BNB Chain', symbol: 'BNB' };
     expect(groupText('claim', null, { parents: [op, { chain: 'Lisk', parent: 'Ethereum', symbol: 'ETH' }] }).detail).toContain("sends it to Ethereum (opBNB's to BNB Chain), where you claim it");

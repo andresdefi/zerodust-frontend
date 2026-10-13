@@ -315,3 +315,16 @@ test('opBNB while Meson is paused: its own bridge to BNB Chain, claimed there in
   await expect(group.locator('.ap-row', { hasText: 'Arbitrum Nova' })).toContainText('on Ethereum, once claimed');
   if (process.env.SHOT) await group.screenshot({ path: process.env.SHOT.replace('.png', '-native.png') });
 });
+
+test('X Layer: its own bridge, claimed on Ethereum within about an hour, OKB arriving as a token', async ({ page }) => {
+  const user = privateKeyToAccount(generatePrivateKey()).address;
+  await mockNetwork(page, user, { xlayer: true });
+  await page.goto(`/address/${user}`);
+  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'Native bridges only' }) });
+  await expect(group).toContainText('X Layer arrives as OKB, a token on Ethereum, not ETH.');
+  await expect(group).toContainText('where you claim it after about an hour');
+  const row = group.locator('.ap-row', { hasText: 'X Layer' });
+  await expect(row).toContainText('Native bridge · claim in about an hour');
+  await expect(row).toContainText('as OKB on Ethereum');
+  if (process.env.SHOT) await group.screenshot({ path: process.env.SHOT.replace('.png', '-xlayer.png') });
+});

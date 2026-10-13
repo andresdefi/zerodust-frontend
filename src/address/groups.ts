@@ -107,7 +107,7 @@ export function groupChains<T extends AddressChain>(chains: T[], routesOf: (chai
 }
 
 /** Copy for each group (provisional, rewritten with the rest of the site's copy) */
-export function groupText(key: GroupKey, destinationName: string | null, opts: { keyOnly?: number; relayed?: 'all' | 'some'; tokens?: Array<{ chain: string; symbol: string }>; parents?: Array<{ chain: string; parent: string; symbol: string }> } = {}): { title: string; detail: string; tag?: string } {
+export function groupText(key: GroupKey, destinationName: string | null, opts: { keyOnly?: number; relayed?: 'all' | 'some'; tokens?: Array<{ chain: string; symbol: string }>; parents?: Array<{ chain: string; parent: string; symbol: string }>; claimHours?: number[] } = {}): { title: string; detail: string; tag?: string } {
   switch (key) {
     case 'gas':
       return {
@@ -127,6 +127,11 @@ export function groupText(key: GroupKey, destinationName: string | null, opts: {
       const t = opts.tokens ?? [];
       const tokens = t.length === 0 ? ''
         : ` ${t.map((x, i) => i === 0 ? `${x.chain} arrives as ${x.symbol}` : `${x.chain} as ${x.symbol}`).join(t.length > 2 ? ', ' : ' and ')}, ${t.length === 1 ? 'a token' : 'tokens'} on Ethereum, not ETH.`;
+      // How long until the claims open: days (OP and Arbitrum stacks), about an hour (X Layer), or both
+      const hours = opts.claimHours ?? [];
+      const wait = hours.length > 0 && Math.max(...hours) <= 2 ? 'after about an hour'
+        : hours.length > 0 && Math.min(...hours) <= 2 ? 'after a wait of an hour to days (the rows say how long)'
+          : 'after a wait of days';
       // Chains whose own bridge settles elsewhere than Ethereum (opBNB: BNB Chain), named in the sentence
       const all = opts.parents ?? [];
       const other = all.filter((x) => x.parent !== 'Ethereum');
@@ -136,8 +141,8 @@ export function groupText(key: GroupKey, destinationName: string | null, opts: {
       const how = opts.relayed === 'all'
         ? `No other bridge takes these out, so each chain's own bridge sends it to ${to}. It arrives by itself, about an hour later.`
         : opts.relayed === 'some'
-          ? `No other bridge takes these out, so each chain's own bridge sends it to ${to}. Most need a claim there later, after a wait of days; the rows say which.`
-          : `Needs a claim later. No other bridge takes these out, so each chain's own bridge sends it to ${to}, where you claim it after a wait of days. Nothing arrives by itself.`;
+          ? `No other bridge takes these out, so each chain's own bridge sends it to ${to}. Most need a claim there later, ${wait}; the rows say which.`
+          : `Needs a claim later. No other bridge takes these out, so each chain's own bridge sends it to ${to}, where you claim it ${wait}. Nothing arrives by itself.`;
       return { title: 'Native bridges only', detail: `${how}${tokens} Sweep with the key.` };
     }
   }
