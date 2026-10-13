@@ -120,8 +120,16 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string,
     if (code === '0x' || keccak256(code) !== ZERODUST_GUARD_CODEHASH) throw new Error('Plan refused: ZeroDust\'s guard is not deployed on this chain as expected');
     // The fork charges no L1 fee: replay with the planned L1 fee added to the value, so the wallet
     // is at 0 while the guard runs, as on-chain; the guard must then burn every unit of its gas
-    const l1Fee = BigInt(plan.guard!.l1Fee);
-    const txs = plan.txs.map((tx) => ({ ...tx, value: (BigInt(tx.value) + l1Fee).toString() }));
+    // A bridge deposit keeps its exact amount (Meson reverts on any other): there the L1 fee joins
+    // ZeroDust's fee in the replay, as the difference does when the page signs
+    const g = plan.guard!;
+    const l1Fee = BigInt(g.l1Fee);
+    const txs = plan.txs.map((tx) => {
+      const value = (BigInt(tx.value) + l1Fee).toString();
+      if (g.absorb !== 'fee') return { ...tx, value };
+      const { args: [target, fee, data] } = decodeFunctionData({ abi: GUARD_SWEEP, data: tx.data as Hex });
+      return { ...tx, value, data: encodeFunctionData({ abi: GUARD_SWEEP, functionName: 'sweep', args: [target, fee + l1Fee, data] }) };
+    });
     checkReplay(t.chainId, txs, await replay(t.chainId, t.from, txs), null);
     return plan;
   }
