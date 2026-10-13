@@ -205,6 +205,12 @@
 .zd-note { margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--warn-soft); color: var(--warn); font-size: 14px; line-height: 1.45; }
 .zd-with .card { box-shadow: none; padding: 0; margin-top: 10px; width: auto; }
 .zd-back { margin-top: 12px; }
+.zd-claim-review { margin-top: 16px; display: grid; gap: 8px; }
+.zd-claim-review > p:not(.zd-note) { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+.zd-claim-review > p > span { color: var(--muted); }
+.zd-claim-review > p > b { text-align: right; font-weight: 600; }
+.zd-claim-review .zd-note { margin-top: 4px; }
+.zd-claim-review .btns { margin-top: 10px; }
 .zd-confirm { width: min(600px, calc(100vw - 24px)); max-height: min(820px, calc(100dvh - 32px)); padding: 0; display: flex; flex-direction: column; }
 .zd-confirm-top { padding: 22px 22px 12px; }
 .zd-confirm-list { flex: 1; overflow-y: auto; padding: 0 22px 8px; border-top: 1px solid var(--line); }
@@ -243,6 +249,11 @@
 .ap-claim > .ap-route { grid-area: route; justify-self: end; }
 .ap-claim > .ap-prog-detail { grid-area: detail; color: var(--muted); font-size: 14px; }
 .ap-claim > .ap-links-tx { grid-area: links; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: flex-end; }
+.ap-claims-add { padding: 12px 16px; font-size: 14px; color: var(--muted); }
+.ap-claims > .ap-claims-add { border-top: 1px solid var(--line); }
+.ap-claims-form label { display: block; margin-bottom: 6px; }
+.ap-claims-form > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ap-claims-form input { flex: 1; min-width: 240px; height: 36px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 0 12px; font: inherit; font-size: 14px; color: var(--ink); }
 @media (max-width: 900px) {
   .ap-claims .ap-claim { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'chain' 'route' 'bal' 'detail' 'links'; }
   .ap-claim > * { min-width: 0; }

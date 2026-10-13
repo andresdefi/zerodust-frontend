@@ -7,6 +7,8 @@ export type NativeStack = 'op' | 'arb' | 'zk';
 
 export interface NativeExit {
   stack: NativeStack;
+  chainName: string;
+  explorerUrl: string;
   /** Where the withdrawal is claimed (Ethereum for every chain today) */
   toChainId: 1;
   /** The chain's own bridge site, where the withdrawal is proved and claimed */
@@ -24,25 +26,25 @@ const ETHEREUM = 1 as const;
 
 export const NATIVE_EXITS: Readonly<Record<number, NativeExit>> = {
   // Lisk: dispute games about every 6 h, then 7 days after the prove
-  1135: { stack: 'op', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.lisk.com', bridgeName: 'Lisk Bridge', claimAfterHours: 7 * 24 + 6, prove: true },
+  1135: { chainName: 'Lisk', explorerUrl: 'https://blockscout.lisk.com', stack: 'op', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.lisk.com', bridgeName: 'Lisk Bridge', claimAfterHours: 7 * 24 + 6, prove: true },
   // Arbitrum Nova: the assertion that holds the withdrawal is confirmed about 6.4 days later
-  42170: { stack: 'arb', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.arbitrum.io', bridgeName: 'Arbitrum Bridge', claimAfterHours: 156, prove: false },
+  42170: { chainName: 'Arbitrum Nova', explorerUrl: 'https://nova.arbiscan.io', stack: 'arb', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.arbitrum.io', bridgeName: 'Arbitrum Bridge', claimAfterHours: 156, prove: false },
   // Blast: its L2OutputOracle posts state hourly; claimable 1 day after the prove
-  81457: { stack: 'op', toChainId: ETHEREUM, bridgeUrl: 'https://blast.io/en/bridge', bridgeName: 'Blast Bridge', claimAfterHours: 26, prove: true },
+  81457: { chainName: 'Blast', explorerUrl: 'https://blastscan.io', stack: 'op', toChainId: ETHEREUM, bridgeUrl: 'https://blast.io/en/bridge', bridgeName: 'Blast Bridge', claimAfterHours: 26, prove: true },
   // Abstract (ZK Stack): claimable once its batch is executed on Ethereum, hours later
-  2741: { stack: 'zk', toChainId: ETHEREUM, bridgeUrl: 'https://native-bridge.abs.xyz/bridge/', bridgeName: 'Abstract Native Bridge', claimAfterHours: 24, prove: false },
+  2741: { chainName: 'Abstract', explorerUrl: 'https://abscan.org', stack: 'zk', toChainId: ETHEREUM, bridgeUrl: 'https://native-bridge.abs.xyz/bridge/', bridgeName: 'Abstract Native Bridge', claimAfterHours: 24, prove: false },
   // Gravity (Arbitrum Orbit): G arrives as an ERC-20 on Ethereum, confirmed about 6.4 days later
   1625: {
-    stack: 'arb', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.gravity.xyz', bridgeName: 'Gravity Bridge', claimAfterHours: 156, prove: false,
+    chainName: 'Gravity', explorerUrl: 'https://explorer.gravity.xyz', stack: 'arb', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.gravity.xyz', bridgeName: 'Gravity Bridge', claimAfterHours: 156, prove: false,
     token: { symbol: 'G', address: '0x9C7BEBa8F6eF6643aBd725e45a4E8387eF260649', decimals: 18 },
   },
 };
 
 export const nativeExitOf = (chainId: number): NativeExit | undefined => NATIVE_EXITS[chainId];
 
-/** Gas on Ethereum for the user's own steps (measured: proves 342k-463k, a ZK finalize 182.5k) */
+/** Gas on Ethereum for the user's own steps (measured: proves 315k-463k, OP claims 244k, a ZK finalize 175k, a Nova claim 113k) */
 export const PROVE_GAS = 450_000n;
-export const CLAIM_GAS: Readonly<Record<NativeStack, bigint>> = { op: 150_000n, arb: 150_000n, zk: 190_000n };
+export const CLAIM_GAS: Readonly<Record<NativeStack, bigint>> = { op: 250_000n, arb: 150_000n, zk: 190_000n };
 
 /** Wei the user's own transactions on Ethereum cost at this gas price */
 export function claimCostWei(exit: NativeExit, gasPrice: bigint): bigint {
@@ -78,7 +80,7 @@ export function nativeSteps(exit: NativeExit, chainName: string, recipient: stri
     steps.push(`Wait ${waitText(exit)}, then claim it on Ethereum (one transaction, paid in ETH there).`);
   }
   steps.push(`It arrives as ${arrives}, at ${recipient}. Nothing arrives until it is claimed; ZeroDust does not claim for you.`);
-  steps.push(`${exit.prove ? 'Prove and claim' : 'Claim'} on ${exit.bridgeName} (${exit.bridgeUrl}), or any tool that can: anyone may send ${exit.prove ? 'them' : 'it'}, the funds always go to the address above.`);
+  steps.push(`${exit.prove ? 'Prove and claim' : 'Claim'} on this page (under "Waiting to be claimed") or on ${exit.bridgeName} (${exit.bridgeUrl}): any wallet with ETH on Ethereum may send ${exit.prove ? 'them' : 'it'}, the funds always go to the address above.`);
   return steps;
 }
 
