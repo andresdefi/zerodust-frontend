@@ -254,12 +254,28 @@ test('MetaMask: one session for the site, shown in the header and reused by the 
 
 test('"Native bridges only": a chain no other bridge takes out, with its claim said up front', async ({ page }) => {
   const user = privateKeyToAccount(generatePrivateKey()).address;
-  await mockNetwork(page, user, { nova: true });
+  await mockNetwork(page, user, { nova: true, fraxtal: true });
   await page.goto(`/address/${user}`);
   const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'Native bridges only' }) });
   await expect(group).toContainText('Needs a claim later.');
   await expect(group.locator('.ap-row', { hasText: 'Arbitrum Nova' })).toContainText('Native bridge · claim in');
+  // Fraxtal's FRAX arrives as FXS on Ethereum: said in the group and in its row
+  await expect(group).toContainText('Fraxtal arrives as FXS, a token on Ethereum, not ETH.');
+  await expect(group.locator('.ap-row', { hasText: 'Fraxtal' })).toContainText('as FXS on Ethereum');
   // Scroll has no own bridge pinned: it stays on its own chain
   await expect(page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'Stays on its own chain' }) })).toContainText('Scroll');
   if (process.env.SHOT) await group.screenshot({ path: process.env.SHOT });
+});
+
+test('"Native bridges only" with Taiko: its relayer delivers, nothing to claim; the rows say which need a claim', async ({ page }) => {
+  const user = privateKeyToAccount(generatePrivateKey()).address;
+  await mockNetwork(page, user, { nova: true, fraxtal: true, taiko: true });
+  await page.goto(`/address/${user}`);
+  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'Native bridges only' }) });
+  await expect(group).toContainText('Most need a claim there later, after a wait of days; the rows say which.');
+  await expect(group).toContainText('Fraxtal arrives as FXS, a token on Ethereum, not ETH.');
+  await expect(group.locator('.ap-row', { hasText: 'Taiko' })).toContainText('Native bridge · arrives in about an hour');
+  await expect(group.locator('.ap-row', { hasText: 'Taiko' })).toContainText('on Ethereum, by itself');
+  await expect(group.locator('.ap-row', { hasText: 'Arbitrum Nova' })).toContainText('Native bridge · claim in');
+  if (process.env.SHOT) await group.screenshot({ path: process.env.SHOT.replace('.png', '-taiko.png') });
 });
