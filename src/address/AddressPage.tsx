@@ -6,7 +6,7 @@ import { ChainIcon } from '../components/ChainIcon';
 import { DestinationPicker } from '../components/DestinationPicker';
 import { formatAmount, formatUsd, shortAddress } from '../lib/format';
 import { groupChains, groupOf, groupText, tokenRouteOf, type GroupKey } from './groups';
-import { nativeExitOf, waitText } from '../sweep/native';
+import { nativeExitOf, parentOf, waitText } from '../sweep/native';
 import { PendingClaims } from './PendingClaims';
 import { announcementHref, closesLong, closesShort, cutoffLong, stillSwept } from './closing';
 import { isListedScam, resolveName, useAddressData, useEstimates, useResolved, type AddressRow, type ChainOption, type Estimate } from './useAddress';
@@ -218,7 +218,8 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
       {groups.map((g) => {
         const relayedN = g.key === 'claim' ? g.chains.filter((c) => nativeExitOf(c.chainId)?.relayed).length : 0;
         const text = groupText(g.key, destName, { keyOnly: g.chains.filter((c) => !OFFLINE && (!c.metamask || c.direct)).length, relayed: relayedN === 0 ? undefined : relayedN === g.chains.length ? 'all' : 'some',
-          tokens: g.key === 'claim' ? g.chains.flatMap((c) => { const t = nativeExitOf(c.chainId)?.token; return t ? [{ chain: c.name, symbol: t.symbol }] : []; }) : undefined });
+          tokens: g.key === 'claim' ? g.chains.flatMap((c) => { const t = nativeExitOf(c.chainId)?.token; return t ? [{ chain: c.name, symbol: t.symbol }] : []; }) : undefined,
+          parents: g.key === 'claim' ? g.chains.flatMap((c) => { const e = nativeExitOf(c.chainId); return e ? [{ chain: c.name, parent: parentOf(e).name, symbol: e.token?.symbol ?? parentOf(e).symbol }] : []; }) : undefined });
         const isActive = g.key === activeGroup;
         const chosen = isActive ? g.chains.filter((c) => selectedIds.has(c.chainId) && !finished.has(c.chainId)) : [];
         const subtotal = g.chains.reduce((s, c) => s + (c.usd ?? 0), 0);
@@ -545,9 +546,9 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
   } else if (group === 'claim' && nativeExitOf(row.chainId)) {
     const exit = nativeExitOf(row.chainId)!;
     route = exit.relayed
-      ? { text: `Native bridge · arrives in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to Ethereum: its relayer delivers it, nothing to claim` }
-      : { text: `Native bridge · claim in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to Ethereum: you claim it there on ${exit.bridgeName}` };
-    receive = exit.token ? `as ${exit.token.symbol} on Ethereum` : exit.relayed ? 'on Ethereum, by itself' : 'on Ethereum, once claimed';
+      ? { text: `Native bridge · arrives in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to ${parentOf(exit).name}: its relayer delivers it, nothing to claim` }
+      : { text: `Native bridge · claim in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to ${parentOf(exit).name}: you claim it there on ${exit.bridgeName}` };
+    receive = exit.token ? `as ${exit.token.symbol} on ${parentOf(exit).name}` : exit.relayed ? `on ${parentOf(exit).name}, by itself` : `on ${parentOf(exit).name}, once claimed`;
   } else {
     route = { text: 'Same chain only', tone: 'plain' };
     receive = `to an address on ${row.name}`;

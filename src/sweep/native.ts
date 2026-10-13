@@ -1,7 +1,8 @@
-// A chain's own bridge to Ethereum ("Native bridges only"). Offered only for a chain no other route
-// takes out (owner, 2026-10-12). The funds leave the chain at once but arrive only after the
-// recipient proves (OP stack) and claims the withdrawal on Ethereum, days later; ZeroDust does not
-// claim for them yet. The page pins these chains itself: the API's word decides nothing here.
+// A chain's own bridge to its parent chain, Ethereum (BNB Chain for opBNB): "Native bridges only".
+// Offered only for a chain no other route takes out (owner, 2026-10-12). The funds leave the chain at
+// once but arrive only after the recipient proves (OP stack) and claims the withdrawal on the parent,
+// days later; ZeroDust does not claim for them yet. The page pins these chains itself: the API's word
+// decides nothing here.
 
 export type NativeStack = 'op' | 'arb' | 'zk' | 'taiko';
 
@@ -9,8 +10,8 @@ export interface NativeExit {
   stack: NativeStack;
   chainName: string;
   explorerUrl: string;
-  /** Where the withdrawal is claimed (Ethereum for every chain today) */
-  toChainId: 1;
+  /** Where the withdrawal is claimed: Ethereum, or BNB Chain (opBNB) */
+  toChainId: ParentId;
   /** The chain's own bridge site, where the withdrawal is proved and claimed */
   bridgeUrl: string;
   bridgeName: string;
@@ -25,6 +26,16 @@ export interface NativeExit {
 }
 
 const ETHEREUM = 1 as const;
+const BNB_CHAIN = 56 as const;
+export type ParentId = typeof ETHEREUM | typeof BNB_CHAIN;
+
+/** The chains own bridges settle on: where the prove and claim are sent, and paid */
+export interface Parent { chainId: ParentId; name: string; symbol: string; explorer: string }
+export const PARENTS: Readonly<Record<ParentId, Parent>> = {
+  1: { chainId: 1, name: 'Ethereum', symbol: 'ETH', explorer: 'https://etherscan.io' },
+  56: { chainId: 56, name: 'BNB Chain', symbol: 'BNB', explorer: 'https://bscscan.com' },
+};
+export const parentOf = (exit: NativeExit): Parent => PARENTS[exit.toChainId];
 
 export const NATIVE_EXITS: Readonly<Record<number, NativeExit>> = {
   // Lisk: dispute games about every 6 h, then 7 days after the prove
@@ -42,6 +53,9 @@ export const NATIVE_EXITS: Readonly<Record<number, NativeExit>> = {
   },
   // Taiko: its relayer processes the message on Ethereum for the fee the sweep pays (measured 24-53 min)
   167000: { chainName: 'Taiko', explorerUrl: 'https://taikoscan.io', stack: 'taiko', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.taiko.xyz', bridgeName: 'Taiko Bridge', claimAfterHours: 1, prove: false, relayed: true },
+  // opBNB: its own bridge to BNB Chain while Meson (its fast route) is paused; outputs every 3,600
+  // blocks (about 15 min), claimable 7 days after the prove; BNB arrives as native BNB
+  204: { chainName: 'opBNB', explorerUrl: 'https://opbnb.bscscan.com', stack: 'op', toChainId: BNB_CHAIN, bridgeUrl: 'https://opbnb-bridge.bnbchain.org', bridgeName: 'opBNB Bridge', claimAfterHours: 7 * 24 + 1, prove: true },
   // Gravity (Arbitrum Orbit): G arrives as an ERC-20 on Ethereum, confirmed about 6.4 days later
   1625: {
     chainName: 'Gravity', explorerUrl: 'https://explorer.gravity.xyz', stack: 'arb', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.gravity.xyz', bridgeName: 'Gravity Bridge', claimAfterHours: 156, prove: false,
@@ -51,11 +65,11 @@ export const NATIVE_EXITS: Readonly<Record<number, NativeExit>> = {
 
 export const nativeExitOf = (chainId: number): NativeExit | undefined => NATIVE_EXITS[chainId];
 
-/** Gas on Ethereum for the user's own steps (measured: proves 315k-463k, OP claims 244k, a ZK finalize 175k, a Nova claim 113k) */
+/** Gas on the parent chain for the user's own steps (measured: proves 315k-463k, OP claims 244k, a ZK finalize 175k, a Nova claim 113k) */
 export const PROVE_GAS = 450_000n;
 export const CLAIM_GAS: Readonly<Record<NativeStack, bigint>> = { op: 250_000n, arb: 150_000n, zk: 190_000n, taiko: 0n };
 
-/** Wei the user's own transactions on Ethereum cost at this gas price */
+/** Wei the user's own transactions on the parent chain cost at its gas price */
 export function claimCostWei(exit: NativeExit, gasPrice: bigint): bigint {
   if (exit.relayed) return 0n;
   return (CLAIM_GAS[exit.stack] + (exit.prove ? PROVE_GAS : 0n)) * gasPrice;
@@ -82,7 +96,8 @@ export function waitText(exit: NativeExit): string {
 
 /** What happens after the sweep, step by step, before anything is signed */
 export function nativeSteps(exit: NativeExit, chainName: string, recipient: string): string[] {
-  const arrives = exit.token ? `${exit.token.symbol} (${exit.token.name}), a token on Ethereum, not ETH` : 'ETH on Ethereum';
+  const p = parentOf(exit);
+  const arrives = exit.token ? `${exit.token.symbol} (${exit.token.name}), a token on ${p.name}, not ${p.symbol}` : `${p.symbol} on ${p.name}`;
   if (exit.relayed) {
     return [
       `The sweep sends everything into ${chainName}'s own bridge, with a fee for its relayer taken from the balance. The wallet on ${chainName} ends at exactly 0.`,
@@ -92,13 +107,13 @@ export function nativeSteps(exit: NativeExit, chainName: string, recipient: stri
   }
   const steps = [`The sweep sends everything into ${chainName}'s own bridge. The wallet on ${chainName} ends at exactly 0.`];
   if (exit.prove) {
-    steps.push(`Within a few hours, prove the withdrawal on Ethereum (one transaction, paid in ETH there).`);
-    steps.push(`Wait ${waitText(exit)} in total, then claim it on Ethereum (a second transaction).`);
+    steps.push(`Within a few hours, prove the withdrawal on ${p.name} (one transaction, paid in ${p.symbol} there).`);
+    steps.push(`Wait ${waitText(exit)} in total, then claim it on ${p.name} (a second transaction).`);
   } else {
-    steps.push(`Wait ${waitText(exit)}, then claim it on Ethereum (one transaction, paid in ETH there).`);
+    steps.push(`Wait ${waitText(exit)}, then claim it on ${p.name} (one transaction, paid in ${p.symbol} there).`);
   }
   steps.push(`It arrives as ${arrives}, at ${recipient}. Nothing arrives until it is claimed; ZeroDust does not claim for you.`);
-  steps.push(`${exit.prove ? 'Prove and claim' : 'Claim'} on this page (under "Waiting to be claimed") or on ${exit.bridgeName} (${exit.bridgeUrl}): any wallet with ETH on Ethereum may send ${exit.prove ? 'them' : 'it'}, the funds always go to the address above.`);
+  steps.push(`${exit.prove ? 'Prove and claim' : 'Claim'} on this page (under "Waiting to be claimed") or on ${exit.bridgeName} (${exit.bridgeUrl}): any wallet with ${p.symbol} on ${p.name} may send ${exit.prove ? 'them' : 'it'}, the funds always go to the address above.`);
   return steps;
 }
 
