@@ -9,6 +9,7 @@ import {
 import { buildProveWithdrawal, getWithdrawals } from 'viem/op-stack';
 import { DIRECT_RPC_URLS, ETHEREUM_FALLBACK_RPC, RPC_URLS } from '../chains/rpcs';
 import { nativeExitOf } from './native';
+import { AGG_L1, aggClaimData, aggProof, aggWithdrawalOf, type AggContracts, type AggProof, type AggWithdrawal } from './agglayer';
 
 // ---- Pinned contracts on the parent chain ----
 
@@ -20,7 +21,7 @@ interface Arb { kind: 'arb'; rollup: Address; outbox: Address }
 interface Zk { kind: 'zk'; nullifier: Address }
 /** Taiko: its relayer processes the message on Ethereum; the page only reads whether it did */
 interface Taiko { kind: 'taiko'; l1Bridge: Address }
-type Contracts = OpGames | OpOracle | Arb | Zk | Taiko;
+type Contracts = OpGames | OpOracle | Arb | Zk | Taiko | AggContracts;
 
 export const CLAIM_CONTRACTS: Readonly<Record<number, Contracts>> = {
   // Lisk: OptimismPortal2 with dispute games (games still report l2BlockNumber)
@@ -35,6 +36,11 @@ export const CLAIM_CONTRACTS: Readonly<Record<number, Contracts>> = {
   2741: { kind: 'zk', nullifier: '0xD7f9f54194C633F36CCD5F3da84ad4a1c38cB2cB' },
   167000: { kind: 'taiko', l1Bridge: '0xd60247c6848B7Ca29eDdF63AA924E53dB6Ddd8EC' },
   // opBNB, on BNB Chain: OptimismPortal 1.6.0 and L2OutputOracle 1.3.0 (outputs every 3,600 blocks)
+  // X Layer: the AggLayer unified bridge (sweep/agglayer.ts builds the claim's proofs from public data)
+  196: {
+    kind: 'agglayer', bridge: '0x2a3DD3EB832aF982ec71669E178424b10Dca2EDe', rollupManager: '0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2',
+    germ: '0x580bda1e7A0CFAe92Fa7F6c20A3794F169CE3CFb', rollupId: 3, gasToken: '0x75231F58b43240C9718Dd58B4967c5114342a86c',
+  },
   204: { kind: 'op-oracle', portal: '0x1876EA7702C0ad0C6A2ae6036DE7733edfBca519', oracle: '0x153CAB79f4767E2ff862C94aa49573294B13D169', latestOutput: true },
 };
 
@@ -83,6 +89,7 @@ export interface Withdrawal {
   arb?: { position: bigint; caller: Address; destination: Address; arbBlockNum: bigint; ethBlockNum: bigint; timestamp: bigint; callvalue: bigint; data: Hex };
   zk?: { batch: bigint | null; txIndex: number; message: Hex; sender: Address; logIndex: number };
   taiko?: { msgHash: Hex };
+  agg?: AggWithdrawal;
 }
 
 /** The withdrawal a sweep's transaction made, or null when it holds none (another of the sweep's transactions) */
@@ -122,6 +129,12 @@ export function withdrawalOf(chainId: number, receipt: TransactionReceipt, sentA
     return { ...base, recipient: a.destination, amount: a.callvalue, arb: { position: a.position, caller: a.caller, destination: a.destination, arbBlockNum: a.arbBlockNum, ethBlockNum: a.ethBlockNum, timestamp: a.timestamp, callvalue: a.callvalue, data: a.data } };
   }
   if (c.kind === 'zk') return readZk(receipt as ZkReceipt, base);
+  if (c.kind === 'agglayer') {
+    const a = aggWithdrawalOf(c, receipt);
+    if (!a) return null;
+    const { recipient, ...agg } = a;
+    return { ...base, recipient, amount: agg.amount, agg };
+  }
   if (c.kind === 'taiko') {
     const sent = parseEventLogs({ abi: TAIKO_MESSAGE_SENT, logs: logsFrom(receipt, TAIKO_L2_BRIDGE) });
     if (sent.length !== 1) return null;
@@ -270,6 +283,10 @@ export async function claimState(w: Withdrawal, now = Date.now()): Promise<Claim
     const { sendCount } = await confirmedArb(w.chainId, c);
     return sendCount > a.position ? { stage: 'claim' } : estimate();
   }
+  if (c.kind === 'agglayer') {
+    if (await l1().readContract({ address: c.bridge, abi: AGG_L1, functionName: 'isClaimed', args: [w.agg!.depositCount, c.rollupId] })) return { stage: 'claimed' };
+    return (await aggProofOf(w)) ? { stage: 'claim' } : estimate();
+  }
   if (c.kind === 'taiko') {
     const status = await l1().readContract({ address: c.l1Bridge, abi: TAIKO_L1_BRIDGE, functionName: 'messageStatus', args: [w.taiko!.msgHash] });
     // DONE: processed on Ethereum, the funds are there; anything else waits for the relayer
@@ -367,6 +384,11 @@ export async function claimCall(w: Withdrawal): Promise<L1Call> {
     if (root.toLowerCase() !== sendRoot.toLowerCase()) throw new Error('the chain\'s proof does not match the root on Ethereum');
     return { to: c.outbox, data: encodeFunctionData({ abi: OUTBOX, functionName: 'executeTransaction', args: [proof, a.position, a.caller, a.destination, a.arbBlockNum, a.ethBlockNum, a.timestamp, a.callvalue, a.data] }) };
   }
+  if (c.kind === 'agglayer') {
+    const proof = await aggProofOf(w, true);
+    if (!proof) throw new Error('X Layer\'s state on Ethereum does not cover it yet');
+    return { to: c.bridge, data: aggClaimData(c, { ...w.agg!, recipient: w.recipient }, proof) };
+  }
   if (c.kind === 'taiko') throw new Error('Taiko\'s relayer delivers it; claim it on bridge.taiko.xyz if it does not');
   const z = w.zk!;
   if (z.batch === null) throw new Error('not in a batch yet');
@@ -445,6 +467,19 @@ async function zkRpc<T>(chainId: number, method: string, params: unknown[]): Pro
 async function zkProof(w: Withdrawal): Promise<{ id: number; proof: Hex[] }> {
   const proof = await zkRpc<{ id: number; proof: Hex[] } | null>(w.chainId, 'zks_getL2ToL1LogProof', [w.txHash, w.zk!.logIndex]);
   if (!proof) throw new Error('no proof from the chain yet');
+  return proof;
+}
+
+// ---- AggLayer (X Layer) ----
+
+/** Proofs built in this page, reused for a minute (the stage read and the claim ask for the same) */
+const aggProofs = new Map<string, { at: number; proof: AggProof | null }>();
+async function aggProofOf(w: Withdrawal, fresh = false): Promise<AggProof | null> {
+  const c = CLAIM_CONTRACTS[w.chainId] as AggContracts;
+  const cached = aggProofs.get(w.txHash);
+  if (!fresh && cached && Date.now() - cached.at < 60_000) return cached.proof;
+  const proof = await aggProof(client(w.chainId), parent(w.chainId), c, w.agg!);
+  aggProofs.set(w.txHash, { at: Date.now(), proof });
   return proof;
 }
 
