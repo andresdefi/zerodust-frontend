@@ -15,11 +15,26 @@ import { GASLIMIT_CHAINS, type PlanTx } from './plan';
 // docs/data/browser-replay-spike-2026-10-01.md (Relay deposits replay to the
 // real sweeps' exact gas; a LI.FI swap replays without revert).
 
-async function rpc<T>(url: string, method: string, params: unknown[]): Promise<T> {
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
-  const body = (await res.json()) as { result?: T; error?: { message: string } };
-  if (body.error || body.result === undefined) throw new Error(`${method}: ${body.error?.message ?? 'no result'}`);
-  return body.result;
+/**
+ * A load-balanced RPC can answer the latest block from one node and the next read from a node
+ * still a block or two behind ("header not found"; opBNB's 0.25 s blocks on publicnode,
+ * 2026-10-13): those reads are retried for a few seconds.
+ */
+const BEHIND = /header not found|unknown block|block not found/i;
+export const BEHIND_RETRIES = 8;
+export const BEHIND_WAIT_MS = 500;
+
+export async function rpc<T>(url: string, method: string, params: unknown[]): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+    const body = (await res.json()) as { result?: T; error?: { message: string } };
+    if (body.error && BEHIND.test(body.error.message) && attempt < BEHIND_RETRIES) {
+      await new Promise((r) => setTimeout(r, BEHIND_WAIT_MS));
+      continue;
+    }
+    if (body.error || body.result === undefined) throw new Error(`${method}: ${body.error?.message ?? 'no result'}`);
+    return body.result;
+  }
 }
 
 /** Forked state from basic reads (many public RPCs refuse eth_getProof) */

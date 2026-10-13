@@ -7,6 +7,7 @@ import { l1FeeOf, hexToBytes, OP_GAS_PRICE_ORACLE, type L1Formula } from '../src
 const CHAINS: Array<{ name: string; rpc: string; formula: L1Formula }> = [
   { name: 'Blast', rpc: 'https://rpc.blast.io', formula: 'ecotone' },
   { name: 'Boba', rpc: 'https://mainnet.boba.network', formula: 'fjord' },
+  { name: 'opBNB', rpc: 'https://opbnb-rpc.publicnode.com', formula: 'fjord' },
 ];
 const SEL = { l1BaseFee: '0x519b4bd3', blobBaseFee: '0xf8206140', baseFeeScalar: '0xc5985918', blobBaseFeeScalar: '0x68d5dca6' } as const;
 
@@ -37,6 +38,8 @@ for (const c of CHAINS) {
         rpc<{ l1Fee?: string }>(c.rpc, 'eth_getTransactionReceipt', [t.hash]),
       ]);
       const f = formatTransaction(tx);
+      // opBNB waives the L1 fee for zero-price (sponsored) transactions; a sweep always pays gas
+      if ((f.gasPrice ?? f.maxFeePerGas) === 0n) continue;
       const raw = serializeTransaction({ ...f, data: f.input }, { r: f.r!, s: f.s!, ...(f.type === 'legacy' ? { v: f.v! } : { yParity: f.yParity! }) });
       const mine = l1FeeOf(hexToBytes(raw), c.formula, p);
       const theirs = BigInt(receipt.l1Fee ?? '0x0');

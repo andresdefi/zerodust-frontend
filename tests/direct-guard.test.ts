@@ -170,6 +170,78 @@ describe('verifyPlan: guard chains', () => {
   }
 });
 
+describe('verifyPlan: opBNB through the guard into Meson', () => {
+  const OPBNB = 204;
+  const BSC = 56;
+  const MESON = '0x25aB3Efd52e6470681CE037cD546Dc60726948D3';
+  const FIXED = 510n * 10n ** 12n; // 0.00051 BNB
+  // Salt flags d8 as Meson's API sets them (plain transfer, service fee waived); expiring far ahead
+  const encode = (units: bigint, o: { inChain?: string; outToken?: string; feeUnits?: bigint; flags?: string; expire?: string } = {}) => `0x264849e7${[
+    '01', units.toString(16).padStart(10, '0'), `${o.flags ?? 'd8'}000000000012345678`, (o.feeUnits ?? 510n).toString(16).padStart(10, '0'),
+    o.expire ?? 'ffffffffff', '02ca', o.outToken ?? 'fb', o.inChain ?? '00cc', 'fb',
+  ].join('')}`;
+  /** BAL here is 0.0001 BNB scaled up to 0.003 BNB so Meson's minimum is met */
+  function mesonPlan(o: { data?: (units: bigint) => string; receive?: (forwarded: bigint) => bigint; bridgeFee?: string | null } = {}): DirectPlan {
+    const bal = 3n * 10n ** 15n;
+    const value = bal - GAS * PRICE - L1;
+    const forwarded = ((value - FEE) / 10n ** 12n) * 10n ** 12n;
+    const fee = value - forwarded;
+    const data = (o.data ?? encode)(forwarded / 10n ** 12n);
+    return {
+      chainId: OPBNB, route: 'meson', requestId: null, fee: fee.toString(), balance: bal.toString(),
+      receive: (o.receive ? o.receive(forwarded) : forwarded - FIXED).toString(),
+      ...(o.bridgeFee === null ? {} : { bridgeFee: o.bridgeFee ?? FIXED.toString() }),
+      txs: [{ kind: 'sweep', to: GUARD, data: encodeFunctionData({ abi: SWEEP, functionName: 'sweep', args: [MESON, fee, data as Hex] }), value: value.toString(), gas: GAS.toString(), gasPrice: PRICE.toString(), nonce: 0 }],
+      guard: { address: GUARD, target: MESON, data, forwarded: forwarded.toString(), l1Fee: L1.toString(), absorb: 'fee', l1Formula: 'fjord' },
+    };
+  }
+  const mctx = (o: Partial<PlanContext> = {}) => ctx({ chainId: OPBNB, toChainId: BSC, balance: 3n * 10n ** 15n, ...o });
+
+  it('accepts exactly the forwarded amount into Meson, receiving it less Meson\'s fixed fee, and reports that fee', () => {
+    expect(verifyPlan(mesonPlan(), mctx())).toEqual({ mesonFee: FIXED });
+  });
+
+  const refusals: Array<[string, () => DirectPlan, Partial<PlanContext>?]> = [
+    ['a swap for another amount', () => mesonPlan({ data: (u) => encode(u + 1n) })],
+    ['a swap from another chain', () => mesonPlan({ data: (u) => encode(u, { inChain: '003c' }) })],
+    ['a swap paying out another token', () => mesonPlan({ data: (u) => encode(u, { outToken: '01' }) })],
+    ['a swap releasing to a dapp contract', () => mesonPlan({ data: (u) => encode(u, { flags: '58' }) })],
+    ['a swap charging Meson\'s service fee on top', () => mesonPlan({ data: (u) => encode(u, { flags: '98' }) })],
+    ['a swap sharing part of the payout with a partner', () => mesonPlan({ data: (u) => encode(u, { flags: 'da' }) })],
+    ['a swap that expires in minutes', () => mesonPlan({ data: (u) => encode(u, { expire: Math.floor(Date.now() / 1000 + 300).toString(16).padStart(10, '0') }) })],
+    ['a receive that hides Meson\'s fee', () => mesonPlan({ receive: (f) => f })],
+    ['a fee shown that is not Meson\'s', () => mesonPlan({ bridgeFee: '1' })],
+    ['no fee shown at all', () => mesonPlan({ bridgeFee: null })],
+    ['a destination Meson does not serve from opBNB', () => mesonPlan(), { toChainId: BASE }],
+    ['Relay where Meson is pinned', () => { const p = mesonPlan(); p.route = 'relay'; return p; }],
+  ];
+  for (const [why, plan, over] of refusals) {
+    it(`refuses ${why}`, () => {
+      expect(() => verifyPlan(plan(), mctx(over))).toThrow(/Plan refused/);
+    });
+  }
+
+  it('the page asks Meson for the swap it signs, naming the recipient it shows; the fee must not have moved', async () => {
+    const { requestMesonSwap } = await import('../src/direct/meson');
+    const units = 2_850n; // 0.00285 BNB in Meson's 6 decimals
+    const asked: Array<Record<string, string>> = [];
+    const meson = (o: { feeUnits?: bigint; value?: bigint } = {}) => vi.fn(async (_url: string, init?: RequestInit) => {
+      asked.push(JSON.parse(String(init!.body)));
+      const data = encode(units, o);
+      return new Response(JSON.stringify({ result: { encoded: `0x${data.slice(10)}`, tx: { to: MESON, value: (o.value ?? units * 10n ** 12n).toString(), data } } }));
+    });
+    vi.stubGlobal('fetch', meson());
+    const data = await requestMesonSwap(OPBNB, BSC, FROM, OTHER, units * 10n ** 12n, FIXED);
+    expect(data).toBe(encode(units));
+    expect(asked[0]).toEqual({ from: 'opbnb:bnb', to: 'bnb:bnb', amount: '0.002850', fromAddress: FROM, recipient: OTHER });
+    vi.stubGlobal('fetch', meson({ feeUnits: 600n }));
+    await expect(requestMesonSwap(OPBNB, BSC, FROM, OTHER, units * 10n ** 12n, FIXED)).rejects.toThrow(/fee changed/);
+    vi.stubGlobal('fetch', meson({ value: 1n }));
+    await expect(requestMesonSwap(OPBNB, BSC, FROM, OTHER, units * 10n ** 12n, FIXED)).rejects.toThrow(/Plan refused/);
+    await expect(requestMesonSwap(OPBNB, BASE, FROM, OTHER, units * 10n ** 12n, FIXED)).rejects.toThrow(/Plan refused/);
+  });
+});
+
 // ------------------------------------------------------------ planChecked and signPlan, offline
 
 const ORACLE = parseAbi(['function isFjord() view returns (bool)', 'function isIsthmus() view returns (bool)', 'function l1BaseFee() view returns (uint256)', 'function blobBaseFee() view returns (uint256)', 'function baseFeeScalar() view returns (uint32)', 'function blobBaseFeeScalar() view returns (uint32)']);
@@ -296,6 +368,24 @@ describe('planChecked and signPlan on Blast (the real guard bytecode on a fork)'
   it('accepts an oracle that answers false for flags it has', async () => {
     vi.stubGlobal('fetch', network({ plan: planFor(), fjord: false, isthmus: false }, account.address));
     await expect(run.signPlan(account, await run.planChecked(t, 'route'))).resolves.toHaveLength(1);
+  });
+});
+
+describe('broadcast on guard chains', () => {
+  it('reports a guard refusal, so the page plans and sends again (the L1 fee moved before inclusion)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      const { method } = JSON.parse(String(init!.body)) as { method: string };
+      const result = method === 'eth_sendRawTransaction' ? `0x${'ab'.repeat(32)}` : { status: '0x0', blockNumber: '0x10' };
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
+    }));
+    const sent = await run.broadcast(guardPlan(), ['0x01']);
+    expect(sent).toMatchObject({ ok: false, guardRefused: true, hashes: [`0x${'ab'.repeat(32)}`] });
+    expect(run.GUARD_ATTEMPTS).toBeGreaterThan(1);
+  });
+
+  it('a send refused for funds (planned on a stale balance) is also planned again; nothing was sent', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'insufficient funds for gas * price + value' } }))));
+    expect(await run.broadcast(guardPlan(), ['0x01'])).toMatchObject({ ok: false, guardRefused: true, hashes: [] });
   });
 });
 
