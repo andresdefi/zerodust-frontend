@@ -66,6 +66,13 @@ describe('groupChains', () => {
     expect(groupText('claim', null, { tokens: [{ chain: 'Fraxtal', symbol: 'FXS' }, { chain: 'Gravity', symbol: 'G' }] }).detail)
       .toContain('Fraxtal arrives as FXS and Gravity as G, tokens on Ethereum, not ETH.');
   });
+
+  it('native bridges only: a chain settling on BNB Chain is named; alone, the group says BNB Chain', () => {
+    const op = { chain: 'opBNB', parent: 'BNB Chain', symbol: 'BNB' };
+    expect(groupText('claim', null, { parents: [op, { chain: 'Lisk', parent: 'Ethereum', symbol: 'ETH' }] }).detail).toContain("sends it to Ethereum (opBNB's to BNB Chain), where you claim it");
+    expect(groupText('claim', null, { parents: [op] }).detail).toContain('sends it to BNB Chain, where you claim it');
+    expect(groupText('claim', null, { parents: [{ chain: 'Lisk', parent: 'Ethereum', symbol: 'ETH' }] }).detail).toContain('sends it to Ethereum, where');
+  });
 });
 
 describe('parseView', () => {

@@ -302,3 +302,16 @@ test('opBNB: Meson\'s fixed fee is on the row before anything is chosen, and aft
   await expect(gas).toContainText('0.00234 BNB');
   if (process.env.SHOT) await page.locator('section.ap-grp', { has: gas }).screenshot({ path: process.env.SHOT });
 });
+
+test('opBNB while Meson is paused: its own bridge to BNB Chain, claimed there in BNB', async ({ page }) => {
+  const user = privateKeyToAccount(generatePrivateKey()).address;
+  await mockNetwork(page, user, { opbnb: 'native', nova: true });
+  await page.goto(`/address/${user}`);
+  const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'Native bridges only' }) });
+  await expect(group).toContainText("each chain's own bridge sends it to Ethereum (opBNB's to BNB Chain), where you claim it");
+  const row = group.locator('.ap-row', { hasText: 'opBNB' });
+  await expect(row).toContainText('Native bridge · claim in about 7 days');
+  await expect(row).toContainText('on BNB Chain, once claimed');
+  await expect(group.locator('.ap-row', { hasText: 'Arbitrum Nova' })).toContainText('on Ethereum, once claimed');
+  if (process.env.SHOT) await group.screenshot({ path: process.env.SHOT.replace('.png', '-native.png') });
+});
