@@ -88,7 +88,10 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
   const gasGroup = activeGroup === 'gas';
   // Both gas groups share the destination: quote them together
   const gasChains = groups.filter((g) => g.key === 'gas').flatMap((g) => g.chains);
-  const estimates = useEstimates(address, gasChains, destination, recipient);
+  // A direct chain's estimate is a full plan (several bridge quotes): asked once its route check
+  // says a bridge takes it, not while the check runs or after it said no (2026-10-13, Relay's limit)
+  const estimated = gasChains.filter((c) => !c.direct || c.chainId === destination || routesOf(c.chainId).gas === true);
+  const estimates = useEstimates(address, estimated, destination, recipient);
   // How long each bridge usually takes (GET /bridges/timing), to set expectations on each row
   const [timings, setTimings] = useState<BridgeTimings>(NO_TIMINGS);
   useEffect(() => { void fetchTimings().then(setTimings, () => undefined); }, []);

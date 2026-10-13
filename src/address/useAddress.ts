@@ -5,7 +5,7 @@ import { mainnet } from 'viem/chains';
 import { normalize } from 'viem/ens';
 import { ZeroDust } from '@zerodust/sdk';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
-import { directBalances, directChains, directRoute, preparePlan } from '../direct/plan';
+import { directBalances, directChains, directRoute, preparePlan, relayBusy } from '../direct/plan';
 import { inPool } from '../lib/pool';
 import { API_URL } from '../sweep/constants';
 import type { AddressChain, ChainRoutes, FixedFee } from './groups';
@@ -232,12 +232,13 @@ export function useAddressData(address: Address | null, destination: number | nu
           return;
         }
         // No bridge to the chosen chain, or none answering after the retries: does one take it
-        // somewhere else? Unconfirmed counts as blocked only when another chain is confirmed instead
+        // somewhere else? Unconfirmed counts as blocked only when another chain is confirmed instead.
+        // Not while Relay is over its limit: those checks would ask it again
         let elsewhere = false;
         const feeOf = (answer: typeof res, toChainId: number): FixedFee | undefined =>
           answer.bridgeFeeWei && answer.bridge ? { amount: BigInt(answer.bridgeFeeWei), bridge: answer.bridge, toChainId } : undefined;
         let fixedFee = res.available === true ? feeOf(res, destination) : undefined;
-        if (res.available !== true) {
+        if (res.available !== true && !relayBusy(res)) {
           for (const alt of ALT_CANDIDATES.filter((id) => id !== destination && id !== r.chainId)) {
             if (cancelled) break;
             const other = await probe(alt);

@@ -4,7 +4,7 @@ import { ZERODUST_CONTRACT_ADDRESS, ZeroDust, ZeroDustAgent, closingDelegateFor,
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { inPool } from '../lib/pool';
 import { readState } from '../lib/rpc';
-import { deliveryStatus, directBalances, directChains, directRoute, tokenExitFor, BURN_ADDRESS, TOKEN_EXITS, ZERODUST_ADDRESS, type DirectPlan, type PlanMode } from '../direct/plan';
+import { deliveryStatus, directBalances, directChains, directRoute, relayBusy, tokenExitFor, BURN_ADDRESS, TOKEN_EXITS, ZERODUST_ADDRESS, type DirectPlan, type PlanMode } from '../direct/plan';
 import { broadcast, GUARD_ATTEMPTS, planChecked, settledBalance, signPlan, waitForNonce } from '../direct/run';
 
 import { API_URL } from './constants';
@@ -359,7 +359,8 @@ export function useSweep(wallet: Wallet) {
         result = await probe();
       }
       if (!cancelled) setDirectRoutes((prev) => ({ ...prev, [row.chainId]: result }));
-      if (result.available === true) return;
+      // Relay over its limit: other destinations would ask it again, so the route stays unknown
+      if (result.available === true || relayBusy(result)) return;
       // Not confirmed to the destination: which other major chains can it go to?
       const found: number[] = [];
       for (const toChainId of ALT_CANDIDATES) {
