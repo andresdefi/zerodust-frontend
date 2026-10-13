@@ -127,16 +127,18 @@ export function groupText(key: GroupKey, destinationName: string | null, opts: {
       const t = opts.tokens ?? [];
       const tokens = t.length === 0 ? ''
         : ` ${t.map((x, i) => i === 0 ? `${x.chain} arrives as ${x.symbol}` : `${x.chain} as ${x.symbol}`).join(t.length > 2 ? ', ' : ' and ')}, ${t.length === 1 ? 'a token' : 'tokens'} on Ethereum, not ETH.`;
-      // Chains whose own bridge settles elsewhere than Ethereum (opBNB: BNB Chain), named as well
-      const other = (opts.parents ?? []).filter((x) => x.parent !== 'Ethereum');
-      const to = other.length === 0 ? 'Ethereum' : 'its parent chain';
-      const elsewhere = other.length === 0 ? '' : ` ${other.map((x) => `${x.chain}'s goes to ${x.parent}, as ${x.symbol}`).join('; ')}.`;
+      // Chains whose own bridge settles elsewhere than Ethereum (opBNB: BNB Chain), named in the sentence
+      const all = opts.parents ?? [];
+      const other = all.filter((x) => x.parent !== 'Ethereum');
+      const to = other.length === 0 ? 'Ethereum'
+        : other.length === all.length && new Set(other.map((x) => x.parent)).size === 1 ? other[0]!.parent
+          : `Ethereum (${other.map((x) => `${x.chain}'s to ${x.parent}`).join(', ')})`;
       const how = opts.relayed === 'all'
         ? `No other bridge takes these out, so each chain's own bridge sends it to ${to}. It arrives by itself, about an hour later.`
         : opts.relayed === 'some'
           ? `No other bridge takes these out, so each chain's own bridge sends it to ${to}. Most need a claim there later, after a wait of days; the rows say which.`
           : `Needs a claim later. No other bridge takes these out, so each chain's own bridge sends it to ${to}, where you claim it after a wait of days. Nothing arrives by itself.`;
-      return { title: 'Native bridges only', detail: `${how}${elsewhere}${tokens} Sweep with the key.` };
+      return { title: 'Native bridges only', detail: `${how}${tokens} Sweep with the key.` };
     }
   }
 }

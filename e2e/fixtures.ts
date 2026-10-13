@@ -272,7 +272,7 @@ function telosLeftoverPlan(nonce: number) {
  * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base);
  * `hiccups`: the first route checks answer "unknown", then the real answer
  */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean; scam?: string[]; scamCheckDown?: boolean; unchecked?: number; closing?: Record<number, 'closing' | 'cutoff'>; nova?: boolean; fraxtal?: boolean; taiko?: boolean; opbnb?: boolean } = {}) {
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean; scam?: string[]; scamCheckDown?: boolean; unchecked?: number; closing?: Record<number, 'closing' | 'cutoff'>; nova?: boolean; fraxtal?: boolean; taiko?: boolean; opbnb?: boolean | 'native' } = {}) {
   const chains = [...CHAINS, ...(opts.mitosis ? [MITOSIS_CHAIN] : []), ...(opts.endurance ? [ENDURANCE_CHAIN] : []), ...(opts.nova ? [NOVA_CHAIN] : []), ...(opts.fraxtal ? [FRAXTAL_CHAIN] : []), ...(opts.taiko ? [TAIKO_CHAIN] : []), ...(opts.opbnb ? [BSC_CHAIN] : [])];
   const funded = [...FUNDED, ...(opts.mitosis ? [MITOSIS] : []), ...(opts.endurance ? [ENDURANCE] : []), ...(opts.nova ? [NOVA] : []), ...(opts.fraxtal ? [FRAXTAL] : []), ...(opts.taiko ? [TAIKO] : []), ...(opts.unchecked !== undefined ? [42161] : [])];
   // Chains that announced their shutdown, as GET /chains and /direct/chains report them
@@ -376,6 +376,8 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     if (path === '/direct/route') {
       const to = Number(url.searchParams.get('toChainId'));
       // opBNB: Meson, only to BNB Chain, for a fixed 0.00051 BNB
+      // opBNB with Meson paused: no route anywhere, so its own bridge to BNB Chain
+      if (opts.opbnb === 'native') return json(route, { available: false, exit: false, reason: 'No bridge takes BNB out of opBNB; it can be swept to another address on opBNB' });
       if (opts.opbnb) return json(route, to === 56 ? { available: true, bridge: 'meson', bridgeFeeWei: (510n * 10n ** 12n).toString() } : { available: false, exit: false, reason: 'Meson does not deliver to chain ' + to });
       // Telos: no gas bridge; its own bridge delivers TLOS as a token on Base
       if (opts.telos) return json(route, to === 8453 ? { available: false, exit: true, reason: 'No gas bridge takes TLOS out; its own bridge delivers TLOS as a token' } : { available: false, exit: false, reason: 'Gas.zip: Quote: Please Try Again' });
