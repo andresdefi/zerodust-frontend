@@ -13,20 +13,26 @@ import { nativeExitOf } from './native';
 // ---- Pinned contracts on Ethereum ----
 
 interface OpGames { kind: 'op-games'; portal: Address; factory: Address }
-interface OpOracle { kind: 'op-oracle'; portal: Address; oracle: Address; yieldManager: Address }
+/** The older portal with an L2OutputOracle; Blast's adds a yield checkpoint to its proofs and claims */
+interface OpOracle { kind: 'op-oracle'; portal: Address; oracle: Address; yieldManager?: Address }
 interface Arb { kind: 'arb'; rollup: Address; outbox: Address }
 interface Zk { kind: 'zk'; nullifier: Address }
-type Contracts = OpGames | OpOracle | Arb | Zk;
+/** Taiko: its relayer processes the message on Ethereum; the page only reads whether it did */
+interface Taiko { kind: 'taiko'; l1Bridge: Address }
+type Contracts = OpGames | OpOracle | Arb | Zk | Taiko;
 
 export const CLAIM_CONTRACTS: Readonly<Record<number, Contracts>> = {
   // Lisk: OptimismPortal2 with dispute games (games still report l2BlockNumber)
   1135: { kind: 'op-games', portal: '0x26dB93F8b8b4f7016240af62F7730979d353f9A7', factory: '0x0CF7D3706a27CCE2017aEB11E8a9c8b5388c282C' },
   // Blast: the older portal with an L2OutputOracle; a claim names a yield checkpoint hint
   81457: { kind: 'op-oracle', portal: '0x0Ec68c5B10F21EFFb74f2A5C61DFe6b08C0Db6Cb', oracle: '0x826D1B0D4111Ad9146Eb8941D7Ca2B6a44215c76', yieldManager: '0x98078db053902644191f93988341E31289E1C8FE' },
+  // Fraxtal: OptimismPortalCGT 2.8.1-beta.4, pays the claim out as FXS
+  252: { kind: 'op-oracle', portal: '0x36cb65c1967A0Fb0EEE11569C51C2f2aA1Ca6f6D', oracle: '0x66CC916Ed5C6C2FA97014f7D1cD141528Ae171e4' },
   42170: { kind: 'arb', rollup: '0xE7E8cCC7c381809BDC4b213CE44016300707B7Bd', outbox: '0xD4B80C3D7240325D18E645B49e6535A3Bf95cc58' },
   1625: { kind: 'arb', rollup: '0x2807B1d5d94ca823ca7d8642A5F5DDac120ce48f', outbox: '0x1153a1e4B1523DFf36f77d696bd6eBF2B0e7DAbF' },
   // Abstract: the ZK Stack's L1Nullifier (behind its shared bridge)
   2741: { kind: 'zk', nullifier: '0xD7f9f54194C633F36CCD5F3da84ad4a1c38cB2cB' },
+  167000: { kind: 'taiko', l1Bridge: '0xd60247c6848B7Ca29eDdF63AA924E53dB6Ddd8EC' },
 };
 
 const rpcOf = (chainId: number) => RPC_URLS[chainId] ?? DIRECT_RPC_URLS[chainId];
@@ -70,6 +76,7 @@ export interface Withdrawal {
   op?: { tx: OpTx; hash: Hex; block: bigint };
   arb?: { position: bigint; caller: Address; destination: Address; arbBlockNum: bigint; ethBlockNum: bigint; timestamp: bigint; callvalue: bigint; data: Hex };
   zk?: { batch: bigint | null; txIndex: number; message: Hex; sender: Address; logIndex: number };
+  taiko?: { msgHash: Hex };
 }
 
 /** The withdrawal a sweep's transaction made, or null when it holds none (another of the sweep's transactions) */
@@ -90,6 +97,8 @@ const OP_L2_BRIDGE: Address = '0x4200000000000000000000000000000000000010';
 const BLAST_L2_BRIDGE: Address = '0x4300000000000000000000000000000000000005';
 const OP_L2_MESSENGER: Address = '0x4200000000000000000000000000000000000007';
 const ARB_SYS: Address = '0x0000000000000000000000000000000000000064';
+const TAIKO_L2_BRIDGE: Address = '0x1670000000000000000000000000000000000001';
+const TAIKO_MESSAGE_SENT = parseAbi(['event MessageSent(bytes32 indexed msgHash, (uint64 id, uint64 fee, uint32 gasLimit, address from, uint64 srcChainId, address srcOwner, uint64 destChainId, address destOwner, address to, uint256 value, bytes data) message)']);
 const logsFrom = (receipt: TransactionReceipt, address: Address) => receipt.logs.filter((l) => isAddressEqual(l.address, address));
 
 /**
@@ -107,12 +116,20 @@ export function withdrawalOf(chainId: number, receipt: TransactionReceipt, sentA
     return { ...base, recipient: a.destination, amount: a.callvalue, arb: { position: a.position, caller: a.caller, destination: a.destination, arbBlockNum: a.arbBlockNum, ethBlockNum: a.ethBlockNum, timestamp: a.timestamp, callvalue: a.callvalue, data: a.data } };
   }
   if (c.kind === 'zk') return readZk(receipt as ZkReceipt, base);
+  if (c.kind === 'taiko') {
+    const sent = parseEventLogs({ abi: TAIKO_MESSAGE_SENT, logs: logsFrom(receipt, TAIKO_L2_BRIDGE) });
+    if (sent.length !== 1) return null;
+    const { msgHash, message } = sent[0]!.args;
+    // A plain ETH message to Ethereum: anything else is not a withdrawal this page follows
+    if (message.destChainId !== 1n || message.data !== '0x') return null;
+    return { ...base, recipient: message.to, amount: message.value, taiko: { msgHash } };
+  }
   const withdrawals = getWithdrawals({ logs: logsFrom(receipt, OP_MESSAGE_PASSER) });
   if (withdrawals.length !== 1) return null;
   const w = withdrawals[0]!;
   // Through L2StandardBridge the message goes to Ethereum's messenger; the bridge's event names the
   // user. It counts only when it is the message the messenger passed (same value).
-  const bridges = c.kind === 'op-oracle' ? [OP_L2_BRIDGE, BLAST_L2_BRIDGE] : [OP_L2_BRIDGE];
+  const bridges = c.kind === 'op-oracle' && c.yieldManager ? [OP_L2_BRIDGE, BLAST_L2_BRIDGE] : [OP_L2_BRIDGE];
   const bridged = parseEventLogs({ abi: ETH_BRIDGE_INITIATED, logs: bridges.flatMap((b) => logsFrom(receipt, b)) });
   const viaBridge = bridged.length === 1 && isAddressEqual(w.sender, OP_L2_MESSENGER) && bridged[0]!.args.amount === w.value ? bridged[0]!.args : undefined;
   if (bridged.length > 0 && !viaBridge) return null;
@@ -175,6 +192,11 @@ const PORTAL1 = parseAbi([
   'function proveWithdrawalTransaction(WithdrawalTransaction _tx, uint256 _l2OutputIndex, OutputRootProof _outputRootProof, bytes[] _withdrawalProof)',
   'function finalizeWithdrawalTransaction(uint256 hintId, WithdrawalTransaction _tx)',
 ]);
+const PORTAL1_STD = parseAbi([
+  'function provenWithdrawals(bytes32) view returns (bytes32 outputRoot, uint128 timestamp, uint128 l2OutputIndex)',
+  TX_STRUCT,
+  'function finalizeWithdrawalTransaction(WithdrawalTransaction _tx)',
+]);
 const ORACLE = parseAbi([
   'function latestBlockNumber() view returns (uint256)',
   'function FINALIZATION_PERIOD_SECONDS() view returns (uint256)',
@@ -187,6 +209,7 @@ const OUTBOX = parseAbi([
   'function isSpent(uint256) view returns (bool)',
   'function executeTransaction(bytes32[] proof, uint256 index, address l2Sender, address to, uint256 l2Block, uint256 l1Block, uint256 l2Timestamp, uint256 value, bytes data)',
 ]);
+const TAIKO_L1_BRIDGE = parseAbi(['function messageStatus(bytes32) view returns (uint8)']);
 const NULLIFIER = parseAbi([
   'function isWithdrawalFinalized(uint256 chainId, uint256 l2BatchNumber, uint256 l2MessageIndex) view returns (bool)',
   'function finalizeDeposit((uint256 chainId, uint256 l2BatchNumber, uint256 l2MessageIndex, address l2Sender, uint16 l2TxNumberInBatch, bytes message, bytes32[] merkleProof) _finalizeWithdrawalParams)',
@@ -222,7 +245,9 @@ export async function claimState(w: Withdrawal, now = Date.now()): Promise<Claim
   if (c.kind === 'op-oracle') {
     const { hash, block } = w.op!;
     if (await l1().readContract({ address: c.portal, abi: PORTAL1, functionName: 'finalizedWithdrawals', args: [hash] })) return { stage: 'claimed' };
-    const [, proved] = await l1().readContract({ address: c.portal, abi: PORTAL1, functionName: 'provenWithdrawals', args: [hash] });
+    const [, proved] = c.yieldManager
+      ? await l1().readContract({ address: c.portal, abi: PORTAL1, functionName: 'provenWithdrawals', args: [hash] })
+      : await l1().readContract({ address: c.portal, abi: PORTAL1_STD, functionName: 'provenWithdrawals', args: [hash] });
     if (proved > 0n) {
       const period = await l1().readContract({ address: c.oracle, abi: ORACLE, functionName: 'FINALIZATION_PERIOD_SECONDS' });
       const until = (Number(proved) + Number(period)) * 1000;
@@ -236,6 +261,11 @@ export async function claimState(w: Withdrawal, now = Date.now()): Promise<Claim
     if (await l1().readContract({ address: c.outbox, abi: OUTBOX, functionName: 'isSpent', args: [a.position] })) return { stage: 'claimed' };
     const { sendCount } = await confirmedArb(w.chainId, c);
     return sendCount > a.position ? { stage: 'claim' } : estimate();
+  }
+  if (c.kind === 'taiko') {
+    const status = await l1().readContract({ address: c.l1Bridge, abi: TAIKO_L1_BRIDGE, functionName: 'messageStatus', args: [w.taiko!.msgHash] });
+    // DONE: processed on Ethereum, the funds are there; anything else waits for the relayer
+    return status === 2 ? { stage: 'claimed' } : estimate();
   }
   const z = w.zk!;
   if (z.batch === null) return estimate();
@@ -300,12 +330,15 @@ export async function claimCall(w: Withdrawal): Promise<L1Call> {
     if (!submitter) throw new Error('not proved yet');
     return { to: c.portal, data: encodeFunctionData({ abi: PORTAL2, functionName: 'finalizeWithdrawalTransactionExternalProof', args: [w.op!.tx, submitter] }) };
   }
+  if (c.kind === 'op-oracle' && !c.yieldManager) {
+    return { to: c.portal, data: encodeFunctionData({ abi: PORTAL1_STD, functionName: 'finalizeWithdrawalTransaction', args: [w.op!.tx] }) };
+  }
   if (c.kind === 'op-oracle') {
     const [, , , requestId] = await l1().readContract({ address: c.portal, abi: PORTAL1, functionName: 'provenWithdrawals', args: [w.op!.hash] });
     let hintId = 0n;
     if (requestId !== 0n) {
-      const last = await l1().readContract({ address: c.yieldManager, abi: YIELD, functionName: 'getLastCheckpointId' });
-      hintId = await l1().readContract({ address: c.yieldManager, abi: YIELD, functionName: 'findCheckpointHint', args: [requestId, 1n, last] });
+      const last = await l1().readContract({ address: c.yieldManager!, abi: YIELD, functionName: 'getLastCheckpointId' });
+      hintId = await l1().readContract({ address: c.yieldManager!, abi: YIELD, functionName: 'findCheckpointHint', args: [requestId, 1n, last] });
     }
     return { to: c.portal, data: encodeFunctionData({ abi: PORTAL1, functionName: 'finalizeWithdrawalTransaction', args: [hintId, w.op!.tx] }) };
   }
@@ -320,6 +353,7 @@ export async function claimCall(w: Withdrawal): Promise<L1Call> {
     if (root.toLowerCase() !== sendRoot.toLowerCase()) throw new Error('the chain\'s proof does not match the root on Ethereum');
     return { to: c.outbox, data: encodeFunctionData({ abi: OUTBOX, functionName: 'executeTransaction', args: [proof, a.position, a.caller, a.destination, a.arbBlockNum, a.ethBlockNum, a.timestamp, a.callvalue, a.data] }) };
   }
+  if (c.kind === 'taiko') throw new Error('Taiko\'s relayer delivers it; claim it on bridge.taiko.xyz if it does not');
   const z = w.zk!;
   if (z.batch === null) throw new Error('not in a batch yet');
   const proof = await zkProof(w);

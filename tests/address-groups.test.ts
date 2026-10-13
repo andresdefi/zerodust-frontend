@@ -58,6 +58,14 @@ describe('groupChains', () => {
     expect(groupText('gas', 'Base', { keyOnly: 2 }).detail).toContain('Key only need the key');
     expect(groupText('gas', 'Base').detail).not.toContain('Key only');
   });
+
+  it('native bridges only: chains whose gas arrives as a token are named in the group', () => {
+    expect(groupText('claim', null).detail).not.toContain('not ETH');
+    expect(groupText('claim', null, { tokens: [{ chain: 'Fraxtal', symbol: 'FXS' }] }).detail)
+      .toContain('Fraxtal arrives as FXS, a token on Ethereum, not ETH. Sweep with the key.');
+    expect(groupText('claim', null, { tokens: [{ chain: 'Fraxtal', symbol: 'FXS' }, { chain: 'Gravity', symbol: 'G' }] }).detail)
+      .toContain('Fraxtal arrives as FXS and Gravity as G, tokens on Ethereum, not ETH.');
+  });
 });
 
 describe('parseView', () => {

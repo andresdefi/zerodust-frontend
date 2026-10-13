@@ -264,6 +264,8 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
   // there unmounted the running sweep and froze its rows)
   const confirmed = useRef(false);
   const ready = m.readyRows;
+  /** Some chain here needs the user's own claim on Ethereum (a relayed one does not) */
+  const needClaim = ready.some((r) => !nativeExitOf(r.chainId)?.relayed);
   const notReady = plan.chains.filter((c) => !ready.some((r) => r.chainId === c.chainId));
   const n = ready.length;
   const st = (r: Row) => m.states[r.chainId];
@@ -343,7 +345,7 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
       </div>
       {ownBridge && n > 0 && (
         <div className="zd-native" role="note">
-          <p className="zd-native-h">Nothing arrives by itself. After the sweep:</p>
+          <p className="zd-native-h">{needClaim ? 'Nothing arrives by itself. After the sweep:' : 'After the sweep:'}</p>
           {ready.map((r) => {
             const exit = nativeExitOf(r.chainId);
             if (!exit) return null;
@@ -355,10 +357,14 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
               <div key={r.chainId} className="zd-native-chain">
                 <p className="zd-native-name"><ChainIcon chainId={r.chainId} name={r.name} size={18} /> {r.name}</p>
                 <ol>{nativeSteps(exit, r.name, shortAddress(m.recipient)).map((t) => <li key={t}>{t}</li>)}</ol>
+                {exit.relayed ? (
+                  <p className="zd-native-cost">Nothing to pay on Ethereum: the relayer&apos;s fee comes out of the balance and is in the amount above.</p>
+                ) : (
                 <p className="zd-native-cost">
                   Your {exit.prove ? 'two transactions' : 'transaction'} on Ethereum: {cost !== null ? `about ${formatAmount(cost, 18)} ETH${costUsd !== null ? ` (${formatUsd(costUsd)})` : ''} at today's gas` : 'cost unknown right now'}.
                   {costUsd !== null && row?.usd && costUsd > row.usd / 2 ? ' That is a large share of what you sweep.' : ''}
                 </p>
+                )}
                 {startBy !== null && (
                   <p className="zd-native-warn">{r.name} closes on {new Date(Date.parse(row!.closing!.closesAt)).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}. {startBy > openedAt
                     ? `Start by ${new Date(startBy).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}: the ${exit.prove ? 'prove' : 'claim'} needs the chain still running.`
@@ -369,7 +375,9 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
           })}
           <label className="zd-native-ok">
             <input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} />
-            I understand: the funds arrive only after I {ready.some((r) => nativeExitOf(r.chainId)?.prove) ? 'prove and ' : ''}claim on Ethereum, and ZeroDust does not do it for me.
+            {needClaim
+              ? <>I understand: the funds arrive only after I {ready.some((r) => nativeExitOf(r.chainId)?.prove) ? 'prove and ' : ''}claim on Ethereum{ready.some((r) => nativeExitOf(r.chainId)?.relayed) ? ' (except where the relayer delivers)' : ''}, and ZeroDust does not do it for me.</>
+              : <>I understand: the funds go through the chain&apos;s own bridge and arrive on Ethereum, not on the chain I picked.</>}
           </label>
         </div>
       )}
