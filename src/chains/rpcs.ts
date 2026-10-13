@@ -67,6 +67,12 @@ export const RPC_URLS: Record<number, string> = {
 // the planned set on a fork, and broadcasts its signed transactions here. The
 // same endpoints the API plans with (/direct/chains); each answered CORS for
 // the site and the reads the replay needs on 2026-10-01.
+/**
+ * Ethereum's second RPC, for the reads and sends of own-bridge proves and claims
+ * (sweep/claims.ts), when the first one rate-limits. CORS for the site checked 2026-10-12.
+ */
+export const ETHEREUM_FALLBACK_RPC = 'https://ethereum-rpc.publicnode.com';
+
 export const DIRECT_RPC_URLS: Record<number, string> = {
   43114: 'https://api.avax.network/ext/bc/C/rpc',
   25: 'https://evm.cronos.org',
