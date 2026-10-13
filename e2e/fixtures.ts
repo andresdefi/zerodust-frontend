@@ -191,6 +191,16 @@ function avaxPlan(nonce: number) {
   };
 }
 
+/** opBNB (a guard chain) holding 0.003 BNB when `opbnb` is on: out through Meson, which keeps a fixed 0.00051 BNB */
+export const OPBNB = 204;
+const BSC_CHAIN = { chainId: 56, name: 'BNB Chain', nativeToken: 'BNB', explorerUrl: 'https://bscscan.com', available: true };
+const OPBNB_BALANCE = 3n * 10n ** 15n;
+function opbnbEstimate() {
+  const forwarded = 2_850_000_000_000_000n;
+  const fee = 150_000_000_000_000n - 120_000_000n;
+  return { chainId: OPBNB, route: 'meson', requestId: null, receive: (forwarded - 510n * 10n ** 12n).toString(), bridgeFee: (510n * 10n ** 12n).toString(), fee: fee.toString(), balance: OPBNB_BALANCE.toString(), txs: [] };
+}
+
 /** A gas-limit direct chain (Monad) holding MONAD_BALANCE when `monad` is on, swept through Across */
 export const MONAD = 143;
 export const MONAD_BALANCE = 63n * 10n ** 18n;
@@ -262,8 +272,8 @@ function telosLeftoverPlan(nonce: number) {
  * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base);
  * `hiccups`: the first route checks answer "unknown", then the real answer
  */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean; scam?: string[]; scamCheckDown?: boolean; unchecked?: number; closing?: Record<number, 'closing' | 'cutoff'>; nova?: boolean; fraxtal?: boolean; taiko?: boolean } = {}) {
-  const chains = [...CHAINS, ...(opts.mitosis ? [MITOSIS_CHAIN] : []), ...(opts.endurance ? [ENDURANCE_CHAIN] : []), ...(opts.nova ? [NOVA_CHAIN] : []), ...(opts.fraxtal ? [FRAXTAL_CHAIN] : []), ...(opts.taiko ? [TAIKO_CHAIN] : [])];
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean; scam?: string[]; scamCheckDown?: boolean; unchecked?: number; closing?: Record<number, 'closing' | 'cutoff'>; nova?: boolean; fraxtal?: boolean; taiko?: boolean; opbnb?: boolean | 'native' } = {}) {
+  const chains = [...CHAINS, ...(opts.mitosis ? [MITOSIS_CHAIN] : []), ...(opts.endurance ? [ENDURANCE_CHAIN] : []), ...(opts.nova ? [NOVA_CHAIN] : []), ...(opts.fraxtal ? [FRAXTAL_CHAIN] : []), ...(opts.taiko ? [TAIKO_CHAIN] : []), ...(opts.opbnb ? [BSC_CHAIN] : [])];
   const funded = [...FUNDED, ...(opts.mitosis ? [MITOSIS] : []), ...(opts.endurance ? [ENDURANCE] : []), ...(opts.nova ? [NOVA] : []), ...(opts.fraxtal ? [FRAXTAL] : []), ...(opts.taiko ? [TAIKO] : []), ...(opts.unchecked !== undefined ? [42161] : [])];
   // Chains that announced their shutdown, as GET /chains and /direct/chains report them
   const closingOf = (chainId: number, name: string) => {
@@ -275,9 +285,9 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
   let uncheckedLeft = opts.unchecked ?? 0;
   let hiccups = opts.hiccups ?? 0;
   /** The funded direct chain, if any */
-  const DIRECT = opts.telos ? TELOS : opts.monad ? MONAD : AVAX;
-  const DIRECT_BALANCE = opts.telos ? TELOS_BALANCE : opts.monad ? MONAD_BALANCE : AVAX_BALANCE;
-  const directInfo = opts.telos
+  const DIRECT = opts.opbnb ? OPBNB : opts.telos ? TELOS : opts.monad ? MONAD : AVAX;
+  const DIRECT_BALANCE = opts.opbnb ? OPBNB_BALANCE : opts.telos ? TELOS_BALANCE : opts.monad ? MONAD_BALANCE : AVAX_BALANCE;
+  const directInfo = opts.opbnb ? { chainId: OPBNB, name: 'opBNB', token: 'BNB', decimals: 18, explorerUrl: 'https://opbnb.bscscan.com' } : opts.telos
     ? { chainId: TELOS, name: 'Telos', token: 'TLOS', decimals: 18, explorerUrl: 'https://teloscan.io' }
     : opts.monad
       ? { chainId: MONAD, name: 'Monad', token: 'MON', decimals: 18, explorerUrl: 'https://monadvision.com' }
@@ -355,15 +365,20 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
           { chainId: AVAX, name: 'Avalanche', token: 'AVAX', decimals: 18, explorerUrl: 'https://snowtrace.io', rpcUrl: DIRECT_RPC_URLS[AVAX], kind: 'evm', ...closingOf(AVAX, 'Avalanche') },
           { chainId: MONAD, name: 'Monad', token: 'MON', decimals: 18, explorerUrl: 'https://monadvision.com', rpcUrl: DIRECT_RPC_URLS[MONAD], kind: 'gaslimit', txGapBlocks: 4 },
           { chainId: TELOS, name: 'Telos', token: 'TLOS', decimals: 18, explorerUrl: 'https://teloscan.io', rpcUrl: DIRECT_RPC_URLS[TELOS], kind: 'fixedprice' },
+          ...(opts.opbnb ? [{ chainId: OPBNB, name: 'opBNB', token: 'BNB', decimals: 18, explorerUrl: 'https://opbnb.bscscan.com', rpcUrl: DIRECT_RPC_URLS[OPBNB], kind: 'opguard', l1Formula: 'fjord' }] : []),
         ],
-        prices: { AVAX: 25, MON: 0.034, TLOS: 0.0192 },
+        prices: { AVAX: 25, MON: 0.034, TLOS: 0.0192, BNB: 739 },
       });
     }
     if (path.startsWith('/direct/balances/')) {
-      return json(route, opts.direct || opts.monad || opts.telos ? [{ ...directInfo, balance: (swept.has(DIRECT) ? 0n : DIRECT_BALANCE).toString() }] : []);
+      return json(route, opts.direct || opts.monad || opts.telos || opts.opbnb ? [{ ...directInfo, balance: (swept.has(DIRECT) ? 0n : DIRECT_BALANCE).toString() }] : []);
     }
     if (path === '/direct/route') {
       const to = Number(url.searchParams.get('toChainId'));
+      // opBNB: Meson, only to BNB Chain, for a fixed 0.00051 BNB
+      // opBNB with Meson paused: no route anywhere, so its own bridge to BNB Chain
+      if (opts.opbnb === 'native') return json(route, { available: false, exit: false, reason: 'No bridge takes BNB out of opBNB; it can be swept to another address on opBNB' });
+      if (opts.opbnb) return json(route, to === 56 ? { available: true, bridge: 'meson', bridgeFeeWei: (510n * 10n ** 12n).toString() } : { available: false, exit: false, reason: 'Meson does not deliver to chain ' + to });
       // Telos: no gas bridge; its own bridge delivers TLOS as a token on Base
       if (opts.telos) return json(route, to === 8453 ? { available: false, exit: true, reason: 'No gas bridge takes TLOS out; its own bridge delivers TLOS as a token' } : { available: false, exit: false, reason: 'Gas.zip: Quote: Please Try Again' });
       // A bridge's passing hiccup: the first answers are "unknown"
@@ -377,6 +392,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       }
       return json(route, opts.onlyTo === undefined || opts.onlyTo === to ? { available: true } : { available: null, reason: 'Gas.zip: Quote: Please Try Again' });
     }
+    if (path === '/direct/prepare' && opts.opbnb) return json(route, opbnbEstimate());
     if (path === '/direct/prepare' && opts.monad) return json(route, monadPlan(directNonce, url.searchParams.get('recipient')!, !!opts.tamper));
     if (path === '/direct/exit' && opts.telos) return json(route, telosExitPlan(directNonce, url.searchParams.get('from')!, url.searchParams.get('recipient')!));
     if (path === '/direct/prepare' && opts.telos) return json(route, telosLeftoverPlan(directNonce));

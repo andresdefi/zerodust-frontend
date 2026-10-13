@@ -101,4 +101,6 @@ export const DIRECT_RPC_URLS: Record<number, string> = {
   // Blast and Boba (direct through ZeroDustGuard, added 2026-10-08; probe-rpcs.mjs passed)
   81457: 'https://rpc.blast.io',
   288: 'https://mainnet.boba.network',
+  // opBNB (direct through ZeroDustGuard, out through Meson; added 2026-10-13, probe-rpcs.mjs passed)
+  204: 'https://opbnb-rpc.publicnode.com',
 };

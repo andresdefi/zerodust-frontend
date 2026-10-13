@@ -4,14 +4,15 @@ import { ZERODUST_CONTRACT_ADDRESS, ZeroDust, ZeroDustAgent, closingDelegateFor,
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { inPool } from '../lib/pool';
 import { readState } from '../lib/rpc';
-import { deliveryStatus, directBalances, directChains, directRoute, tokenExitFor, BURN_ADDRESS, TOKEN_EXITS, ZERODUST_ADDRESS, type PlanMode } from '../direct/plan';
-import { broadcast, planChecked, settledBalance, signPlan } from '../direct/run';
+import { deliveryStatus, directBalances, directChains, directRoute, tokenExitFor, BURN_ADDRESS, TOKEN_EXITS, ZERODUST_ADDRESS, type DirectPlan, type PlanMode } from '../direct/plan';
+import { broadcast, GUARD_ATTEMPTS, planChecked, settledBalance, signPlan, waitForNonce } from '../direct/run';
+
 import { API_URL } from './constants';
 import { formatAmountUp } from '../lib/format';
 import { sendReport, type SweepReport } from './report';
 import { permissionQuote, sweepBatchWithPermissions, sweepStatus, type MetaMaskSession } from './metamask';
 import { durationText, expectedTime, fetchTimings, NO_TIMINGS, type BridgeTimings, type ExpectedTime } from './timing';
-import { addPendingClaim, nativeExitOf, waitText } from './native';
+import { addPendingClaim, nativeExitOf, parentOf, waitText } from './native';
 
 // Mirrors the local sweeper (local-sweeper/src/App.tsx), which is proven with
 // real funds: ZeroDust's sponsored (EIP-7702) chains through the SDK, and
@@ -32,7 +33,7 @@ const ROUTE_RETRY_MS = 3000;
  * with a swap route can also swap out; the few cents of gas reserve the swap
  * leaves are then donated or burned, so the wallet still ends at exactly 0.
  */
-/** 'native': the chain's own bridge to Ethereum, for a chain no other route takes out (sweep/native.ts) */
+/** 'native': the chain's own bridge to its parent (Ethereum; BNB Chain for opBNB), for a chain no other route takes out (sweep/native.ts) */
 export type Choice = 'exit-donate' | 'exit-burn' | 'donate' | 'burn' | 'elsewhere' | 'address' | 'native';
 export const isExit = (c?: Choice) => c === 'exit-donate' || c === 'exit-burn';
 /** The balance reaches the recipient (on the chosen chain, or on another one for 'elsewhere') */
@@ -93,10 +94,30 @@ export interface RowState {
    * token on the destination, not its gas
    */
   token?: { symbol: string; decimals: number };
+  /** A fixed fee the bridge keeps whatever the amount (Meson), in the chain's token; already out of receive */
+  bridgeFee?: bigint;
+}
+
+/** Guard chains: the wait before planning again after the guard refused a sweep */
+const GUARD_RETRY_WAIT_MS = 1500;
+
+/**
+ * A retry's plan: the API may read the balance from a node that has not seen the refused sweep
+ * yet, which the page's check refuses as a changed balance; that is asked again a few times.
+ */
+async function planGuardRetry(attempt: number, plan: () => Promise<DirectPlan>): Promise<DirectPlan> {
+  for (let tries = 1; ; tries++) {
+    try {
+      return await plan();
+    } catch (error) {
+      if (attempt === 1 || tries >= 4 || !/balance changed|nonce is stale/.test(String((error as Error).message))) throw error;
+      await new Promise((r) => setTimeout(r, GUARD_RETRY_WAIT_MS));
+    }
+  }
 }
 
 /** Display names of the bridges a direct plan can use (the API's own adapters name the sponsored ones) */
-const DIRECT_BRIDGE_NAMES: Record<string, string> = { gaszip: 'Gas.zip', relay: 'Relay', across: 'Across', lifi: 'LI.FI', oft: 'LayerZero' };
+const DIRECT_BRIDGE_NAMES: Record<string, string> = { gaszip: 'Gas.zip', relay: 'Relay', across: 'Across', lifi: 'LI.FI', oft: 'LayerZero', meson: 'Meson' };
 
 /** The bridge that carries a sponsored quote, as the API names it (none for a same-chain transfer) */
 /** The quote's bridge id (gaszip, relay, across, hyperlane, endurance), for reports */
@@ -502,7 +523,7 @@ export function useSweep(wallet: Wallet) {
     const exit = choices[row.chainId] === 'native' ? nativeExitOf(row.chainId) : undefined;
     return exit?.token ? { symbol: exit.token.symbol, decimals: exit.token.decimals } : rowToken(row.chainId, toChainId);
   };
-  /** Saves a withdrawal through a chain's own bridge, to be claimed on Ethereum later (this browser only) */
+  /** Saves a withdrawal through a chain's own bridge, to be claimed on its parent chain later (this browser only) */
   const notePending = (row: Row, txHash: string | undefined, amount: bigint | undefined) => {
     if (!txHash || amount === undefined) return;
     const exit = nativeExitOf(row.chainId);
@@ -515,8 +536,8 @@ export function useSweep(wallet: Wallet) {
   const nativeDoneText = (row: Row) => {
     const exit = nativeExitOf(row.chainId)!;
     return exit.relayed
-      ? `Balance reads 0 on-chain. Sent into ${row.name}'s own bridge: its relayer delivers it on Ethereum in ${waitText(exit)}`
-      : `Balance reads 0 on-chain. Withdrawn into ${row.name}'s own bridge: claim it on Ethereum in ${waitText(exit)} (see "Waiting to be claimed")`;
+      ? `Balance reads 0 on-chain. Sent into ${row.name}'s own bridge: its relayer delivers it on ${parentOf(exit).name} in ${waitText(exit)}`
+      : `Balance reads 0 on-chain. Withdrawn into ${row.name}'s own bridge: claim it on ${parentOf(exit).name} in ${waitText(exit)} (see "Waiting to be claimed")`;
   };
 
   /** Real quotes, checked and replayed (direct) or signed and verified by the SDK (sponsored); nothing sent */
@@ -532,7 +553,7 @@ export function useSweep(wallet: Wallet) {
           const plan = await planChecked(directTarget(row), mode, feePaid.current[row.chainId], bridgeFor(row));
           setBridge(row.chainId, plan.route === 'native' ? `${row.name}'s own bridge` : DIRECT_BRIDGE_NAMES[plan.route]);
           setState(row.chainId, {
-            phase: 'ready', choice, fee: BigInt(plan.fee),
+            phase: 'ready', choice, fee: BigInt(plan.fee), ...(plan.bridgeFee ? { bridgeFee: BigInt(plan.bridgeFee) } : {}),
             ...(mode === 'burn' || mode === 'donate' ? {} : { receive: BigInt(plan.receive), toChainId: targetFor(row).toChainId, token: tokenFor(row, targetFor(row).toChainId) }),
           });
         } catch (error) {
@@ -600,13 +621,22 @@ export function useSweep(wallet: Wallet) {
     };
     try {
       update({ phase: 'sweeping', detail: 'Checking' });
-      const plan = await planChecked(directTarget(row), mode, feePaid.current[row.chainId], bridgeFor(row));
+      let plan: DirectPlan;
+      let sent: Awaited<ReturnType<typeof broadcast>>;
+      // Guard chains: a sweep the guard refused because the L1 fee moved is planned and sent again
+      for (let attempt = 1; ; attempt++) {
+        plan = await planGuardRetry(attempt, () => planChecked(directTarget(row), mode, feePaid.current[row.chainId], bridgeFor(row)));
+        setBridge(row.chainId, DIRECT_BRIDGE_NAMES[plan.route]);
+        route = plan.route;
+        update({ phase: 'sweeping', detail: attempt === 1 ? 'Sending' : `The L1 fee moved before it landed; sending again (try ${attempt} of ${GUARD_ATTEMPTS})`, fee: BigInt(plan.fee) });
+        sent = await broadcast(plan, await signPlan(account!, plan), onSent);
+        if (sent.ok || !sent.guardRefused || attempt >= GUARD_ATTEMPTS) break;
+        // Plan again only once the chain's reads include the refused transaction
+        if (sent.hashes.length === 0) await new Promise((r) => setTimeout(r, GUARD_RETRY_WAIT_MS));
+        else if (!(await waitForNonce(row.chainId, address, plan.txs[0]!.nonce + 1))) break;
+      }
       const fee = BigInt(plan.fee);
       const receive = mode === 'burn' || mode === 'donate' ? undefined : BigInt(plan.receive);
-      setBridge(row.chainId, DIRECT_BRIDGE_NAMES[plan.route]);
-      route = plan.route;
-      update({ phase: 'sweeping', detail: 'Sending', fee });
-      const sent = await broadcast(plan, await signPlan(account!, plan), onSent);
       if (sent.feePaidTx) {
         feePaid.current[row.chainId] = sent.feePaidTx;
         sentAny = true;
@@ -639,7 +669,7 @@ export function useSweep(wallet: Wallet) {
       }
       delete feePaid.current[row.chainId];
       if (plan.route === 'native') {
-        // Nothing to follow: the withdrawal exists now and is claimed on Ethereum later
+        // Nothing to follow: the withdrawal exists now and is claimed on its parent chain later
         notePending(row, hash, receive);
         update({ phase: 'done', receive, fee, detail: nativeDoneText(row) });
         return;

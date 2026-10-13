@@ -39,6 +39,16 @@ export interface ChainRoutes {
   unknown?: boolean;
   /** Below every bridge's minimum: the least a bridge takes (stays in its gas group, not selected) */
   minimum?: bigint;
+  /** Its bridge keeps a fixed fee whatever the amount (Meson from opBNB), and the chain it reaches */
+  fixedFee?: FixedFee;
+}
+
+export interface FixedFee {
+  /** In the chain's own token */
+  amount: bigint;
+  /** The API's route name (meson) */
+  bridge: string;
+  toChainId: number;
 }
 
 /** A token the chain's only way out delivers instead of gas, on a fixed chain */
@@ -97,7 +107,7 @@ export function groupChains<T extends AddressChain>(chains: T[], routesOf: (chai
 }
 
 /** Copy for each group (provisional, rewritten with the rest of the site's copy) */
-export function groupText(key: GroupKey, destinationName: string | null, opts: { keyOnly?: number; relayed?: 'all' | 'some'; tokens?: Array<{ chain: string; symbol: string }> } = {}): { title: string; detail: string; tag?: string } {
+export function groupText(key: GroupKey, destinationName: string | null, opts: { keyOnly?: number; relayed?: 'all' | 'some'; tokens?: Array<{ chain: string; symbol: string }>; parents?: Array<{ chain: string; parent: string; symbol: string }> } = {}): { title: string; detail: string; tag?: string } {
   switch (key) {
     case 'gas':
       return {
@@ -117,11 +127,17 @@ export function groupText(key: GroupKey, destinationName: string | null, opts: {
       const t = opts.tokens ?? [];
       const tokens = t.length === 0 ? ''
         : ` ${t.map((x, i) => i === 0 ? `${x.chain} arrives as ${x.symbol}` : `${x.chain} as ${x.symbol}`).join(t.length > 2 ? ', ' : ' and ')}, ${t.length === 1 ? 'a token' : 'tokens'} on Ethereum, not ETH.`;
+      // Chains whose own bridge settles elsewhere than Ethereum (opBNB: BNB Chain), named in the sentence
+      const all = opts.parents ?? [];
+      const other = all.filter((x) => x.parent !== 'Ethereum');
+      const to = other.length === 0 ? 'Ethereum'
+        : other.length === all.length && new Set(other.map((x) => x.parent)).size === 1 ? other[0]!.parent
+          : `Ethereum (${other.map((x) => `${x.chain}'s to ${x.parent}`).join(', ')})`;
       const how = opts.relayed === 'all'
-        ? 'No other bridge takes these out, so each chain\'s own bridge sends it to Ethereum. It arrives by itself, about an hour later.'
+        ? `No other bridge takes these out, so each chain's own bridge sends it to ${to}. It arrives by itself, about an hour later.`
         : opts.relayed === 'some'
-          ? 'No other bridge takes these out, so each chain\'s own bridge sends it to Ethereum. Most need a claim there later, after a wait of days; the rows say which.'
-          : 'Needs a claim later. No other bridge takes these out, so each chain\'s own bridge sends it to Ethereum, where you claim it after a wait of days. Nothing arrives by itself.';
+          ? `No other bridge takes these out, so each chain's own bridge sends it to ${to}. Most need a claim there later, after a wait of days; the rows say which.`
+          : `Needs a claim later. No other bridge takes these out, so each chain's own bridge sends it to ${to}, where you claim it after a wait of days. Nothing arrives by itself.`;
       return { title: 'Native bridges only', detail: `${how}${tokens} Sweep with the key.` };
     }
   }

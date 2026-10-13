@@ -11,7 +11,7 @@ import { tokenRouteOf, type GroupKey } from './groups';
 import type { AddressRow } from './useAddress';
 import { OFFLINE } from '../lib/env';
 import { rpcCall } from '../lib/rpc';
-import { claimCostWei, nativeExitOf, nativeSteps, startByMs } from '../sweep/native';
+import { claimCostWei, nativeExitOf, nativeSteps, parentOf, startByMs } from '../sweep/native';
 import { track } from '../lib/events';
 
 // Sweeping one group from the address page (redesign phase 3): pick how to sign, then
@@ -250,7 +250,8 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // A chain's own bridge: the steps after the sweep must be read and accepted before it is signed
   const [understood, setUnderstood] = useState(false);
-  const [ethGasPrice, setEthGasPrice] = useState<bigint | null>(null);
+  // Gas prices on the parent chains the claims are sent on (Ethereum; BNB Chain for opBNB)
+  const [gasPrices, setGasPrices] = useState<Record<number, bigint>>({});
   // When the dialog opened, for "start by" dates (read once, not during render)
   const [openedAt, setOpenedAt] = useState(0);
   const ownBridge = plan.group === 'claim';
@@ -258,14 +259,19 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
     if (!open || !ownBridge) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setOpenedAt(Date.now());
-    void rpcCall<string>(1, 'eth_gasPrice', []).then((p) => setEthGasPrice(BigInt(p)), () => setEthGasPrice(null));
-  }, [open, ownBridge]);
+    const parents = [...new Set(plan.chains.flatMap((c) => { const e = nativeExitOf(c.chainId); return e ? [e.toChainId] : []; }))];
+    for (const id of parents) {
+      void rpcCall<string>(id, 'eth_gasPrice', []).then((p) => setGasPrices((g) => ({ ...g, [id]: BigInt(p) })), () => {});
+    }
+  }, [open, ownBridge, plan.chains]);
   // Closing the dialog fires its close event: after a confirm that is not a cancel (cancelling
   // there unmounted the running sweep and froze its rows)
   const confirmed = useRef(false);
   const ready = m.readyRows;
-  /** Some chain here needs the user's own claim on Ethereum (a relayed one does not) */
+  /** Some chain here needs the user's own claim on its parent chain (a relayed one does not) */
   const needClaim = ready.some((r) => !nativeExitOf(r.chainId)?.relayed);
+  /** Where the own bridges here settle: "Ethereum", "BNB Chain", or both */
+  const parentNames = [...new Set(ready.flatMap((r) => { const e = nativeExitOf(r.chainId); return e ? [parentOf(e).name] : []; }))].join(' or ') || 'Ethereum';
   const notReady = plan.chains.filter((c) => !ready.some((r) => r.chainId === c.chainId));
   const n = ready.length;
   const st = (r: Row) => m.states[r.chainId];
@@ -296,11 +302,12 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
     return inUsd && outUsd !== null ? 1 - outUsd / inUsd : 0;
   };
   const eaten = ready.filter((r) => takes(r) > BRIDGE_TAKES_FLAG);
+  const fixedFees = ready.filter((r) => st(r)?.bridgeFee !== undefined);
   const destName = m.destOf(plan.destination)?.name ?? 'the destination';
   const totals = m.readyTotals;
   const totalText = totals.map((t) => `${formatAmount(t.amount, t.decimals)} ${t.symbol}${t.dest.chainId !== plan.destination ? ` on ${t.dest.name}` : ''}`).join(' + ');
   const totalUsd = totals.reduce((s, t) => s + (usdValue(t.amount, t.decimals, m.prices[t.isToken ? t.symbol : t.dest.token]) ?? 0), 0);
-  const title = ownBridge ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} through ${n === 1 ? 'its' : 'their'} own bridge to Ethereum?`
+  const title = ownBridge ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} through ${n === 1 ? 'its' : 'their'} own bridge to ${parentNames}?`
     : plan.group === 'own-chain' ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} to an address on ${n === 1 ? 'its' : 'each'} chain?`
     : plan.group === 'token' ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} as tokens?`
     : `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} to ${plan.group === 'elsewhere' ? m.destOf(plan.elsewhereChain!)?.name ?? 'another chain' : destName}?`;
@@ -322,7 +329,7 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
                 <p key={r.chainId} className="zd-cl">
                   <ChainIcon chainId={r.chainId} name={r.name} size={22} />
                   <span className="zd-cl-name">{r.name}
-                    <small>{formatAmount(r.balance, r.decimals)} {r.token}{st(r)?.token ? ` · arrives as ${st(r)!.token!.symbol} on ${m.destOf(st(r)!.toChainId!)?.name ?? ''}` : ''}{m.choices[r.chainId] === 'address' ? ` · to ${shortAddress(m.addressOf[r.chainId]!)}` : ''}</small>
+                    <small>{formatAmount(r.balance, r.decimals)} {r.token}{st(r)?.bridgeFee !== undefined ? ` · ${route} keeps a fixed ${formatAmount(st(r)!.bridgeFee!, r.decimals)} ${r.token}` : ''}{st(r)?.token ? ` · arrives as ${st(r)!.token!.symbol} on ${m.destOf(st(r)!.toChainId!)?.name ?? ''}` : ''}{m.choices[r.chainId] === 'address' ? ` · to ${shortAddress(m.addressOf[r.chainId]!)}` : ''}</small>
                   </span>
                   <span>{amountOut(r)}</span>
                 </p>
@@ -350,18 +357,20 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
             const exit = nativeExitOf(r.chainId);
             if (!exit) return null;
             const row = plan.chains.find((c) => c.chainId === r.chainId);
-            const cost = ethGasPrice !== null ? claimCostWei(exit, ethGasPrice) : null;
-            const costUsd = cost !== null ? usdValue(cost, 18, m.prices.ETH) : null;
+            const p = parentOf(exit);
+            const price = gasPrices[p.chainId];
+            const cost = price !== undefined ? claimCostWei(exit, price) : null;
+            const costUsd = cost !== null ? usdValue(cost, 18, m.prices[p.symbol]) : null;
             const startBy = row?.closing ? startByMs(exit, Date.parse(row.closing.closesAt)) : null;
             return (
               <div key={r.chainId} className="zd-native-chain">
                 <p className="zd-native-name"><ChainIcon chainId={r.chainId} name={r.name} size={18} /> {r.name}</p>
                 <ol>{nativeSteps(exit, r.name, shortAddress(m.recipient)).map((t) => <li key={t}>{t}</li>)}</ol>
                 {exit.relayed ? (
-                  <p className="zd-native-cost">Nothing to pay on Ethereum: the relayer&apos;s fee comes out of the balance and is in the amount above.</p>
+                  <p className="zd-native-cost">Nothing to pay on {p.name}: the relayer&apos;s fee comes out of the balance and is in the amount above.</p>
                 ) : (
                 <p className="zd-native-cost">
-                  Your {exit.prove ? 'two transactions' : 'transaction'} on Ethereum: {cost !== null ? `about ${formatAmount(cost, 18)} ETH${costUsd !== null ? ` (${formatUsd(costUsd)})` : ''} at today's gas` : 'cost unknown right now'}.
+                  Your {exit.prove ? 'two transactions' : 'transaction'} on {p.name}: {cost !== null ? `about ${formatAmount(cost, 18)} ${p.symbol}${costUsd !== null ? ` (${formatUsd(costUsd)})` : ''} at today's gas` : 'cost unknown right now'}.
                   {costUsd !== null && row?.usd && costUsd > row.usd / 2 ? ' That is a large share of what you sweep.' : ''}
                 </p>
                 )}
@@ -376,17 +385,20 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
           <label className="zd-native-ok">
             <input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} />
             {needClaim
-              ? <>I understand: the funds arrive only after I {ready.some((r) => nativeExitOf(r.chainId)?.prove) ? 'prove and ' : ''}claim on Ethereum{ready.some((r) => nativeExitOf(r.chainId)?.relayed) ? ' (except where the relayer delivers)' : ''}, and ZeroDust does not do it for me.</>
-              : <>I understand: the funds go through the chain&apos;s own bridge and arrive on Ethereum, not on the chain I picked.</>}
+              ? <>I understand: the funds arrive only after I {ready.some((r) => nativeExitOf(r.chainId)?.prove) ? 'prove and ' : ''}claim on {parentNames}{ready.some((r) => nativeExitOf(r.chainId)?.relayed) ? ' (except where the relayer delivers)' : ''}, and ZeroDust does not do it for me.</>
+              : <>I understand: the funds go through the chain&apos;s own bridge and arrive on {parentNames}, not on the chain I picked.</>}
           </label>
         </div>
       )}
       <div className="zd-confirm-bottom">
+        {fixedFees.length > 0 && (
+          <p className="zd-note">{fixedFees.map((r) => `${routeOf(r)} keeps a fixed ${formatAmount(st(r)!.bridgeFee!, r.decimals)} ${r.token} of the transfer from ${r.name}`).join('; ')}, whatever the amount. The amounts shown are after it.</p>
+        )}
         {eaten.length > 0 && (
           <p className="zd-note">{eaten.length === 1 ? '1 chain loses' : `${eaten.length} chains lose`} most of its value to the bridge: {eaten.map((r) => `${r.name} (${Math.round(takes(r) * 100)}%)`).join(', ')}. Untick {eaten.length === 1 ? 'it' : 'them'} on the page to keep {eaten.length === 1 ? 'it' : 'them'}.</p>
         )}
         {n > 0 && totals.length > 0 && (
-          <p className="zd-total"><span>{ownBridge ? 'You can claim' : 'You receive at least'}, at {m.toSelf ? 'your wallet' : shortAddress(m.recipient)}{plan.group !== 'token' ? ` on ${ownBridge ? 'Ethereum' : plan.group === 'elsewhere' ? m.destOf(plan.elsewhereChain!)?.name : destName}` : ''}</span><b>{totalText}{totalUsd > 0 ? ` (${formatUsd(totalUsd)})` : ''}</b></p>
+          <p className="zd-total"><span>{ownBridge ? 'You can claim' : 'You receive at least'}, at {m.toSelf ? 'your wallet' : shortAddress(m.recipient)}{plan.group !== 'token' ? ` on ${ownBridge ? parentNames : plan.group === 'elsewhere' ? m.destOf(plan.elsewhereChain!)?.name : destName}` : ''}</span><b>{totalText}{totalUsd > 0 ? ` (${formatUsd(totalUsd)})` : ''}</b></p>
         )}
         <div className="btns">
           <button type="button" className="btn btn-ghost" onClick={onCancel}>{n === 0 ? 'Close' : 'Back'}</button>

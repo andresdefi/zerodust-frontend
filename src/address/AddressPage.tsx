@@ -5,11 +5,11 @@ import { deliversOnlyToSender } from '@zerodust/sdk';
 import { ChainIcon } from '../components/ChainIcon';
 import { DestinationPicker } from '../components/DestinationPicker';
 import { formatAmount, formatUsd, shortAddress } from '../lib/format';
-import { groupChains, groupOf, groupText, tokenRouteOf, type GroupKey } from './groups';
-import { nativeExitOf, waitText } from '../sweep/native';
+import { groupChains, groupOf, groupText, tokenRouteOf, type FixedFee, type GroupKey } from './groups';
+import { nativeExitOf, parentOf, waitText } from '../sweep/native';
 import { PendingClaims } from './PendingClaims';
 import { announcementHref, closesLong, closesShort, cutoffLong, stillSwept } from './closing';
-import { isListedScam, resolveName, useAddressData, useEstimates, useResolved, type AddressRow, type ChainOption, type Estimate } from './useAddress';
+import { directRouteName, isListedScam, resolveName, useAddressData, useEstimates, useResolved, type AddressRow, type ChainOption, type Estimate } from './useAddress';
 import { SweepSession, SweepWithDialog, type SweepPlan } from './SweepSession';
 import { FAILURE_LABEL, failureKind, minimumOf, tooSmallText, type RowState, type Wallet } from '../sweep/useSweep';
 import { reportText } from '../sweep/report';
@@ -218,7 +218,8 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
       {groups.map((g) => {
         const relayedN = g.key === 'claim' ? g.chains.filter((c) => nativeExitOf(c.chainId)?.relayed).length : 0;
         const text = groupText(g.key, destName, { keyOnly: g.chains.filter((c) => !OFFLINE && (!c.metamask || c.direct)).length, relayed: relayedN === 0 ? undefined : relayedN === g.chains.length ? 'all' : 'some',
-          tokens: g.key === 'claim' ? g.chains.flatMap((c) => { const t = nativeExitOf(c.chainId)?.token; return t ? [{ chain: c.name, symbol: t.symbol }] : []; }) : undefined });
+          tokens: g.key === 'claim' ? g.chains.flatMap((c) => { const t = nativeExitOf(c.chainId)?.token; return t ? [{ chain: c.name, symbol: t.symbol }] : []; }) : undefined,
+          parents: g.key === 'claim' ? g.chains.flatMap((c) => { const e = nativeExitOf(c.chainId); return e ? [{ chain: c.name, parent: parentOf(e).name, symbol: e.token?.symbol ?? parentOf(e).symbol }] : []; }) : undefined });
         const isActive = g.key === activeGroup;
         const chosen = isActive ? g.chains.filter((c) => selectedIds.has(c.chainId) && !finished.has(c.chainId)) : [];
         const subtotal = g.chains.reduce((s, c) => s + (c.usd ?? 0), 0);
@@ -261,6 +262,8 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
                   destPrice={destToken ? data.priceOf(destToken.token) : undefined}
                   unknownRoute={data.routesOf(c.chainId).unknown === true}
                   minimum={data.routesOf(c.chainId).minimum}
+                  fixedFee={data.routesOf(c.chainId).fixedFee}
+                  nameOf={(id) => optionOf(id)?.name ?? `chain ${id}`}
                   usual={estimates[c.chainId]?.route ? expectedTime(timings, estimates[c.chainId]!.route, c.chainId) : null}
                   senderOnly={senderOnly(c)}
                   state={progress.states[c.chainId]}
@@ -482,7 +485,7 @@ function OwnChainAddress({ value, onChange }: { value: Address | null; onChange:
 
 const SHOWN_PHASES = new Set(['sweeping', 'done', 'failed']);
 
-function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destination, destName, destToken, estimate, destPrice, unknownRoute, minimum, usual, senderOnly, state, bridge, arrivalExplorer, arrivalName, running }: {
+function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destination, destName, destToken, estimate, destPrice, unknownRoute, minimum, fixedFee, nameOf, usual, senderOnly, state, bridge, arrivalExplorer, arrivalName, running }: {
   row: AddressRow;
   group: GroupKey;
   selected: boolean;
@@ -498,6 +501,9 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
   unknownRoute: boolean;
   /** Below every bridge's minimum (direct chains: known before any quote) */
   minimum: bigint | undefined;
+  /** Its bridge keeps a fixed fee whatever the amount (Meson), and the chain it reaches */
+  fixedFee: FixedFee | undefined;
+  nameOf: (chainId: number) => string;
   /** How long its bridge usually takes from this chain, when measured */
   usual: ExpectedTime | null;
   /** Its bridge pays only the sending wallet, and the gas is set to go elsewhere */
@@ -527,7 +533,11 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
       // Flag a bridge that keeps most of the value (owner, 2026-10-08)
       const arrivesUsd = estimate.receive !== undefined && destToken && destPrice ? (Number(estimate.receive) / 10 ** destToken.decimals) * destPrice : null;
       const takes = arrivesUsd !== null && row.usd ? 1 - arrivesUsd / row.usd : 0;
-      route = takes > BRIDGE_TAKES_FLAG ? { text: `Bridge takes ${Math.round(takes * 100)}%`, tone: 'warn' }
+      // A fixed fee whatever the amount (Meson): said on the row, not only in the total (owner, 2026-10-13)
+      const fixed = estimate.bridgeFee !== undefined ? `${formatAmount(estimate.bridgeFee, row.decimals)} ${row.token}` : null;
+      const fixedTitle = fixed ? `${estimate.route} keeps a fixed ${fixed} of every transfer from ${row.name}, whatever the amount. What you receive is after it.` : undefined;
+      route = takes > BRIDGE_TAKES_FLAG ? { text: `Bridge takes ${Math.round(takes * 100)}%`, tone: 'warn', title: fixedTitle }
+        : fixed ? { text: `${estimate.route} · fixed fee ${fixed}`, tone: 'acc', title: fixedTitle }
         : usual?.slowLately ? { text: `${estimate.route} · slower lately`, tone: 'warn', title: `Usually ${durationText(usual.seconds)}, but slower than usual lately` }
         : usual ? { text: `${estimate.route} · usually ${durationText(usual.seconds)}`, tone: 'ok' }
         : { text: estimate.route, tone: 'ok' };
@@ -542,12 +552,18 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
   } else if (group === 'elsewhere') {
     route = { text: `Not to ${destName}`, tone: 'warn' };
     receive = 'Pick another chain';
+    // Its only bridge keeps a fixed fee (Meson from opBNB): said before the chain is picked
+    if (fixedFee) {
+      const fee = `${formatAmount(fixedFee.amount, row.decimals)} ${row.token}`;
+      route = { text: `Only to ${nameOf(fixedFee.toChainId)}`, tone: 'warn', title: `${directRouteName(fixedFee.bridge)} keeps a fixed ${fee} of every transfer from ${row.name}, whatever the amount` };
+      receive = `${directRouteName(fixedFee.bridge)} keeps ${fee}`;
+    }
   } else if (group === 'claim' && nativeExitOf(row.chainId)) {
     const exit = nativeExitOf(row.chainId)!;
     route = exit.relayed
-      ? { text: `Native bridge · arrives in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to Ethereum: its relayer delivers it, nothing to claim` }
-      : { text: `Native bridge · claim in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to Ethereum: you claim it there on ${exit.bridgeName}` };
-    receive = exit.token ? `as ${exit.token.symbol} on Ethereum` : exit.relayed ? 'on Ethereum, by itself' : 'on Ethereum, once claimed';
+      ? { text: `Native bridge · arrives in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to ${parentOf(exit).name}: its relayer delivers it, nothing to claim` }
+      : { text: `Native bridge · claim in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to ${parentOf(exit).name}: you claim it there on ${exit.bridgeName}` };
+    receive = exit.token ? `as ${exit.token.symbol} on ${parentOf(exit).name}` : exit.relayed ? `on ${parentOf(exit).name}, by itself` : `on ${parentOf(exit).name}, once claimed`;
   } else {
     route = { text: 'Same chain only', tone: 'plain' };
     receive = `to an address on ${row.name}`;
