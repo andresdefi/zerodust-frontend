@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FAILURE_LABEL, failureKind, minimumOf, plainReason, tooSmallText } from '../src/sweep/useSweep';
+import { FAILURE_LABEL, failureKind, minimumOf, plainReason, tooSmallText } from '../src/sweep/outcome';
 import { formatAmountUp } from '../src/lib/format';
 import { SITE_VERSION, reportBody, reportText } from '../src/sweep/report';
 

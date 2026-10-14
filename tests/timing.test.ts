@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bridgingText } from '../src/sweep/useSweep';
+import { bridgingText } from '../src/sweep/outcome';
 import { durationText, expectedTime, parseTimings } from '../src/sweep/timing';
 
 const timings = parseTimings({

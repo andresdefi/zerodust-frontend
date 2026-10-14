@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getAddress, isAddress, parseUnits, type Address, type LocalAccount } from 'viem';
-import { ZERODUST_CONTRACT_ADDRESS, ZeroDust, ZeroDustAgent, closingDelegateFor, deliveredToken, deliversOnlyToSender, type Destination } from '@zerodust/sdk';
+import { getAddress, isAddress, type Address } from 'viem';
+import { ZeroDust, ZeroDustAgent, closingDelegateFor, deliversOnlyToSender, type Destination } from '@zerodust/sdk';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { inPool } from '../lib/pool';
 import { readState } from '../lib/rpc';
@@ -8,11 +8,12 @@ import { deliveryStatus, directBalances, directChains, directRoute, relayBusy, t
 import { broadcast, GUARD_ATTEMPTS, planChecked, settledBalance, signPlan, waitForNonce } from '../direct/run';
 
 import { API_URL } from './constants';
-import { formatAmountUp } from '../lib/format';
 import { sendReport, type SweepReport } from './report';
-import { permissionQuote, sweepBatchWithPermissions, sweepStatus, type MetaMaskSession } from './metamask';
-import { durationText, expectedTime, fetchTimings, NO_TIMINGS, type BridgeTimings, type ExpectedTime } from './timing';
+import { permissionQuote, sweepBatchWithPermissions, sweepStatus } from './metamask';
+import { expectedTime, fetchTimings, NO_TIMINGS, type BridgeTimings } from './timing';
 import { addPendingClaim, nativeExitOf, parentOf, waitText } from './native';
+import { type Choice, type DestOption, NEEDS_KEY, type Row, type RowState, type Stage, type Wallet, isExit, isRouted, rowToken } from './sweep-types';
+import { bridgingText, endedWhereSigned, failureKind, isNoRoute, onlySelfSweep, tooSmallText, totalsByDest } from './outcome';
 
 // Mirrors the local sweeper (local-sweeper/src/App.tsx), which is proven with
 // real funds: ZeroDust's sponsored (EIP-7702) chains through the SDK, and
@@ -28,75 +29,12 @@ const PARALLEL_CHAINS = 3;
 const ROUTE_RETRIES = 2;
 const ROUTE_RETRY_MS = 3000;
 
-/**
- * What to do with a chain no route takes to the destination. Direct chains
- * with a swap route can also swap out; the few cents of gas reserve the swap
- * leaves are then donated or burned, so the wallet still ends at exactly 0.
- */
-/** 'native': the chain's own bridge to its parent (Ethereum; BNB Chain for opBNB), for a chain no other route takes out (sweep/native.ts) */
-export type Choice = 'exit-donate' | 'exit-burn' | 'donate' | 'burn' | 'elsewhere' | 'address' | 'native';
-export const isExit = (c?: Choice) => c === 'exit-donate' || c === 'exit-burn';
-/** The balance reaches the recipient (on the chosen chain, or on another one for 'elsewhere') */
-export const isRouted = (c?: Choice) => !c || isExit(c) || c === 'elsewhere' || c === 'address' || c === 'native';
 
 /**
  * Chains offered instead when a source cannot reach the chosen destination
  * ('elsewhere'): the balance goes to the same address on one of these.
  */
 const ALT_CANDIDATES = [8453, 10, 42161, 1, 56, 137];
-
-export interface Row {
-  chainId: number;
-  name: string;
-  token: string;
-  decimals: number;
-  balance: bigint;
-  canSweep: boolean;
-  explorerUrl: string;
-  /** No 7702 in ZeroDust: the wallet sweeps itself with exact legacy transactions */
-  direct?: boolean;
-  /** Why this wallet cannot sweep the chain at all (MetaMask: no permission there); shown instead of "too small" */
-  unavailable?: string;
-}
-
-/** A chain the funds can go to, and from how many of the loaded sources */
-export interface DestOption {
-  chainId: number;
-  name: string;
-  token: string;
-  decimals: number;
-  reachableFrom: number;
-}
-
-export type Phase = 'idle' | 'quoting' | 'ready' | 'no-route' | 'sweeping' | 'done' | 'failed';
-
-export interface RowState {
-  phase: Phase;
-  /** Estimated amount arriving, in the destination's token */
-  receive?: bigint;
-  detail?: string;
-  txHash?: string;
-  /** Cross-chain: the transaction that delivered on the destination, once the bridge reports it */
-  arrivalTx?: string;
-  /** A transaction left this wallet (or the relayer took the sweep): a failure then needs checking */
-  sent?: boolean;
-  /** What was reported to the API (POST /reports), for "Copy details" */
-  report?: SweepReport;
-  /** The API's reference for that report (ZD-1A2B3C4D); absent if it could not be recorded */
-  reference?: string;
-  choice?: Choice;
-  /** Direct chains: ZeroDust's fee in the chain's token, paid as its own transfer */
-  fee?: bigint;
-  /** Where `receive` arrives: the destination, or another chain for 'elsewhere' */
-  toChainId?: number;
-  /**
-   * Token delivery (a Hyperlane warp route, e.g. Mitosis): `receive` is this
-   * token on the destination, not its gas
-   */
-  token?: { symbol: string; decimals: number };
-  /** A fixed fee the bridge keeps whatever the amount (Meson), in the chain's token; already out of receive */
-  bridgeFee?: bigint;
-}
 
 /** Guard chains: the wait before planning again after the guard refused a sweep */
 const GUARD_RETRY_WAIT_MS = 1500;
@@ -119,33 +57,15 @@ async function planGuardRetry(attempt: number, plan: () => Promise<DirectPlan>):
 /** Display names of the bridges a direct plan can use (the API's own adapters name the sponsored ones) */
 const DIRECT_BRIDGE_NAMES: Record<string, string> = { gaszip: 'Gas.zip', relay: 'Relay', across: 'Across', lifi: 'LI.FI', oft: 'LayerZero', meson: 'Meson' };
 
-/** The bridge that carries a sponsored quote, as the API names it (none for a same-chain transfer) */
 /** The quote's bridge id (gaszip, relay, across, hyperlane, endurance), for reports */
 function bridgeName(quote: unknown): string | undefined {
   return (quote as { bridge?: { name?: string } } | undefined)?.bridge?.name;
 }
 
+/** The bridge that carries a sponsored quote, as the API names it (none for a same-chain transfer) */
 function quoteBridge(quote: unknown): string | undefined {
   return (quote as { bridge?: { displayName?: string } } | undefined)?.bridge?.displayName;
 }
-
-/** The token a row delivers instead of gas on `toChainId`, if any (owner decision 2026-10-03) */
-export function rowToken(sourceChainId: number, toChainId: number): RowState['token'] {
-  const t = deliveredToken(sourceChainId, toChainId) ?? tokenExitFor(sourceChainId, toChainId)?.token;
-  return t ? { symbol: t.symbol, decimals: t.decimals } : undefined;
-}
-
-/** What arrives on one chain, in one asset (its gas, or a delivered token) */
-export interface DestTotal {
-  dest: DestOption;
-  amount: bigint;
-  symbol: string;
-  decimals: number;
-  /** A token, not the chain's gas */
-  isToken: boolean;
-}
-
-export type Stage = 'loading' | 'error' | 'empty' | 'select' | 'checked' | 'sweeping' | 'done';
 
 interface ChainInfo {
   name: string;
@@ -157,14 +77,6 @@ interface ChainInfo {
 
 const client = new ZeroDust({ environment: 'mainnet', baseUrl: API_URL });
 
-/**
- * The wallet being swept: a key held in this tab (the SDK signs everything), or a MetaMask
- * account that grants a permission per chain (metamask.ts; the key stays in MetaMask)
- */
-export type Wallet = { kind: 'key'; account: LocalAccount } | { kind: 'metamask'; session: MetaMaskSession };
-
-/** Shown on a chain MetaMask cannot sweep: the plain way out is the key */
-export const NEEDS_KEY = 'MetaMask cannot sweep this chain yet. Load the wallet with its key instead.';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -912,127 +824,3 @@ export function useSweep(wallet: Wallet) {
 }
 
 export type SweepModel = ReturnType<typeof useSweep>;
-
-/**
- * What a row says while a bridge delivers: the wallet already reads 0, who is delivering, and for
- * how long (a Gas.zip delivery once took 4 minutes and 8 retries on its side, 2026-10-06)
- */
-export function bridgingText(bridge: string, to: string, seconds: number, expected?: ExpectedTime | null): string {
-  const waited = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-  const usual = expected
-    ? `usually ${durationText(expected.seconds)}${expected.slowLately ? ', slower than usual lately' : ''}`
-    : 'usually under a minute, sometimes a few';
-  return `Wallet reads 0. ${bridge} is delivering to ${to} (${waited}; ${usual})`;
-}
-
-/**
- * True when every selected chain that could be swept is the destination chain and the funds would
- * go to the same wallet: a same-chain sweep to yourself moves nothing, so the page must ask for
- * another address instead of offering a sweep (owner, 2026-10-06).
- */
-export function onlySelfSweep(
-  rows: Array<Pick<Row, 'chainId' | 'canSweep'>>,
-  selected: Set<number>,
-  destination: number | null,
-  toSelf: boolean
-): boolean {
-  if (destination === null || !toSelf) return false;
-  const chosen = rows.filter((r) => r.canSweep && selected.has(r.chainId));
-  return chosen.length > 0 && chosen.every((r) => r.chainId === destination);
-}
-
-/**
- * What arrives, per chain and asset: the chosen destination's gas first, then
- * the rest ('elsewhere', delivered tokens). A token never adds into gas.
- */
-export function totalsByDest(states: RowState[], destination: number | null, destOf: (chainId: number) => DestOption | null): DestTotal[] {
-  const sums = new Map<string, DestTotal>();
-  for (const s of states) {
-    if (s.receive === undefined || s.toChainId === undefined) continue;
-    const dest = destOf(s.toChainId);
-    if (!dest) continue;
-    const symbol = s.token?.symbol ?? dest.token;
-    const key = `${dest.chainId}:${symbol}`;
-    const prev = sums.get(key);
-    sums.set(key, prev
-      ? { ...prev, amount: prev.amount + s.receive }
-      : { dest, amount: s.receive, symbol, decimals: s.token?.decimals ?? dest.decimals, isToken: !!s.token });
-  }
-  const rank = (t: DestTotal) => (t.dest.chainId === destination ? 0 : 2) + (t.isToken ? 1 : 0);
-  return [...sums.values()].sort((a, b) => rank(a) - rank(b));
-}
-
-/** Errors that mean no bridge can take this chain to the destination (not transient ones) */
-/**
- * What a chain row says when it cannot be swept: the same plain words on every
- * chain, whatever the method behind it (the raw reason stays in a tooltip)
- */
-/**
- * The minimum the API names when a balance is too small to bridge
- * (AMOUNT_TOO_LOW: "... it needs at least 17.94 MITO. ..."), or null
- */
-export function minimumOf(detail: string | undefined, decimals: number): bigint | null {
-  const found = detail?.match(/needs at least (\d+(?:\.\d+)?) /);
-  if (!found) return null;
-  try {
-    return parseUnits(found[1]!, decimals);
-  } catch {
-    return null;
-  }
-}
-
-/** "Too small to bridge: needs at least 17.94 MITO, add 17.89 more" */
-export function tooSmallText(minimum: bigint, row: { balance: bigint; decimals: number; token: string }): string {
-  const more = minimum - row.balance;
-  return `Too small to bridge: needs at least ${formatAmountUp(minimum, row.decimals)} ${row.token}${more > 0n ? `, add ${formatAmountUp(more, row.decimals)} more` : ''}`;
-}
-
-/**
- * What a failed row asks of the owner. Only a failure after something was sent
- * needs checking; before that nothing moved, and the reason says what to do.
- */
-export type FailureKind = 'too-small' | 'no-route' | 'stopped' | 'try-again' | 'check';
-
-export function failureKind(st: { detail?: string; sent?: boolean; txHash?: string }, decimals: number): FailureKind {
-  if (st.sent || st.txHash) return 'check';
-  const detail = st.detail ?? '';
-  if (minimumOf(detail, decimals) !== null) return 'too-small';
-  if (isNoRoute(detail)) return 'no-route';
-  if (/refus|unsafe|safety/i.test(detail)) return 'stopped';
-  return 'try-again';
-}
-
-export const FAILURE_LABEL: Record<FailureKind, string> = {
-  'too-small': 'Too small',
-  'no-route': 'No route',
-  stopped: 'Stopped',
-  'try-again': 'Try again',
-  check: 'Check needed',
-};
-
-export function plainReason(detail: string, token: string, chain: string, row?: { balance: bigint; decimals: number }): string {
-  const minimum = row ? minimumOf(detail, row.decimals) : null;
-  if (minimum !== null && row) return tooSmallText(minimum, { ...row, token });
-  if (isNoRoute(detail)) return `No bridge takes ${token} out of ${chain} right now`;
-  if (/does not cover|INSUFFICIENT|too small/i.test(detail)) return 'Too small to cover its own transfer';
-  if (/refus|unsafe|safety/i.test(detail)) return 'Stopped before signing: the plan failed a safety check';
-  // The API's own plain words for what a MetaMask permission cannot do on this chain yet
-  if (/MetaMask permission/i.test(detail)) return detail;
-  return 'Could not check this chain right now. Try again in a moment.';
-}
-
-export function isNoRoute(message: string): boolean {
-  return /Chain Disabled|Limit Exceeded|not supported|no routes|does not deliver|router call|Insuf+icient Liquidity|No bridge|NO_ROUTE/i.test(message);
-}
-
-/**
- * Whether a sweep left the wallet where its closing authorization puts it: no code, or the
- * smart-account delegate it had before (`closing`). Unknown (`null`): ZeroDust's delegation is
- * gone, whatever is there instead.
- */
-export function endedWhereSigned(code: string, closing: string | null): boolean {
-  const lower = code.toLowerCase();
-  if (closing === null) return lower === '0x' || (lower.startsWith('0xef0100') && lower.slice(8) !== ZERODUST_CONTRACT_ADDRESS.slice(2).toLowerCase());
-  if (BigInt(closing) === 0n) return lower === '0x';
-  return lower === `0xef0100${closing.slice(2).toLowerCase()}`;
-}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bridgingText, onlySelfSweep, plainReason } from '../src/sweep/useSweep';
+import { bridgingText, onlySelfSweep, plainReason } from '../src/sweep/outcome';
 
 // A same-chain sweep to the same wallet moves nothing: the page asks for another address
 // instead of offering it (owner, 2026-10-06, found sweeping Base to Base from MetaMask)
