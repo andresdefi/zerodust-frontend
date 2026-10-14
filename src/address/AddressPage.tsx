@@ -101,7 +101,7 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
   // A chain swept to 0 is not offered again until the balances are read again
   const finished = useMemo(() => new Set(Object.entries(progress.states).filter(([, st]) => st.phase === 'done').map(([id]) => Number(id))), [progress.states]);
   // A token route whose bridge pays only the sending wallet (Endurance) cannot reach another recipient
-  const senderOnly = (c: AddressRow) => { const t = tokenRouteOf(c.chainId); return !toSelf && t !== null && deliversOnlyToSender(c.chainId, t.toChainId); };
+  const senderOnly = (c: AddressRow) => { const t = tokenRouteOf(c.chainId, destination); return !toSelf && t !== null && deliversOnlyToSender(c.chainId, t.toChainId); };
   const sweepable = (c: AddressRow) => { const r = data.routesOf(c.chainId); return !r.unknown && r.minimum === undefined && !senderOnly(c) && !estimates[c.chainId]?.error && !finished.has(c.chainId); };
   const selectedIds = selection?.ids ?? new Set(active?.chains.filter(sweepable).map((c) => c.chainId) ?? []);
 
@@ -521,7 +521,7 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
 }) {
   const shown = state && (SHOWN_PHASES.has(state.phase) || (running && state.phase === 'quoting'));
   if (shown) return <ProgressRow row={row} state={state!} bridge={bridge} arrivalExplorer={arrivalExplorer} arrivalName={arrivalName} />;
-  const token = tokenRouteOf(row.chainId);
+  const token = tokenRouteOf(row.chainId, destination);
   let route: { text: string; tone: 'ok' | 'warn' | 'acc' | 'plain'; title?: string };
   let receive: string = '';
   if (group === 'gas') {
@@ -552,7 +552,7 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
   } else if (group === 'token' && token) {
     route = senderOnly
       ? { text: 'Your wallet only', tone: 'warn', title: `${row.name} can only be swept to your own wallet: its bridge pays only the wallet that sends` }
-      : { text: `${token.symbol} on ${token.toChainName}`, tone: 'acc' };
+      : { text: `${token.symbol} on ${token.toChainName}`, tone: 'acc', ...(token.alsoTo ? { title: `${row.name} can also go to ${token.alsoTo.join(' or ')} as ${token.symbol}: choose it as the destination` } : {}) };
     receive = `as ${token.symbol}`;
   } else if (group === 'elsewhere') {
     route = { text: `Not to ${destName}`, tone: 'warn' };
