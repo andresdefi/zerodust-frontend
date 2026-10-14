@@ -56,18 +56,29 @@ export interface TokenRoute {
   symbol: string;
   toChainId: number;
   toChainName: string;
+  /** Other chains the token can go to instead (0G: Ethereum), named for the row's tip */
+  alsoTo?: string[];
 }
 
 /** The chains token routes deliver to (named here: the page's chain list may not include them) */
-const TOKEN_ROUTE_CHAINS: Readonly<Record<number, string>> = { 56: 'BNB Chain', 8453: 'Base' };
+const TOKEN_ROUTE_CHAINS: Readonly<Record<number, string>> = { 1: 'Ethereum', 56: 'BNB Chain', 8453: 'Base' };
 const named = (symbol: string, toChainId: number): TokenRoute => ({ symbol, toChainId, toChainName: TOKEN_ROUTE_CHAINS[toChainId] ?? `chain ${toChainId}` });
 
-export function tokenRouteOf(chainId: number): TokenRoute | null {
+/**
+ * Where a token chain's sweep goes: its only destination, or for a token with several (0G: BNB
+ * Chain or Ethereum, owner 2026-10-14) the chosen destination when it is one of them, else the
+ * first (the cheapest)
+ */
+export function tokenRouteOf(chainId: number, destination: number | null = null): TokenRoute | null {
   const hyperlane = HYPERLANE_ROUTES[chainId];
   if (hyperlane) return named(hyperlane.token.symbol, hyperlane.toChainId);
   if (chainId === ENDURANCE_ROUTE.chainId) return named(ENDURANCE_ROUTE.token.symbol, ENDURANCE_ROUTE.toChainId);
   const oft = OFT_ROUTES[chainId];
-  if (oft) return named(oft.token.symbol, oft.toChainId);
+  if (oft) {
+    const route = oft.routes.find((r) => r.toChainId === destination) ?? oft.routes[0]!;
+    const others = oft.routes.filter((r) => r !== route).map((r) => TOKEN_ROUTE_CHAINS[r.toChainId] ?? `chain ${r.toChainId}`);
+    return { ...named(route.token.symbol, route.toChainId), ...(others.length > 0 ? { alsoTo: others } : {}) };
+  }
   const exit = TOKEN_EXITS[chainId];
   if (exit) return named(exit.token.symbol, exit.toChainId);
   return null;

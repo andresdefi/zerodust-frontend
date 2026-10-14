@@ -55,7 +55,7 @@ Some chains are the exception, because no bridge carries their gas token as gas:
 | Endurance (648), ACE | ACE, an ERC-20 token on BNB Chain | Endurance's bridge | The sweeping wallet only (`OWN_WALLET_ONLY` otherwise) |
 | Intuition (1155), TRUST | TRUST, an ERC-20 token on Base | Metalayer (Caldera's Hyperlane deployment) | Any address |
 | Telos (40), TLOS (direct chain) | TLOS, a token on Base | Telos's own OFT bridge | Any address |
-| 0G (16661), 0G | 0G, an ERC-20 token on BNB Chain | LayerZero (0G's official OFT bridge) | Any address |
+| 0G (16661), 0G | 0G, an ERC-20 token on BNB Chain or Ethereum (the destination you choose if it is one of them, else BNB Chain, the cheaper) | LayerZero (0G's official OFT bridge) | Any address |
 
 A quote for these routes carries `receiveToken` (symbol, address, decimals), and `estimatedReceive` is in that token. The site says plainly that a token arrives, before you confirm.
 
