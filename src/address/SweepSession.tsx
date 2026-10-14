@@ -188,7 +188,7 @@ export function SweepSession({ wallet, plan, onProgress, onEnd }: {
     for (const c of plan.chains) {
       if (plan.group === 'token') {
         if (c.direct && TOKEN_EXITS[c.chainId]) model.setChoice(c.chainId, 'exit-donate');
-        else model.setChoice(c.chainId, 'elsewhere', tokenRouteOf(c.chainId)?.toChainId);
+        else model.setChoice(c.chainId, 'elsewhere', tokenRouteOf(c.chainId, plan.destination)?.toChainId);
       } else if (plan.group === 'elsewhere' && plan.elsewhereChain !== undefined) {
         model.setChoice(c.chainId, 'elsewhere', plan.elsewhereChain);
       } else if (plan.group === 'own-chain' && plan.ownChainAddress) {

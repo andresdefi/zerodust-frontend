@@ -25,6 +25,11 @@ describe('groupOf: one group per way of sweeping and what arrives', () => {
     expect(tokenRouteOf(124816)).toEqual({ symbol: 'MITO', toChainId: 56, toChainName: 'BNB Chain' });
     expect(tokenRouteOf(648)).toEqual({ symbol: 'ACE', toChainId: 56, toChainName: 'BNB Chain' });
     expect(tokenRouteOf(40)).toEqual({ symbol: 'TLOS', toChainId: 8453, toChainName: 'Base' });
+    // 0G: BNB Chain or Ethereum (owner, 2026-10-14): the chosen one when it is one of them, else BNB Chain
+    expect(tokenRouteOf(16661)).toEqual({ symbol: '0G', toChainId: 56, toChainName: 'BNB Chain', alsoTo: ['Ethereum'] });
+    expect(tokenRouteOf(16661, 8453)).toEqual({ symbol: '0G', toChainId: 56, toChainName: 'BNB Chain', alsoTo: ['Ethereum'] });
+    expect(tokenRouteOf(16661, 1)).toEqual({ symbol: '0G', toChainId: 1, toChainName: 'Ethereum', alsoTo: ['BNB Chain'] });
+    expect(tokenRouteOf(124816, 1)).toEqual({ symbol: 'MITO', toChainId: 56, toChainName: 'BNB Chain' });
   });
 
   it('below every bridge minimum: stays in its gas group (the row says how much is needed), not "stays on its own chain"', () => {
