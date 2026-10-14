@@ -238,3 +238,24 @@ describe('planChecked: Arbitrum-stack own-bridge plans (no fork can run ArbSys)'
     await expect(run.planChecked(target, 'route')).rejects.toThrow(/did not choose/);
   });
 });
+
+describe('Reya, HPP, RISE (2026-10-14): own bridges, a bridge site only where one claims ETH', () => {
+  it('pins each to Ethereum with its stack', () => {
+    expect(NATIVE_EXITS[1729]).toMatchObject({ chainName: 'Reya', stack: 'arb', toChainId: 1, prove: false });
+    expect(NATIVE_EXITS[190415]).toMatchObject({ chainName: 'HPP', stack: 'arb', toChainId: 1, prove: false, bridge: { url: 'https://bridge.arbitrum.io', name: 'Arbitrum Bridge' } });
+    expect(NATIVE_EXITS[4153]).toMatchObject({ chainName: 'RISE', stack: 'op', toChainId: 1, prove: true });
+    expect(NATIVE_EXITS[1729]!.bridge).toBeUndefined();
+    expect(NATIVE_EXITS[4153]!.bridge).toBeUndefined();
+  });
+
+  it('sends the claim to this page alone when no bridge site claims it, and names the site when one does', () => {
+    const reya = nativeSteps(NATIVE_EXITS[1729]!, 'Reya', TO).join(' ');
+    expect(reya).toContain('Claim on this page (under "Waiting to be claimed"):');
+    expect(reya).not.toMatch(/undefined|https:/);
+    const hpp = nativeSteps(NATIVE_EXITS[190415]!, 'HPP', TO).join(' ');
+    expect(hpp).toContain('or on Arbitrum Bridge (https://bridge.arbitrum.io)');
+    const rise = nativeSteps(NATIVE_EXITS[4153]!, 'RISE', TO).join(' ');
+    expect(rise).toContain('Prove and claim on this page (under "Waiting to be claimed"):');
+    expect(rise).not.toMatch(/undefined/);
+  });
+});

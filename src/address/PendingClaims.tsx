@@ -83,7 +83,7 @@ export function PendingClaims({ address, version }: { address: Address; version:
               <span className="ap-prog-detail">{detailText(c, l)} To {shortAddress(c.recipient)} on {parentOf(exit).name}{exit.token ? `, as ${exit.token.symbol}` : ''}.</span>
               <span className="ap-links-tx">
                 {c.explorerUrl && <a href={`${c.explorerUrl.replace(/\/$/, '')}/tx/${c.txHash}`} target="_blank" rel="noreferrer">Withdrawal ↗</a>}
-                {s?.stage !== 'claimed' && <a href={exit.bridgeUrl} target="_blank" rel="noreferrer">{exit.bridgeName} ↗</a>}
+                {s?.stage !== 'claimed' && exit.bridge && <a href={exit.bridge.url} target="_blank" rel="noreferrer">{exit.bridge.name} ↗</a>}
                 {s?.stage === 'claimed'
                   ? <button type="button" className="linkbtn" onClick={() => { removePendingClaim(c.txHash); setList(pendingClaimsOf(address)); }}>Remove</button>
                   : l?.withdrawal === null && <button type="button" className="linkbtn" onClick={() => { removePendingClaim(c.txHash); setList(pendingClaimsOf(address)); }}>Remove</button>}
@@ -173,7 +173,7 @@ function detailText(c: PendingClaim, l: Live | undefined): string {
     if (l?.state?.stage === 'claimed') return `Delivered on ${parentOf(exit).name} by ${c.chainName}'s relayer.`;
     return l?.state?.stage === 'waiting' && l.state.until
       ? `${c.chainName}'s relayer delivers it; nothing to claim.`
-      : `${c.chainName}'s relayer has not delivered it yet. If it does not within a few hours, claim it on ${exit.bridgeName} with the recipient's wallet.`;
+      : `${c.chainName}'s relayer has not delivered it yet. If it does not within a few hours, claim it on ${exit.bridge?.name ?? `${c.chainName}'s bridge`} with the recipient's wallet.`;
   }
   switch (l?.state?.stage) {
     case 'prove': return `${c.chainName}'s state covering it is on ${parentOf(exit).name}: prove it now to start the wait.`;

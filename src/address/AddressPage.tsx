@@ -567,7 +567,7 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
     const exit = nativeExitOf(row.chainId)!;
     route = exit.relayed
       ? { text: `Native bridge · arrives in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to ${parentOf(exit).name}: its relayer delivers it, nothing to claim` }
-      : { text: `Native bridge · claim in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to ${parentOf(exit).name}: you claim it there on ${exit.bridgeName}` };
+      : { text: `Native bridge · claim in ${waitText(exit)}`, tone: 'acc', title: `${row.name}'s own bridge to ${parentOf(exit).name}: you claim it there, on this page${exit.bridge ? ` or on ${exit.bridge.name}` : ''}` };
     receive = exit.token ? `as ${exit.token.symbol} on ${parentOf(exit).name}` : exit.relayed ? `on ${parentOf(exit).name}, by itself` : `on ${parentOf(exit).name}, once claimed`;
   } else {
     route = { text: 'Same chain only', tone: 'plain' };

@@ -61,6 +61,10 @@ export const RPC_URLS: Record<number, string> = {
   1155: 'https://rpc.intuition.systems',
   124816: 'https://rpc.mitosis.org',
   648: 'https://rpc-endurance.fusionist.io',
+  // Reya, HPP, RISE (added 2026-10-14)
+  1729: 'https://rpc.reya.network',
+  190415: 'https://mainnet.hpp.io',
+  4153: 'https://rpc.risechain.com',
 };
 
 // Direct chains (no EIP-7702 in ZeroDust): the page reads balances, replays
