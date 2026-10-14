@@ -67,6 +67,10 @@ export const NATIVE_EXITS: Readonly<Record<number, NativeExit>> = {
   1729: { chainName: 'Reya', explorerUrl: 'https://explorer.reya.network', stack: 'arb', toChainId: ETHEREUM, claimAfterHours: 170, prove: false },
   190415: { chainName: 'HPP', explorerUrl: 'https://explorer.hpp.io', stack: 'arb', toChainId: ETHEREUM, bridge: { url: 'https://bridge.arbitrum.io', name: 'Arbitrum Bridge' }, claimAfterHours: 190, prove: false },
   4153: { chainName: 'RISE', explorerUrl: 'https://explorer.risechain.com', stack: 'op', toChainId: ETHEREUM, claimAfterHours: 7 * 24 + 1, prove: true },
+  // Codex and Metal L2 (OP Stack): a game daily (Codex) or every 6 hours (Metal), claimable 7 days
+  // after the prove. No bridge site claims their ETH.
+  81224: { chainName: 'Codex', explorerUrl: 'https://explorer.codex.xyz', stack: 'op', toChainId: ETHEREUM, claimAfterHours: 8 * 24, prove: true },
+  1750: { chainName: 'Metal L2', explorerUrl: 'https://explorer.metall2.com', stack: 'op', toChainId: ETHEREUM, claimAfterHours: 7 * 24 + 6, prove: true },
   // Gravity (Arbitrum Orbit): G arrives as an ERC-20 on Ethereum, confirmed about 6.4 days later
   1625: {
     chainName: 'Gravity', explorerUrl: 'https://explorer.gravity.xyz', stack: 'arb', toChainId: ETHEREUM, bridge: { url: 'https://bridge.gravity.xyz', name: 'Gravity Bridge' }, claimAfterHours: 156, prove: false,

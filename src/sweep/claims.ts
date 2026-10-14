@@ -37,6 +37,9 @@ export const CLAIM_CONTRACTS: Readonly<Record<number, Contracts>> = {
   190415: { kind: 'arb', rollup: '0x8361fC54C99AdDbeD390Af68e7e6115323AB8DB1', outbox: '0x433da6d107e942Ec4EAB1e86B16427B6071F6491' },
   // RISE: OptimismPortal2 5.1.1 with dispute games of type 42 (they report l2BlockNumber; resolved ~1 day later)
   4153: { kind: 'op-games', portal: '0xad92Fa18EB74E46Db844240623124BF46589db4C', factory: '0x6A4139810986CF13408330e14C4ac9Daf0511aA3' },
+  // Codex and Metal L2: OptimismPortal2 5.6.1 with permissioned games (type 1)
+  81224: { kind: 'op-games', portal: '0x52759C07A759c81BAab28AE1BE5A19e6450959bD', factory: '0x6A3855dc26e2beA8Ac73f82Cda79f3808B6C6F6C' },
+  1750: { kind: 'op-games', portal: '0x3F37aBdE2C6b5B2ed6F8045787Df1ED1E3753956', factory: '0x7BFfF391A2dbbDc68A259792AC9748F50FcDE93E' },
   // Abstract: the ZK Stack's L1Nullifier (behind its shared bridge)
   2741: { kind: 'zk', nullifier: '0xD7f9f54194C633F36CCD5F3da84ad4a1c38cB2cB' },
   167000: { kind: 'taiko', l1Bridge: '0xd60247c6848B7Ca29eDdF63AA924E53dB6Ddd8EC' },

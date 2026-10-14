@@ -248,6 +248,14 @@ describe('Reya, HPP, RISE (2026-10-14): own bridges, a bridge site only where on
     expect(NATIVE_EXITS[4153]!.bridge).toBeUndefined();
   });
 
+  it('pins Codex and Metal L2 (OP Stack) to Ethereum, proved and claimed on this page', () => {
+    for (const id of [81224, 1750]) {
+      expect(NATIVE_EXITS[id]).toMatchObject({ stack: 'op', toChainId: 1, prove: true });
+      expect(NATIVE_EXITS[id]!.bridge).toBeUndefined();
+      expect(nativeSteps(NATIVE_EXITS[id]!, NATIVE_EXITS[id]!.chainName, TO).join(' ')).toContain('Prove and claim on this page (under "Waiting to be claimed"):');
+    }
+  });
+
   it('sends the claim to this page alone when no bridge site claims it, and names the site when one does', () => {
     const reya = nativeSteps(NATIVE_EXITS[1729]!, 'Reya', TO).join(' ');
     expect(reya).toContain('Claim on this page (under "Waiting to be claimed"):');
