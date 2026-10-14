@@ -27,7 +27,7 @@ const NETWORKS = {
   1313161554: 'aurora', 232: 'lens', 14: 'flare', 30: 'rootstock', 21000000: 'corn',
   177: 'hashkey', 1890: 'lightlink', 185: 'mint', 1101: 'polygon-zkevm', 42170: 'arbitrum-nova',
   143: 'monad', 255: 'kroma',
-  1729: 'reya',
+  1729: 'reya', 81224: 'codex',
 };
 // Chains whose logo lives in the token set (the chain shares its token's mark)
 const TOKENS = { 747: 'FLOW' };

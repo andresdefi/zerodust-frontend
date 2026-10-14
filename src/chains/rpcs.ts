@@ -65,6 +65,9 @@ export const RPC_URLS: Record<number, string> = {
   1729: 'https://rpc.reya.network',
   190415: 'https://mainnet.hpp.io',
   4153: 'https://rpc.risechain.com',
+  // Codex, Metal L2 (added 2026-10-14)
+  81224: 'https://rpc.codex.xyz',
+  1750: 'https://rpc.metall2.com',
 };
 
 // Direct chains (no EIP-7702 in ZeroDust): the page reads balances, replays
