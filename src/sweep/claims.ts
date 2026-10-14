@@ -32,6 +32,11 @@ export const CLAIM_CONTRACTS: Readonly<Record<number, Contracts>> = {
   252: { kind: 'op-oracle', portal: '0x36cb65c1967A0Fb0EEE11569C51C2f2aA1Ca6f6D', oracle: '0x66CC916Ed5C6C2FA97014f7D1cD141528Ae171e4' },
   42170: { kind: 'arb', rollup: '0xE7E8cCC7c381809BDC4b213CE44016300707B7Bd', outbox: '0xD4B80C3D7240325D18E645B49e6535A3Bf95cc58' },
   1625: { kind: 'arb', rollup: '0x2807B1d5d94ca823ca7d8642A5F5DDac120ce48f', outbox: '0x1153a1e4B1523DFf36f77d696bd6eBF2B0e7DAbF' },
+  // Reya, HPP: read from each chain's Bridge on Ethereum (bridge.rollup(), rollup.outbox()), 2026-10-14
+  1729: { kind: 'arb', rollup: '0xB55002d2795217Fd3B91EcBb3385ba9A231E5327', outbox: '0x3f373b0A7DcEe7b7bCfC16DF85CfAE18388542c9' },
+  190415: { kind: 'arb', rollup: '0x8361fC54C99AdDbeD390Af68e7e6115323AB8DB1', outbox: '0x433da6d107e942Ec4EAB1e86B16427B6071F6491' },
+  // RISE: OptimismPortal2 5.1.1 with dispute games of type 42 (they report l2BlockNumber; resolved ~1 day later)
+  4153: { kind: 'op-games', portal: '0xad92Fa18EB74E46Db844240623124BF46589db4C', factory: '0x6A4139810986CF13408330e14C4ac9Daf0511aA3' },
   // Abstract: the ZK Stack's L1Nullifier (behind its shared bridge)
   2741: { kind: 'zk', nullifier: '0xD7f9f54194C633F36CCD5F3da84ad4a1c38cB2cB' },
   167000: { kind: 'taiko', l1Bridge: '0xd60247c6848B7Ca29eDdF63AA924E53dB6Ddd8EC' },
