@@ -12,9 +12,8 @@ export interface NativeExit {
   explorerUrl: string;
   /** Where the withdrawal is claimed: Ethereum, or BNB Chain (opBNB) */
   toChainId: ParentId;
-  /** The chain's own bridge site, where the withdrawal is proved and claimed */
-  bridgeUrl: string;
-  bridgeName: string;
+  /** The chain's own bridge site, where the withdrawal can also be proved and claimed (none known: Reya, RISE) */
+  bridge?: { url: string; name: string };
   /** Hours from the withdrawal until it can be claimed (OP: the prove's wait included) */
   claimAfterHours: number;
   /** OP stack: a prove transaction on Ethereum first, once the chain has posted its state */
@@ -39,32 +38,38 @@ export const parentOf = (exit: NativeExit): Parent => PARENTS[exit.toChainId];
 
 export const NATIVE_EXITS: Readonly<Record<number, NativeExit>> = {
   // Lisk: dispute games about every 6 h, then 7 days after the prove
-  1135: { chainName: 'Lisk', explorerUrl: 'https://blockscout.lisk.com', stack: 'op', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.lisk.com', bridgeName: 'Lisk Bridge', claimAfterHours: 7 * 24 + 6, prove: true },
+  1135: { chainName: 'Lisk', explorerUrl: 'https://blockscout.lisk.com', stack: 'op', toChainId: ETHEREUM, bridge: { url: 'https://bridge.lisk.com', name: 'Lisk Bridge' }, claimAfterHours: 7 * 24 + 6, prove: true },
   // Arbitrum Nova: the assertion that holds the withdrawal is confirmed about 6.4 days later
-  42170: { chainName: 'Arbitrum Nova', explorerUrl: 'https://nova.arbiscan.io', stack: 'arb', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.arbitrum.io', bridgeName: 'Arbitrum Bridge', claimAfterHours: 156, prove: false },
+  42170: { chainName: 'Arbitrum Nova', explorerUrl: 'https://nova.arbiscan.io', stack: 'arb', toChainId: ETHEREUM, bridge: { url: 'https://bridge.arbitrum.io', name: 'Arbitrum Bridge' }, claimAfterHours: 156, prove: false },
   // Blast: its L2OutputOracle posts state hourly; claimable 1 day after the prove
-  81457: { chainName: 'Blast', explorerUrl: 'https://blastscan.io', stack: 'op', toChainId: ETHEREUM, bridgeUrl: 'https://blast.io/en/bridge', bridgeName: 'Blast Bridge', claimAfterHours: 26, prove: true },
+  81457: { chainName: 'Blast', explorerUrl: 'https://blastscan.io', stack: 'op', toChainId: ETHEREUM, bridge: { url: 'https://blast.io/en/bridge', name: 'Blast Bridge' }, claimAfterHours: 26, prove: true },
   // Abstract (ZK Stack): claimable once its batch is executed on Ethereum, hours later
-  2741: { chainName: 'Abstract', explorerUrl: 'https://abscan.org', stack: 'zk', toChainId: ETHEREUM, bridgeUrl: 'https://native-bridge.abs.xyz/bridge/', bridgeName: 'Abstract Native Bridge', claimAfterHours: 24, prove: false },
+  2741: { chainName: 'Abstract', explorerUrl: 'https://abscan.org', stack: 'zk', toChainId: ETHEREUM, bridge: { url: 'https://native-bridge.abs.xyz/bridge/', name: 'Abstract Native Bridge' }, claimAfterHours: 24, prove: false },
   // Fraxtal: L2OutputOracle outputs hourly, claimable 7 days after the prove; FRAX is paid out as FXS (an ERC-20)
   252: {
-    chainName: 'Fraxtal', explorerUrl: 'https://fraxscan.com', stack: 'op', toChainId: ETHEREUM, bridgeUrl: 'https://docs.frax.com/fraxtal/tools/bridges', bridgeName: 'Fraxtal\'s bridges', claimAfterHours: 7 * 24 + 1, prove: true,
+    chainName: 'Fraxtal', explorerUrl: 'https://fraxscan.com', stack: 'op', toChainId: ETHEREUM, bridge: { url: 'https://docs.frax.com/fraxtal/tools/bridges', name: 'Fraxtal\'s bridges' }, claimAfterHours: 7 * 24 + 1, prove: true,
     token: { symbol: 'FXS', name: 'Frax Share', address: '0x3432B6A60D23Ca0dFCa7761B7ab56459D9C964D0', decimals: 18 },
   },
   // Taiko: its relayer processes the message on Ethereum for the fee the sweep pays (measured 24-53 min)
-  167000: { chainName: 'Taiko', explorerUrl: 'https://taikoscan.io', stack: 'taiko', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.taiko.xyz', bridgeName: 'Taiko Bridge', claimAfterHours: 1, prove: false, relayed: true },
+  167000: { chainName: 'Taiko', explorerUrl: 'https://taikoscan.io', stack: 'taiko', toChainId: ETHEREUM, bridge: { url: 'https://bridge.taiko.xyz', name: 'Taiko Bridge' }, claimAfterHours: 1, prove: false, relayed: true },
   // opBNB: its own bridge to BNB Chain while Meson (its fast route) is paused; outputs every 3,600
   // blocks (about 15 min), claimable 7 days after the prove; BNB arrives as native BNB
-  204: { chainName: 'opBNB', explorerUrl: 'https://opbnb.bscscan.com', stack: 'op', toChainId: BNB_CHAIN, bridgeUrl: 'https://opbnb-bridge.bnbchain.org', bridgeName: 'opBNB Bridge', claimAfterHours: 7 * 24 + 1, prove: true },
+  204: { chainName: 'opBNB', explorerUrl: 'https://opbnb.bscscan.com', stack: 'op', toChainId: BNB_CHAIN, bridge: { url: 'https://opbnb-bridge.bnbchain.org', name: 'opBNB Bridge' }, claimAfterHours: 7 * 24 + 1, prove: true },
   // X Layer: the AggLayer bridge; its exit root reaches Ethereum about every 15 min, then OKB is claimed
   // there as the OKB ERC-20 (the claim's proofs are built on this page, sweep/agglayer.ts)
   196: {
-    chainName: 'X Layer', explorerUrl: 'https://www.okx.com/web3/explorer/xlayer', stack: 'agglayer', toChainId: ETHEREUM, bridgeUrl: 'https://web3.okx.com/xlayer/bridge', bridgeName: 'X Layer Bridge', claimAfterHours: 1, prove: false,
+    chainName: 'X Layer', explorerUrl: 'https://www.okx.com/web3/explorer/xlayer', stack: 'agglayer', toChainId: ETHEREUM, bridge: { url: 'https://web3.okx.com/xlayer/bridge', name: 'X Layer Bridge' }, claimAfterHours: 1, prove: false,
     token: { symbol: 'OKB', name: 'OKB', address: '0x75231F58b43240C9718Dd58B4967c5114342a86c', decimals: 18 },
   },
+  // Reya and HPP (Arbitrum Orbit): Reya posts an assertion about daily, confirmed ~6.4 days later; HPP
+  // posts one about every 4.6 days, confirmed ~5.6 days later. RISE (OP Stack): a dispute game about
+  // every 25 min, claimable 7 days after the prove. No bridge site claims Reya's or RISE's ETH.
+  1729: { chainName: 'Reya', explorerUrl: 'https://explorer.reya.network', stack: 'arb', toChainId: ETHEREUM, claimAfterHours: 170, prove: false },
+  190415: { chainName: 'HPP', explorerUrl: 'https://explorer.hpp.io', stack: 'arb', toChainId: ETHEREUM, bridge: { url: 'https://bridge.arbitrum.io', name: 'Arbitrum Bridge' }, claimAfterHours: 190, prove: false },
+  4153: { chainName: 'RISE', explorerUrl: 'https://explorer.risechain.com', stack: 'op', toChainId: ETHEREUM, claimAfterHours: 7 * 24 + 1, prove: true },
   // Gravity (Arbitrum Orbit): G arrives as an ERC-20 on Ethereum, confirmed about 6.4 days later
   1625: {
-    chainName: 'Gravity', explorerUrl: 'https://explorer.gravity.xyz', stack: 'arb', toChainId: ETHEREUM, bridgeUrl: 'https://bridge.gravity.xyz', bridgeName: 'Gravity Bridge', claimAfterHours: 156, prove: false,
+    chainName: 'Gravity', explorerUrl: 'https://explorer.gravity.xyz', stack: 'arb', toChainId: ETHEREUM, bridge: { url: 'https://bridge.gravity.xyz', name: 'Gravity Bridge' }, claimAfterHours: 156, prove: false,
     token: { symbol: 'G', name: 'Gravity', address: '0x9C7BEBa8F6eF6643aBd725e45a4E8387eF260649', decimals: 18 },
   },
 };
@@ -108,7 +113,7 @@ export function nativeSteps(exit: NativeExit, chainName: string, recipient: stri
     return [
       `The sweep sends everything into ${chainName}'s own bridge, with a fee for its relayer taken from the balance. The wallet on ${chainName} ends at exactly 0.`,
       `${chainName}'s relayer delivers it as ${arrives} in ${waitText(exit)}, at ${recipient}, with the part of its fee it did not use. Nothing to claim.`,
-      `If it has not arrived after a few hours, claim it on ${exit.bridgeName} (${exit.bridgeUrl}) with the wallet at ${recipient}.`,
+      `If it has not arrived after a few hours, claim it on ${exit.bridge ? `${exit.bridge.name} (${exit.bridge.url})` : `${chainName}'s bridge`} with the wallet at ${recipient}.`,
     ];
   }
   const steps = [`The sweep sends everything into ${chainName}'s own bridge. The wallet on ${chainName} ends at exactly 0.`];
@@ -119,7 +124,7 @@ export function nativeSteps(exit: NativeExit, chainName: string, recipient: stri
     steps.push(`Wait ${waitText(exit)}, then claim it on ${p.name} (one transaction, paid in ${p.symbol} there).`);
   }
   steps.push(`It arrives as ${arrives}, at ${recipient}. Nothing arrives until it is claimed; ZeroDust does not claim for you.`);
-  steps.push(`${exit.prove ? 'Prove and claim' : 'Claim'} on this page (under "Waiting to be claimed") or on ${exit.bridgeName} (${exit.bridgeUrl}): any wallet with ${p.symbol} on ${p.name} may send ${exit.prove ? 'them' : 'it'}, the funds always go to the address above.`);
+  steps.push(`${exit.prove ? 'Prove and claim' : 'Claim'} on this page (under "Waiting to be claimed")${exit.bridge ? ` or on ${exit.bridge.name} (${exit.bridge.url})` : ''}: any wallet with ${p.symbol} on ${p.name} may send ${exit.prove ? 'them' : 'it'}, the funds always go to the address above.`);
   return steps;
 }
 
