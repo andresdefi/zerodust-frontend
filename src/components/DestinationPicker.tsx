@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { DestOption } from '../sweep/useSweep';
+import type { DestOption } from '../sweep/sweep-types';
 import { ChainIcon } from './ChainIcon';
 
 /** Modal list of every chain the funds can go to, with how many sources reach each */
