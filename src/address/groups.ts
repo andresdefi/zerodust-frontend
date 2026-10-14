@@ -1,4 +1,4 @@
-import { ENDURANCE_ROUTE, HYPERLANE_ROUTES } from '@zerodust/sdk';
+import { ENDURANCE_ROUTE, HYPERLANE_ROUTES, OFT_ROUTES } from '@zerodust/sdk';
 import { TOKEN_EXITS } from '../direct/plan';
 import { OFFLINE } from '../lib/env';
 import { nativeExitOf } from '../sweep/native';
@@ -66,6 +66,8 @@ export function tokenRouteOf(chainId: number): TokenRoute | null {
   const hyperlane = HYPERLANE_ROUTES[chainId];
   if (hyperlane) return named(hyperlane.token.symbol, hyperlane.toChainId);
   if (chainId === ENDURANCE_ROUTE.chainId) return named(ENDURANCE_ROUTE.token.symbol, ENDURANCE_ROUTE.toChainId);
+  const oft = OFT_ROUTES[chainId];
+  if (oft) return named(oft.token.symbol, oft.toChainId);
   const exit = TOKEN_EXITS[chainId];
   if (exit) return named(exit.token.symbol, exit.toChainId);
   return null;

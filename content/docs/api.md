@@ -201,7 +201,7 @@ Prices a sweep and stores the quote. Nothing is signed or sent.
 | `signer` | `key` (default): EIP-7702, signed with the wallet's key. `permission`: through MetaMask and the permission router ([With MetaMask](#with-metamask)). |
 | `bridge` | `native`: through the source chain's own bridge to Ethereum, for chains that have one (Lisk, Arbitrum Nova; `toChainId` must be `1`). Never chosen without it. See [A chain's own bridge](/docs#a-chains-own-bridge). |
 
-ZeroDust always chooses the route. For a cross-chain sweep it asks every bridge that serves the pair (Gas.zip, Relay, Across, Stargate; Hyperlane, Metalayer or Endurance for the token deliveries) and keeps the highest expected output. Every route delivers the destination's native gas (see [What arrives](/docs#what-arrives) for the token exceptions): Across is asked only when both chains' gas is ETH, and only a plain deposit to a recipient with no contract code (or an EIP-7702 delegation) on the destination is accepted from it. Passing `callTarget` or `callData` is refused with `CUSTOM_ROUTE_UNSUPPORTED`.
+ZeroDust always chooses the route. For a cross-chain sweep it asks every bridge that serves the pair (Gas.zip, Relay, Across, Stargate; Hyperlane, Metalayer, Endurance or LayerZero for the token deliveries) and keeps the highest expected output. Every route delivers the destination's native gas (see [What arrives](/docs#what-arrives) for the token exceptions): Across is asked only when both chains' gas is ETH, and only a plain deposit to a recipient with no contract code (or an EIP-7702 delegation) on the destination is accepted from it. Passing `callTarget` or `callData` is refused with `CUSTOM_ROUTE_UNSUPPORTED`.
 
 Response:
 
@@ -216,7 +216,7 @@ Response:
 | `autoRevoke` | `true` with `signer=key`; `false` with `signer=permission` (no revoke) |
 | `signer` | `key` or `permission`, as requested |
 | `permission` | `signer=permission` only: `router` (the permission's delegate, redeemer and payee, and the typed data's `verifyingContract`), `delegationManager` (MetaMask's) and `domainVersion` (`permission-2`) |
-| `receiveToken` | Token deliveries only (Mitosis and Endurance to BNB Chain, Intuition to Base): `{ symbol, address, decimals }` of the ERC-20 token that arrives instead of gas. `estimatedReceive` and `intent.minReceive` are in this token. |
+| `receiveToken` | Token deliveries only (Mitosis, Endurance and 0G to BNB Chain, Intuition to Base): `{ symbol, address, decimals }` of the ERC-20 token that arrives instead of gas. `estimatedReceive` and `intent.minReceive` are in this token. |
 | `bridge` | Cross-chain only: `name`, `displayName`, `inputAmount` (wei sent to the bridge), `expectedOutput` (wei the bridge expects to deliver). With `bridge=native`, `name` is `native` and the sweep is `completed` once its source transaction succeeds: the funds wait in the bridge until the recipient claims them on Ethereum. |
 | `intent` | Fields that go into the signed `SweepIntent`: `mode`, `destination`, `destinationChainId` (string), `callTarget` (zero address for same-chain), `routeHash`, `minReceive`, and `callData` for cross-chain. `keccak256(callData) == routeHash`, so the route can be decoded and checked before signing. |
 | `deadline` | Unix seconds. The contract accepts at most 60 seconds ahead. |
