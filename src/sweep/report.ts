@@ -3,7 +3,7 @@
 // reference instead of a guess. Only what is public on-chain or on the page:
 // never the key. The returned reference (ZD-1A2B3C4D) is shown on the row.
 import { API_URL } from './constants';
-import type { FailureKind } from './useSweep';
+import type { FailureKind } from './outcome';
 
 export const SITE_VERSION = typeof __SITE_VERSION__ === 'string' ? __SITE_VERSION__ : 'unknown';
 

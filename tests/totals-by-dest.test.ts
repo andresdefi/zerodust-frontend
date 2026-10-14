@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { rowToken, totalsByDest, type DestOption, type RowState } from '../src/sweep/useSweep';
+import { rowToken, type DestOption, type RowState } from '../src/sweep/sweep-types';
+import { totalsByDest } from '../src/sweep/outcome';
 
 const DESTS: DestOption[] = [
   { chainId: 8453, name: 'Base', token: 'ETH', decimals: 18, reachableFrom: 2 },
