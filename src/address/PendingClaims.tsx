@@ -18,7 +18,7 @@ const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: 'n
 /**
  * Withdrawals sent into a chain's own bridge from this browser, still to be claimed on its parent
  * chain (sweep/native.ts). Each one's stage is read from the chain and the parent (sweep/claims.ts), and
- * the prove and claim are sent from here; the chain's bridge site stays linked as the fallback.
+ * the prove and claim are sent from here; the chain's bridge site, where it has one, stays linked as the fallback.
  */
 export function PendingClaims({ address, version }: { address: Address; version: number }) {
   const [list, setList] = useState<PendingClaim[]>([]);
@@ -66,7 +66,7 @@ export function PendingClaims({ address, version }: { address: Address; version:
       <header className="ap-grp-h">
         <div className="ap-grp-t">
           <h2>Waiting to be claimed<span className="tag acc">On {on}</span></h2>
-          <p>Withdrawals into a chain&apos;s own bridge, kept in this browser. Nothing arrives until it is {needsProve ? 'proved and ' : ''}claimed on {parents.length > 1 ? 'the chain it settles on' : on}, from here or on the chain&apos;s bridge site. Any wallet can pay that gas; the funds go to the recipient either way.</p>
+          <p>Withdrawals into a chain&apos;s own bridge, kept in this browser. Nothing arrives until it is {needsProve ? 'proved and ' : ''}claimed on {parents.length > 1 ? 'the chain it settles on' : on}, from here (or on the chain&apos;s bridge site, where it has one). Any wallet can pay that gas; the funds go to the recipient either way.</p>
         </div>
       </header>
       <ul className="ap-rows">
