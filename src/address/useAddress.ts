@@ -18,7 +18,7 @@ import type { AddressChain, ChainRoutes, FixedFee } from './groups';
 const client = new ZeroDust({ environment: 'mainnet', baseUrl: API_URL });
 
 /** Bridges that deliver a token, not gas (their routes go to one fixed chain) */
-const TOKEN_BRIDGES = new Set(['hyperlane', 'endurance']);
+const TOKEN_BRIDGES = new Set(['hyperlane', 'endurance', 'layerzero']);
 /** Quotes asked at once: well under the API's 60 a minute */
 const QUOTE_POOL = 3;
 /** A route a bridge could not confirm ("try again") is asked this many more times */

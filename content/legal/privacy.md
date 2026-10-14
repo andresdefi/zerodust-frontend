@@ -42,7 +42,7 @@ To quote and run a sweep, the API (api.zerodust.xyz) receives your wallet addres
 
 - **Blockchains.** Every sweep is a public, permanent blockchain transaction. Anyone can see the addresses and amounts involved. This cannot be deleted by anyone.
 - **Chain RPC providers.** Your browser reads balances and sends transactions through each chain's public RPC endpoint. Those providers see your IP address and the requests you make.
-- **Bridges** (Gas.zip, Relay, Across, LI.FI). To quote and deliver a cross-chain sweep, the API sends them your wallet address, the destination address, the chains and the amount. For a MetaMask sweep that Relay carries, your browser also asks Relay for the deposit directly (api.relay.link), with the same details, so Relay sees your IP address.
+- **Bridges** (Gas.zip, Relay, Across, LI.FI). To quote and deliver a cross-chain sweep, the API sends them your wallet address, the destination address, the chains and the amount. For a MetaMask sweep that Relay carries, your browser also asks Relay for the deposit directly (api.relay.link), with the same details, so Relay sees your IP address. Sweeps carried over LayerZero (Stargate, 0G's bridge) are quoted on-chain; the API only sends LayerZero's explorer (scan.layerzero-api.com) the sweep's transaction hash, to follow its delivery.
 - **Our providers.** The API runs on Render, its database on Supabase, and it sits behind Cloudflare. It reads the chains through Alchemy and Infura, and for a few chains also through dRPC's public endpoints when the chain's own RPC fails; they see the wallet addresses it looks up but not your IP address. They process data only to run the service.
 - **Transfers outside the EEA.** Render, Supabase, Cloudflare, Vercel, Alchemy and Infura are US companies. Transfers to them rely on the EU's standard contractual clauses or the EU-US Data Privacy Framework.
 
@@ -54,4 +54,4 @@ You can ask what data ZeroDust holds about your wallet address, and ask for it t
 
 We will update this page when what we collect changes, and change the date below.
 
-Last updated: 11 October 2026.
+Last updated: 14 October 2026.
