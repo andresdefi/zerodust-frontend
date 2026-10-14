@@ -57,7 +57,7 @@ async function planGuardRetry(attempt: number, plan: () => Promise<DirectPlan>):
 /** Display names of the bridges a direct plan can use (the API's own adapters name the sponsored ones) */
 const DIRECT_BRIDGE_NAMES: Record<string, string> = { gaszip: 'Gas.zip', relay: 'Relay', across: 'Across', lifi: 'LI.FI', oft: 'LayerZero', meson: 'Meson' };
 
-/** The quote's bridge id (gaszip, relay, across, hyperlane, endurance), for reports */
+/** The quote's bridge id (gaszip, relay, across, stargate, hyperlane, endurance, layerzero), for reports */
 function bridgeName(quote: unknown): string | undefined {
   return (quote as { bridge?: { name?: string } } | undefined)?.bridge?.name;
 }
