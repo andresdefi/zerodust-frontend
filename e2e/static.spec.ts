@@ -72,7 +72,7 @@ test('the offline file matches its published hash and runs the address page from
 
   // The same flow as the site: the address, then its page (hash routing), then the key
   await page.getByRole('searchbox', { name: 'Address or ENS name' }).fill(user);
-  await page.getByRole('button', { name: 'Find my dust' }).click();
+  await page.getByRole('button', { name: 'Look it up' }).click();
   await expect(page).toHaveURL(new RegExp(`#/address/${user}$`));
   await expect(page.getByText('Offline page', { exact: true }).first()).toBeVisible();
   const group = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'Arrives as gas on Base' }) });
