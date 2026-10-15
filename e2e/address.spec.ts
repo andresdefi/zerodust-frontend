@@ -91,7 +91,7 @@ test('home: the search opens the address page; a bad entry says why', async ({ p
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Leave nothing behind.' })).toBeVisible();
   await page.getByLabel('Address or ENS name').fill(user);
-  await page.getByRole('button', { name: 'Find my dust' }).click();
+  await page.getByRole('button', { name: 'Look it up' }).click();
   await expect(page).toHaveURL(new RegExp(`/address/${user}$`));
   await expect(page.locator('section.ap-grp').first()).toBeVisible();
 
