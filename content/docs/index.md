@@ -61,17 +61,24 @@ A quote for these routes carries `receiveToken` (symbol, address, decimals), and
 
 ### A chain's own bridge
 
-Asked for explicitly (`bridge=native` on [`GET /quote`](/docs/api#get-quote) and the [direct-chain](/docs/direct-chains) planner), ZeroDust sweeps the wallet to exactly 0 into the chain's own bridge to Ethereum. The funds do not arrive by themselves: after a waiting period the recipient proves the withdrawal (OP Stack chains) and claims it on Ethereum, paying Ethereum gas, on the chain's own bridge site. ZeroDust never chooses this route on its own.
+Asked for explicitly (`bridge=native` on [`GET /quote`](/docs/api#get-quote) and the [direct-chain](/docs/direct-chains) planner), ZeroDust sweeps the wallet to exactly 0 into the chain's own bridge to Ethereum (to BNB Chain for opBNB). Except on Taiko, the funds do not arrive by themselves: after a waiting period the recipient proves the withdrawal (OP Stack chains) and claims it on the parent chain, paying its gas, on zerodust.xyz or on the chain's own bridge site (`nativeExit.bridgeUrl`). ZeroDust never chooses this route on its own.
 
-| Chain | Stack | Wait before the claim | Arrives on Ethereum as |
+| Chain | Stack | Wait before the claim | Arrives as |
 |---|---|---|---|
-| Lisk (1135) | OP Stack | a state record (up to ~6 h), prove, then 7 days | ETH |
-| Arbitrum Nova (42170) | Arbitrum | ~6.4 days | ETH |
-| Blast (81457), direct | OP Stack (older oracle) | an output (~1 h), prove, then 1 day | ETH |
-| Abstract (2741), direct | ZK Stack | until its batch is executed on Ethereum (hours) | ETH |
-| Gravity (1625), direct | Arbitrum Orbit | ~5.6 days | G, an ERC-20 token |
+| Lisk (1135) | OP Stack | a state record (up to ~6 h), prove, then 7 days | ETH on Ethereum |
+| Fraxtal (252) | OP Stack | an output, prove, then 7 days | FXS on Ethereum, an ERC-20 token |
+| RISE (4153), Metal L2 (1750), Codex (81224) | OP Stack | a dispute game (RISE ~25 min, Metal L2 ~6 h, Codex daily), prove, then 7 days | ETH on Ethereum |
+| Arbitrum Nova (42170) | Arbitrum | ~6.4 days | ETH on Ethereum |
+| Reya (1729) | Arbitrum Orbit | ~7 days | ETH on Ethereum |
+| HPP (190415) | Arbitrum Orbit | 6 to 10 days (its assertions come every ~4.6 days) | ETH on Ethereum |
+| X Layer (196) | AggLayer | about an hour | OKB on Ethereum, an ERC-20 token |
+| Taiko (167000) | Taiko | none: Taiko's relayer delivers in ~30 min, its fee taken from the amount | ETH on Ethereum |
+| opBNB (204), direct | OP Stack | prove, then 7 days | BNB on BNB Chain |
+| Blast (81457), direct | OP Stack (older oracle) | an output (~1 h), prove, then 1 day | ETH on Ethereum |
+| Abstract (2741), direct | ZK Stack | until its batch is executed on Ethereum (hours) | ETH on Ethereum |
+| Gravity (1625), direct | Arbitrum Orbit | ~5.6 days | G on Ethereum, an ERC-20 token |
 
-The website does not offer these routes yet.
+On the website these routes are under "Native bridges only", for chains no other bridge takes out, and the address page lists withdrawals waiting to be proved or claimed (kept in that browser), with buttons for each step.
 
 ## Ways to use ZeroDust
 
@@ -83,10 +90,10 @@ The website does not offer these routes yet.
 
 ## Supported chains
 
-As of 11 October 2026 ZeroDust sweeps 73 chains:
+As of 15 October 2026 ZeroDust sweeps 79 chains:
 
-- 52 EIP-7702 chains, swept by the sponsor (`GET /chains`). Each entry's `crossChain.available` says whether a bridge currently accepts it as a cross-chain source.
-- 21 direct chains, swept by the wallet itself (`GET /direct/chains`).
+- 57 EIP-7702 chains, swept by the sponsor (`GET /chains`). Each entry's `crossChain.available` says whether a bridge currently accepts it as a cross-chain source.
+- 22 direct chains, swept by the wallet itself (`GET /direct/chains`).
 - 16 of the EIP-7702 chains can also be swept with MetaMask, without the key.
 - Cross-chain destinations are not limited to ZeroDust chains: any EVM chain a bridge delivers native gas to qualifies. From Base there are over 100 (104 on 11 October 2026, `GET /destinations?fromChainId=8453`).
 - A chain that announced its shutdown carries `closing` (`closesAt`, `cutoffAt`, the announcement): it is still swept but never offered as a destination, and sponsored sweeps stop 3 days before it closes.

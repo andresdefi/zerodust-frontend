@@ -1,5 +1,4 @@
-// Chains that announced a shutdown (backend config/closing-chains.ts, workspace
-// docs/CHAIN-LIFECYCLE.md): the page warns while they close and never sends funds into them.
+// Chains that announced a shutdown (from the API's `closing` field): the page warns while they close and never sends funds into them.
 
 /** GET /chains and /direct/chains `closing`, present only for a chain that announced its shutdown */
 export interface Closing {
