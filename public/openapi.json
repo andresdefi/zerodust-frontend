@@ -1932,12 +1932,6 @@
                     "maxLength": 254,
                     "description": "Contact email for support"
                   },
-                  "webhookUrl": {
-                    "type": "string",
-                    "format": "uri",
-                    "maxLength": 2048,
-                    "description": "Webhook URL for sweep status notifications"
-                  },
                   "metadata": {
                     "type": "object",
                     "description": "Additional metadata",
@@ -3271,6 +3265,9 @@
                 "relay",
                 "across",
                 "lifi",
+                "oft",
+                "meson",
+                "native",
                 "transfer",
                 "burn",
                 "donate"
