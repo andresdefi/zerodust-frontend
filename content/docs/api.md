@@ -199,7 +199,7 @@ Prices a sweep and stores the quote. Nothing is signed or sent.
 | `userAddress` | Required. The wallet to empty. |
 | `destination` | Required. Where the funds go. |
 | `signer` | `key` (default): EIP-7702, signed with the wallet's key. `permission`: through MetaMask and the permission router ([With MetaMask](#with-metamask)). |
-| `bridge` | `native`: through the source chain's own bridge to Ethereum, for chains that have one (Lisk, Arbitrum Nova; `toChainId` must be `1`). Never chosen without it. See [A chain's own bridge](/docs#a-chains-own-bridge). |
+| `bridge` | `native`: through the source chain's own bridge to Ethereum, for chains with `nativeExit` in `GET /chains` (`toChainId` must be `1`). Never chosen without it. See [A chain's own bridge](/docs#a-chains-own-bridge). |
 
 ZeroDust always chooses the route. For a cross-chain sweep it asks every bridge that serves the pair (Gas.zip, Relay, Across, Stargate; Hyperlane, Metalayer, Endurance or LayerZero for the token deliveries) and keeps the highest expected output. Every route delivers the destination's native gas (see [What arrives](/docs#what-arrives) for the token exceptions): Across is asked only when both chains' gas is ETH, and only a plain deposit to a recipient with no contract code (or an EIP-7702 delegation) on the destination is accepted from it. Passing `callTarget` or `callData` is refused with `CUSTOM_ROUTE_UNSUPPORTED`.
 

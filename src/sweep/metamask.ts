@@ -1,4 +1,4 @@
-// Sweeping from MetaMask without a private key (workspace docs/METAMASK-PERMISSIONS.md).
+// Sweeping from MetaMask without a private key.
 //
 // The wallet grants a one-time ERC-7715 "native-token-allowance" to ZeroDust's permission
 // router (its redeemer and payee), signs the usual sweep intent with the router as the

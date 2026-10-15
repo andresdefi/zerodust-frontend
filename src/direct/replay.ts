@@ -11,9 +11,8 @@ import { GASLIMIT_CHAINS, type PlanTx } from './plan';
 // The local sweeper replays every signed set on an anvil fork before sending.
 // A browser cannot run anvil and the public RPCs cannot simulate, so the page
 // runs the set in an EVM of its own (ethereumjs), forked from the chain's
-// public RPC at the latest block. Spike: workspace
-// docs/data/browser-replay-spike-2026-10-01.md (Relay deposits replay to the
-// real sweeps' exact gas; a LI.FI swap replays without revert).
+// public RPC at the latest block (measured: Relay deposits replay to the real
+// sweeps' exact gas; a LI.FI swap replays without revert).
 
 /**
  * A load-balanced RPC can answer the latest block from one node and the next read from a node
