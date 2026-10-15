@@ -1,6 +1,6 @@
 import { ChainIcon } from '../components/ChainIcon';
 import { SearchIcon, useAddressSearch } from '../components/SiteHeader';
-import { ShieldIcon } from '../components/icons';
+import { EyeIcon, ShieldIcon } from '../components/icons';
 import { OFFLINE, SITE } from '../lib/env';
 
 // The landing page (approved design, 2026-10-08): a ledger reading exactly zero, the
@@ -47,17 +47,28 @@ export function Home({ counts, onMetaMask, metaMaskError }: { counts: SiteCounts
         <form className="hm-search" onSubmit={submit} role="search">
           <label className="hm-search-field">
             <SearchIcon />
-            <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Paste an address or name.eth" aria-label="Address or ENS name" autoComplete="off" spellCheck={false} />
+            <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Paste any address or name.eth" aria-label="Address or ENS name" autoComplete="off" spellCheck={false} />
           </label>
-          <button type="submit" className="btn btn-primary">Find my dust</button>
+          <button type="submit" className="btn btn-primary">Look it up</button>
         </form>
+        <p className="hm-readonly"><EyeIcon />Read-only. A lookup needs no wallet and signs nothing.</p>
         {OFFLINE
           ? <p className="hm-or">You are running the offline page from your own disk. Check for a newer version at <a href={`${SITE}/offline`}>zerodust.xyz/offline</a>.</p>
-          : <p className="hm-or">or <button type="button" className="linkbtn" onClick={onMetaMask}>connect MetaMask</button> to load your own wallet</p>}
+          : <p className="hm-or hm-sweepwith"><b>To sweep:</b> <button type="button" className="linkbtn" onClick={onMetaMask}>connect MetaMask</button> (no key, {counts.metamask} chains) or use the wallet's key (all {chainCount} chains).</p>}
         {metaMaskError && <p className="hm-error" role="alert">{metaMaskError}</p>}
         <div className="hm-logos">
           {LOGOS.map(([id, name]) => <ChainIcon key={id} chainId={id} name={name} size={28} />)}
           <span>{chainCount > LOGOS.length ? `+${chainCount - LOGOS.length} more · ${chainCount} chains` : `${chainCount} chains`}</span>
+        </div>
+      </section>
+
+      <section className="hm-block">
+        <p className="hm-eyebrow">When it helps</p>
+        <h2>Gas you can't send by hand</h2>
+        <div className="hm-ways hm-uses">
+          <div className="hm-way"><b>A chain is closing</b><p>When a chain announces its shutdown, take every wei out before its bridges stop. Your address page marks the chains that are closing.</p></div>
+          <div className="hm-way"><b>Moving to a new wallet</b><p>Leave the old wallet at exactly zero on every chain, not a few cents on twenty of them, and get it all on the chain you choose.</p></div>
+          <div className="hm-way"><b>Leftovers from airdrops and testing</b><p>Gas you bridged to try a chain or claim an airdrop, too little to be worth a transaction each. One sweep brings it home.</p></div>
         </div>
       </section>
 
