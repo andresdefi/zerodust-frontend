@@ -600,7 +600,9 @@ function ProgressRow({ row, state, bridge, arrivalExplorer, arrivalName }: { row
   const label = state.phase === 'done' ? 'Done · 0 left' : kind ? FAILURE_LABEL[kind] : state.phase === 'quoting' ? 'Checking…' : 'Sweeping…';
   // Only a failure after something was sent needs checking; otherwise say what to do
   const least = kind === 'too-small' ? minimumOf(state.detail, row.decimals) : null;
-  const detail = least !== null ? tooSmallText(least, row) : kind && kind !== 'check' ? `${state.detail} Nothing was sent.` : state.detail;
+  const detail = least !== null ? tooSmallText(least, row) : kind && kind !== 'check'
+    ? [state.detail && state.detail.replace(/[.\s]*$/, '.'), 'Nothing was sent.'].filter(Boolean).join(' ')
+    : state.detail;
   const copy = async () => {
     if (!kind || !state.report) return;
     try {

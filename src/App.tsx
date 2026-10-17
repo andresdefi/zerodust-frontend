@@ -8,7 +8,7 @@ import { SiteFooter } from './components/SiteFooter';
 import { directChains } from './direct/plan';
 import { addressHref, navigate, useView } from './lib/route';
 import { API_URL } from './sweep/constants';
-import { connectMetaMask, findMetaMask, type MetaMaskSession } from './sweep/metamask';
+import { connectMetaMask, findMetaMask, walletErrorText, type MetaMaskSession } from './sweep/metamask';
 import { track } from './lib/events';
 
 const client = new ZeroDust({ environment: 'mainnet', baseUrl: API_URL });
@@ -83,7 +83,7 @@ function Site() {
       navigate(addressHref(s.address));
     } catch (error) {
       track('metamask-refused');
-      setMmError(error instanceof Error ? error.message : 'MetaMask did not connect.');
+      setMmError(walletErrorText(error, 'the connection'));
     } finally {
       setMmBusy(false);
     }

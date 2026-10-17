@@ -4,7 +4,7 @@ import { KeyEntry } from '../components/KeyEntry';
 import { ChainIcon } from '../components/ChainIcon';
 import { TOKEN_EXITS } from '../direct/plan';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
-import { connectMetaMask, findMetaMask, type MetaMaskSession } from '../sweep/metamask';
+import { connectMetaMask, findMetaMask, walletErrorText, type MetaMaskSession } from '../sweep/metamask';
 import { isPaused, useServiceStatus } from '../sweep/status';
 import { useSweep, type SweepModel } from '../sweep/useSweep';
 import type { Row, RowState, Wallet } from '../sweep/sweep-types';
@@ -99,7 +99,7 @@ export function SweepWithDialog({ open, plan, address, session, onWallet, onClos
       onWallet({ kind: 'metamask', session });
     } catch (e) {
       if (connecting) track('metamask-refused');
-      setError(e instanceof Error ? e.message : 'MetaMask did not connect.');
+      setError(walletErrorText(e, 'the connection'));
     } finally {
       setBusy(false);
     }
