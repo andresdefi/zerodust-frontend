@@ -32,6 +32,9 @@ export interface SiteCounts {
   destinations: number;
 }
 
+/** The counts on 2026-10-18: in the prerendered home page, and shown until the API answers */
+export const SITE_COUNTS: SiteCounts = { sponsored: 56, metamask: 16, direct: 22, destinations: 103 };
+
 export function Home({ counts, onMetaMask, metaMaskError }: { counts: SiteCounts; onMetaMask: () => void; metaMaskError: string | null }) {
   const { query, setQuery, submit } = useAddressSearch();
   const chainCount = counts.sponsored + counts.direct;

@@ -13,6 +13,24 @@ const dist = join(root, 'dist');
 const integrity = (rel) => `sha384-${createHash('sha384').update(readFileSync(join(dist, rel))).digest('base64')}`;
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
+// Link previews and search: every page names its address on the www host and shares one card
+const SITE = 'https://www.zerodust.xyz';
+const share = (title, description, path) => [
+  `<link rel="canonical" href="${SITE}${path}" />`,
+  '<meta property="og:type" content="website" />',
+  '<meta property="og:site_name" content="ZeroDust" />',
+  `<meta property="og:title" content="${esc(title)}" />`,
+  `<meta property="og:description" content="${esc(description)}" />`,
+  `<meta property="og:url" content="${SITE}${path}" />`,
+  `<meta property="og:image" content="${SITE}/og.png" />`,
+  '<meta property="og:image:width" content="1200" />',
+  '<meta property="og:image:height" content="630" />',
+  '<meta property="og:image:alt" content="0.000000000000000000 ETH left. Leave nothing behind." />',
+  '<meta name="twitter:card" content="summary_large_image" />',
+].map((t) => `    ${t}`).join('\n');
+// A page's address: docs/index is /docs, the rest drop .html (cleanUrls)
+const pathOf = (name) => `/${name.replace(/\/index$/, '')}`;
+
 // The theme script and the chunks it imports, from Vite's manifest
 const manifest = JSON.parse(readFileSync(join(dist, 'theme-manifest.json'), 'utf8'));
 const theme = manifest['src/static-theme.ts'];
@@ -37,7 +55,7 @@ try {
   // Built without git (an upload without .git): the record says so
 }
 
-const { PAGES, llmsFull } = await import(join(root, 'dist-ssr', 'prerender.js'));
+const { PAGES, llmsFull, renderHome } = await import(join(root, 'dist-ssr', 'prerender.js'));
 for (const [name, page] of Object.entries(PAGES)) {
   const body = page.render({ offlineSha256, commit });
   const html = `<!doctype html>
@@ -50,6 +68,7 @@ for (const [name, page] of Object.entries(PAGES)) {
     <title>${esc(page.title)}</title>
     <meta name="description" content="${esc(page.description)}" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+${share(page.title, page.description, pathOf(name))}
     <link rel="stylesheet" crossorigin href="/${css}" integrity="${integrity(css)}">
     <script type="module" crossorigin src="/${theme.file}" integrity="${integrity(theme.file)}"></script>
 ${preloads.map((f) => `    <link rel="modulepreload" crossorigin href="/${f}" integrity="${integrity(f)}">`).join('\n')}
@@ -64,8 +83,25 @@ ${body}
   writeFileSync(file, html);
 }
 
+// The home page with its first screen in the HTML (crawlers and link previews run no scripts).
+// Address pages load the empty shell instead (app.html, vercel.json), so they never flash the home.
+const ROOT = '<div id="root"></div>';
+if (!indexHtml.includes(ROOT)) throw new Error('prerender: empty root not found in index.html');
+writeFileSync(join(dist, 'app.html'), indexHtml);
+writeFileSync(join(dist, 'index.html'), indexHtml
+  .replace('  </head>', `    <link rel="canonical" href="${SITE}/" />\n    <meta property="og:url" content="${SITE}/" />\n  </head>`)
+  .replace(ROOT, `<div id="root">${renderHome()}</div>`));
+
+// What search engines may list: the home page and every prerendered page
+const urls = ['/', ...Object.keys(PAGES).map(pathOf)];
+writeFileSync(join(dist, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.map((u) => `  <url><loc>${SITE}${u === '/' ? '/' : u}</loc></url>`).join('\n')}
+</urlset>
+`);
+
 // The docs as one Markdown file for LLMs, generated so it cannot drift from the pages
 writeFileSync(join(dist, 'llms-full.txt'), llmsFull());
 
 rmSync(join(dist, 'theme-manifest.json'), { force: true });
-console.log(`prerender: ${Object.keys(PAGES).join(', ')}, llms-full.txt; offline page copied; commit ${commit.slice(0, 12)}`);
+console.log(`prerender: home, ${Object.keys(PAGES).join(', ')}, sitemap.xml, llms-full.txt; offline page copied; commit ${commit.slice(0, 12)}`);

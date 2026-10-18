@@ -104,10 +104,11 @@ describe('vercel.json', () => {
     expect(vercel.rewrites?.some((r) => r.source === '/sweep')).toBe(false);
   });
 
-  it('serves the app for a direct /address/... load: with cleanUrls the page is "/", not "/index.html" (a 404)', () => {
+  it('serves the app shell for a direct /address/... load: with cleanUrls the page is "/app", not "/app.html" (a 404)', () => {
     const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8')) as { cleanUrls?: boolean; rewrites?: Array<{ source: string; destination: string }> };
     const address = vercel.rewrites?.find((r) => r.source === '/address/:path*');
-    expect(address?.destination).toBe('/');
+    // app.html: the empty shell, so an address page never flashes the prerendered home
+    expect(address?.destination).toBe('/app');
     if (vercel.cleanUrls) expect(vercel.rewrites?.every((r) => !r.destination.endsWith('.html'))).toBe(true);
   });
 });

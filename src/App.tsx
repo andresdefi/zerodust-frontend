@@ -3,7 +3,7 @@ import { ZeroDust } from '@zerodust/sdk';
 import { isAddressEqual, type Address } from 'viem';
 import { SiteHeader } from './components/SiteHeader';
 import { AddressPage } from './address/AddressPage';
-import { Home, type SiteCounts } from './home/Home';
+import { Home, SITE_COUNTS, type SiteCounts } from './home/Home';
 import { SiteFooter } from './components/SiteFooter';
 import { directChains } from './direct/plan';
 import { addressHref, navigate, useView } from './lib/route';
@@ -13,9 +13,9 @@ import { track } from './lib/events';
 
 const client = new ZeroDust({ environment: 'mainnet', baseUrl: API_URL });
 
-/** The home page's numbers, read live (the defaults are the counts on 2026-10-08, shown until the API answers) */
+/** The home page's numbers, read live (SITE_COUNTS until the API answers) */
 function useSiteCounts(): SiteCounts {
-  const [counts, setCounts] = useState<SiteCounts>({ sponsored: 52, metamask: 16, direct: 21, destinations: 109 });
+  const [counts, setCounts] = useState<SiteCounts>(SITE_COUNTS);
   useEffect(() => {
     void Promise.all([
       client.getChains().catch(() => null),

@@ -13,6 +13,8 @@ export function storedTheme(): Theme | null {
 }
 
 export function systemTheme(): Theme {
+  // Prerendering (no window): the light theme's icon; the app sets the real one when it starts
+  if (typeof window === 'undefined') return 'light';
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 

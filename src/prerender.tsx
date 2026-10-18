@@ -6,6 +6,9 @@ import type { PageBuild } from './pages/build-record';
 import { DocsPage } from './pages/DocsPage';
 import { DOC_NAV, docPath, docSource, renderDoc, renderLegal } from './pages/docs';
 import { StaticPage } from './pages/Layout';
+import { SiteHeader } from './components/SiteHeader';
+import { SiteFooter } from './components/SiteFooter';
+import { Home, SITE_COUNTS } from './home/Home';
 
 export const PAGES: Record<string, { title: string; description: string; render: (build: PageBuild) => string }> = {
   security: {
@@ -51,4 +54,20 @@ export function llmsFull(): string {
     return `<!-- https://zerodust.xyz${docPath(d.slug)} -->\n\n${body}`;
   });
   return `${pages.join('\n\n---\n\n')}\n`;
+}
+
+/**
+ * The home page as the app first draws it (no wallet, the counts in SITE_COUNTS), written into
+ * dist/index.html's root so crawlers and link previews read it without running scripts. The app
+ * replaces it when it starts.
+ */
+export function renderHome(): string {
+  const noop = () => {};
+  return renderToStaticMarkup(
+    <>
+      <SiteHeader search={false} onMetaMask={noop} metaMaskBusy={false} account={null} />
+      <Home counts={SITE_COUNTS} onMetaMask={noop} metaMaskError={null} />
+      <SiteFooter />
+    </>
+  );
 }

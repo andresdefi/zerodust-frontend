@@ -8,7 +8,7 @@
   "rewrites": [
     {
       "source": "/address/:path*",
-      "destination": "/"
+      "destination": "/app"
     }
   ],
   "redirects": [

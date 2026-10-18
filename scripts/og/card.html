@@ -1,0 +1,35 @@
+<!doctype html>
+<!-- The link preview image (public/og.png, 1200x630), drawn by scripts/og/make-og.mjs -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  @font-face { font-family: 'Schibsted Grotesk'; font-weight: 500; src: url('../../node_modules/@fontsource/schibsted-grotesk/files/schibsted-grotesk-latin-500-normal.woff2') format('woff2'); }
+  @font-face { font-family: 'Schibsted Grotesk'; font-weight: 700; src: url('../../node_modules/@fontsource/schibsted-grotesk/files/schibsted-grotesk-latin-700-normal.woff2') format('woff2'); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; }
+  body { background: #efefec; color: #1a1b1e; font-family: 'Schibsted Grotesk', sans-serif; padding: 56px 72px; display: flex; flex-direction: column; }
+  .brand { display: flex; align-items: center; gap: 14px; font-weight: 700; font-size: 30px; letter-spacing: -0.01em; }
+  .main { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+  .ledger { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-weight: 600; font-size: 76px; letter-spacing: -0.04em; line-height: 1; white-space: nowrap; }
+  .dim { color: #d2d3cd; }
+  .unit { font-family: 'Schibsted Grotesk', sans-serif; font-size: 28px; color: #6a6d74; margin-left: 16px; letter-spacing: 0; font-weight: 500; }
+  h1 { margin-top: 44px; font-size: 76px; line-height: 1.02; letter-spacing: -0.025em; font-weight: 700; }
+  p { margin-top: 20px; font-size: 30px; line-height: 1.35; color: #6a6d74; font-weight: 500; max-width: 980px; }
+  .foot { display: flex; justify-content: space-between; align-items: center; font-size: 26px; font-weight: 500; color: #6a6d74; }
+  .pill { background: #f5b800; color: #1a1b1e; font-weight: 700; padding: 12px 26px; border-radius: 999px; }
+</style>
+</head>
+<body>
+  <div class="brand">
+    <svg width="44" height="44" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#F5B800"/><circle cx="14.5" cy="17.5" r="7.5" stroke="#1A1B1E" stroke-width="3.5"/><circle cx="24.5" cy="7.5" r="2.5" fill="#1A1B1E"/></svg>
+    zerodust
+  </div>
+  <div class="main">
+    <div class="ledger">0.<span class="dim">000000000000000000</span><span class="unit">ETH left</span></div>
+    <h1>Leave nothing behind.</h1>
+    <p>Find the gas left on every chain and move it all to one place. Every chain ends at exactly zero.</p>
+  </div>
+  <div class="foot"><span>zerodust.xyz</span><span class="pill">Find my dust</span></div>
+</body>
+</html>
