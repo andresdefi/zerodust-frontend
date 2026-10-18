@@ -5,7 +5,7 @@ import { OFFLINE } from '../lib/env';
 import { formatAmount, shortAddress } from '../lib/format';
 import { claimCall, proveCall, type Withdrawal } from '../sweep/claims';
 import { payerAddress, quoteCall, sendCall, waitMined, type CallQuote, type Payer } from '../sweep/claim-send';
-import { findMetaMask } from '../sweep/metamask';
+import { findMetaMask, walletErrorText } from '../sweep/metamask';
 import type { L1Call } from '../sweep/claims';
 import { nativeExitOf, parentOf } from '../sweep/native';
 
@@ -163,6 +163,6 @@ export function ClaimDialog({ open, step, withdrawal, chainName, symbol, decimal
 }
 
 function firstLine(e: unknown): string {
-  const text = e instanceof Error ? ((e as { shortMessage?: string }).shortMessage ?? e.message) : String(e);
+  const text = e instanceof Error ? ((e as { shortMessage?: string }).shortMessage ?? e.message) : walletErrorText(e, 'the request');
   return text.split('\n')[0]!.slice(0, 240);
 }

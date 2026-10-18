@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { FAILURE_LABEL, failureKind, minimumOf, plainReason, tooSmallText } from '../src/sweep/outcome';
 import { formatAmountUp } from '../src/lib/format';
 import { SITE_VERSION, reportBody, reportText } from '../src/sweep/report';
+import { walletErrorText } from '../src/sweep/metamask';
 
 // Every chain says the same plain words, whatever the method behind it (owner, 2026-10-02)
 describe('plainReason', () => {
@@ -99,5 +100,20 @@ describe('sweep reports', () => {
       'Transactions:',
       `  https://monadvision.com/tx/0x${'cd'.repeat(32)}`,
     ].join('\n'));
+  });
+});
+
+describe('walletErrorText: what a MetaMask refusal or failure says (plain { code, message } objects)', () => {
+  it('declined, already waiting, unsupported, failed with its code; the page own checks keep their words', () => {
+    expect(walletErrorText({ code: 4001, message: 'User rejected the request.' }, 'the connection')).toBe('You declined the connection in MetaMask.');
+    expect(walletErrorText({ code: -32002, message: 'Request already pending' }, 'the permission')).toMatch(/^MetaMask already has a request waiting/);
+    expect(walletErrorText({ code: 4200, message: 'Unsupported method' }, 'the permission')).toMatch(/does not support this request/);
+    expect(walletErrorText({ code: -32602, message: 'Invalid params.' }, 'the permission')).toBe('MetaMask could not complete the permission: Invalid params (code -32602).');
+    expect(walletErrorText(undefined, 'the signature')).toBe('MetaMask could not complete the signature.');
+    expect(walletErrorText(new Error('Stopped before signing: the batch is not for the ZeroDust router'), 'the signature')).toBe('Stopped before signing: the batch is not for the ZeroDust router');
+  });
+
+  it('a declined request is a "try again", not a safety stop', () => {
+    expect(failureKind({ detail: walletErrorText({ code: 4001 }, 'the permission') }, 18)).toBe('try-again');
   });
 });

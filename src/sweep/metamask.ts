@@ -56,6 +56,22 @@ export async function findMetaMask(timeoutMs = 400): Promise<Eip1193Provider | n
   return injected?.isMetaMask ? injected : null;
 }
 
+/**
+ * What a refused or failed MetaMask request says, for the page and for the report. MetaMask
+ * rejects with plain { code, message } objects, not Errors, so its code and words are kept here
+ * (4001: the owner declined; -32002: a request already waits in MetaMask). The page's own checks
+ * throw Errors without a numeric code and keep their message.
+ */
+export function walletErrorText(error: unknown, action: string): string {
+  const { code, message } = (error ?? {}) as { code?: unknown; message?: unknown };
+  if (code === 4001) return `You declined ${action} in MetaMask.`;
+  if (code === -32002) return 'MetaMask already has a request waiting. Open MetaMask to finish or cancel it, then try again.';
+  if (code === 4200 || code === -32601) return 'This MetaMask does not support this request. Update MetaMask, or sweep with your key.';
+  if (error instanceof Error && typeof code !== 'number') return error.message;
+  const said = typeof message === 'string' ? message.split('\n')[0]!.trim().replace(/[.\s]+$/, '').slice(0, 200) : '';
+  return `MetaMask could not complete ${action}${said ? `: ${said}` : ''}${typeof code === 'number' ? ` (code ${code})` : ''}.`;
+}
+
 export interface MetaMaskSession {
   provider: Eip1193Provider;
   address: Address;
@@ -466,7 +482,7 @@ export async function sweepBatchWithPermissions(
   try {
     contexts = await requestPermissions(provider, router, funded.map((it) => ({ chainId: it.chainId, amount: balances[items.indexOf(it)]!, chainName: it.chainName })));
   } catch (error) {
-    for (const it of funded) fail(it.chainId, error instanceof Error ? error.message : 'MetaMask refused the permission');
+    for (const it of funded) fail(it.chainId, walletErrorText(error, 'the permission'));
     return results;
   }
   const granted = funded.filter((it) => {
@@ -516,7 +532,7 @@ export async function sweepBatchWithPermissions(
       for (const { item } of quoted) onStep(item.chainId, 'Sign in MetaMask');
       signature = (await provider.request({ method: 'eth_signTypedData_v4', params: [address, JSON.stringify(local)] })) as Hex;
     } catch (error) {
-      for (const { item } of quoted) fail(item.chainId, error instanceof Error ? error.message : 'Signature refused');
+      for (const { item } of quoted) fail(item.chainId, walletErrorText(error, 'the signature'));
       return results;
     }
 

@@ -264,12 +264,30 @@ describe('sweepBatchWithPermissions', () => {
     expect(calls.map((c) => c.method)).not.toContain('eth_signTypedData_v4');
   });
 
-  it('a refused permission fails every chain without asking anything else', async () => {
+  it('a declined permission fails every chain without asking anything else, and says it was declined', async () => {
     stubApi();
-    const { provider, calls } = fakeProvider({ wallet_requestExecutionPermissions: new Error('User rejected the request.') });
+    // MetaMask rejects with a plain object, not an Error (production report 2026-10-17)
+    const { provider, calls } = fakeProvider({ wallet_requestExecutionPermissions: () => { throw { code: 4001, message: 'User rejected the request.' }; } });
     const results = await run(provider, [item(8453), item(10)]);
-    expect([...results.values()].map((r) => r.error)).toEqual(['User rejected the request.', 'User rejected the request.']);
+    expect([...results.values()].map((r) => r.error)).toEqual(['You declined the permission in MetaMask.', 'You declined the permission in MetaMask.']);
     expect(calls.map((c) => c.method)).toEqual(['wallet_requestExecutionPermissions']);
+  });
+
+  it("a permission MetaMask fails keeps MetaMask's words and code for the report", async () => {
+    stubApi();
+    const { provider } = fakeProvider({ wallet_requestExecutionPermissions: () => { throw { code: -32603, message: 'Internal JSON-RPC error.\nstack...' }; } });
+    const results = await run(provider, [item(8453)]);
+    expect(results.get(8453)?.error).toBe('MetaMask could not complete the permission: Internal JSON-RPC error (code -32603).');
+  });
+
+  it('a declined signature says so', async () => {
+    stubApi();
+    const { provider } = fakeProvider({
+      wallet_requestExecutionPermissions: granted([8453]),
+      eth_signTypedData_v4: () => { throw { code: 4001, message: 'User denied message signature.' }; },
+    });
+    const results = await run(provider, [item(8453)]);
+    expect(results.get(8453)?.error).toBe('You declined the signature in MetaMask.');
   });
 
   it('hands a bridging sweep back without waiting for the delivery (the page follows it)', async () => {
