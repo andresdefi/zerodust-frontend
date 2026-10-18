@@ -101,3 +101,22 @@ test('the offline file matches its published hash and runs the address page from
   expect(watch.leaks).toEqual([]);
   expect(csp).toEqual([]);
 });
+
+// Crawlers and link previews run no scripts (feedback 2026-10-17: the home page was an empty shell)
+test('without scripts: the home page has its headline and share card, robots.txt and the sitemap are served', async ({ browser, request }) => {
+  const ctx = await browser.newContext({ javaScriptEnabled: false });
+  const page = await ctx.newPage();
+  await page.goto('/');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Leave nothing behind.');
+  await expect(page.locator('meta[property="og:image"]')).toHaveAttribute('content', 'https://www.zerodust.xyz/og.png');
+  await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute('content', 'summary_large_image');
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://www.zerodust.xyz/');
+  // Address pages load the empty shell, never the home page
+  await page.goto('/app.html');
+  expect(await page.locator('#root').innerHTML()).toBe('');
+  await ctx.close();
+  expect(await (await request.get('/robots.txt')).text()).toContain('Sitemap: https://www.zerodust.xyz/sitemap.xml');
+  const sitemap = await (await request.get('/sitemap.xml')).text();
+  for (const path of ['/', '/security', '/docs', '/docs/api']) expect(sitemap).toContain(`<loc>https://www.zerodust.xyz${path}</loc>`);
+  expect((await request.get('/og.png')).headers()['content-type']).toBe('image/png');
+});

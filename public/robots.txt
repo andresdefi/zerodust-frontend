@@ -1,0 +1,5 @@
+User-agent: *
+Disallow: /address/
+Disallow: /app
+
+Sitemap: https://www.zerodust.xyz/sitemap.xml
