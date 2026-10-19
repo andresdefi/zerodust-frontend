@@ -414,3 +414,27 @@ test('past its cut-off a sponsored chain leaves the groups and points to its own
   await expect(note).toContainText('No ZeroDust fee in its last days.');
   await expect(page.getByRole('checkbox', { name: 'Select Avalanche' })).toBeVisible();
 });
+
+test("own bridges: one list with each chain's summary, Fraxtal's FRAX shown arriving as FXS, and the sweep held until it is understood", async ({ page }) => {
+  const { key } = await openAddress(page, { nova: true, fraxtal: true });
+  await group(page, 'Native bridges only').getByRole('checkbox', { name: /^Select all in/ }).check();
+  await page.locator('.ap-sticky .btn-primary').click();
+  await useKey(page, key);
+  const dialog = confirmDialog(page);
+  const sweep = dialog.getByRole('button', { name: 'Sweep 2 chains' });
+  await expect(sweep).toBeVisible({ timeout: 30_000 });
+  // Focus starts on Back, not on a link in the list
+  await expect(dialog.getByRole('button', { name: 'Back' })).toBeFocused();
+  // What arrives from Fraxtal is FXS, a token, never counted as ETH
+  await expect(dialog.locator('.zd-cl', { hasText: 'Fraxtal' })).toContainText('0.532554 FXS');
+  const note = dialog.getByRole('note');
+  await expect(note).toContainText('Nothing arrives by itself');
+  await expect(note.locator('.zd-native-chain', { hasText: 'Arbitrum Nova' })).toContainText('Claim it after about 6.5 days.');
+  await expect(note.locator('.zd-native-chain', { hasText: 'Fraxtal' })).toContainText('Prove it within a few hours, then claim it after about 7 days in total.');
+  await expect(note.locator('.zd-native-chain', { hasText: 'Fraxtal' })).toContainText('Arrives as FXS (Frax Share), a token on Ethereum, not ETH.');
+  await expect(note.getByRole('link', { name: /Arbitrum Bridge/ })).toHaveAttribute('href', 'https://bridge.arbitrum.io');
+  await expect(note).not.toContainText('https://');
+  await expect(sweep).toBeDisabled();
+  await dialog.getByRole('checkbox', { name: /I understand/ }).check();
+  await expect(sweep).toBeEnabled();
+});

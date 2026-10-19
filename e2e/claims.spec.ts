@@ -58,13 +58,37 @@ async function openWithClaim(page: Page, balanceWei: bigint) {
   };
   await page.addInitScript((c) => { localStorage.setItem('zd.pending-claims.v1', JSON.stringify([c])); }, claim);
   await page.goto(`/address/${user}`);
+  // Its own tab, which counts what can be sent now
+  const tab = page.getByRole('tab', { name: /Waiting to be claimed/ });
+  await expect(tab).toContainText('1 ready', { timeout: 20_000 });
+  await tab.click();
   return page.getByRole('region', { name: 'Waiting to be claimed' });
+}
+
+/** Several withdrawals at different stages, as the page saved them */
+async function openWithClaims(page: Page, names: string[]) {
+  const user = privateKeyToAccount(generatePrivateKey()).address;
+  await mockNetwork(page, user);
+  await replayChains(page, 0n);
+  const exits: Record<number, { chainName: string; explorerUrl: string; symbol: string }> = {
+    1135: { chainName: 'Lisk', explorerUrl: 'https://blockscout.lisk.com', symbol: 'ETH' },
+    42170: { chainName: 'Arbitrum Nova', explorerUrl: 'https://nova.arbiscan.io', symbol: 'ETH' },
+    1625: { chainName: 'Gravity', explorerUrl: 'https://explorer.gravity.xyz', symbol: 'G' },
+    2741: { chainName: 'Abstract', explorerUrl: 'https://abscan.org', symbol: 'ETH' },
+  };
+  const claims = names.map((name, i) => {
+    const c = fixture.cases.find((k) => k.name === name)!;
+    return { chainId: c.chainId, ...exits[c.chainId]!, decimals: 18, from: user, recipient: c.recipient, amount: c.amount, txHash: c.txHash, sentAt: fixture.now - (i + 1) * 86_400_000 };
+  });
+  await page.addInitScript((list) => { localStorage.setItem('zd.pending-claims.v1', JSON.stringify(list)); }, claims);
+  await page.goto(`/address/${user}`);
 }
 
 test('a withdrawal ready to claim: its stage from the chain, the cost, and a payer without enough ETH stopped before signing', async ({ page }) => {
   const card = await openWithClaim(page, 0n);
-  await expect(card.getByText('Ready to claim')).toBeVisible({ timeout: 20_000 });
-  await card.getByRole('button', { name: 'Claim' }).click();
+  const nova = card.locator('.ap-claim', { hasText: 'Arbitrum Nova' });
+  await expect(nova.locator('.ap-claim-steps li.now.ready')).toHaveText('Claim');
+  await nova.getByRole('button', { name: 'Claim now' }).click();
   const dialog = page.getByRole('dialog', { name: 'Claim on Ethereum' });
   await expect(dialog).toContainText('Any wallet can pay the gas');
   await dialog.getByRole('button', { name: /Private key/ }).click();
@@ -81,7 +105,7 @@ test('a withdrawal ready to claim: its stage from the chain, the cost, and a pay
 
 test('with enough ETH the claim can be sent', async ({ page }) => {
   const card = await openWithClaim(page, 10n ** 17n);
-  await card.getByRole('button', { name: 'Claim' }).click({ timeout: 20_000 });
+  await card.getByRole('button', { name: 'Claim now' }).click({ timeout: 20_000 });
   const dialog = page.getByRole('dialog', { name: 'Claim on Ethereum' });
   await dialog.getByRole('button', { name: /Private key/ }).click();
   await dialog.locator('.keyfield input').focus();
@@ -95,6 +119,8 @@ test('a withdrawal sent from another browser: added by its transaction hash, the
   await mockNetwork(page, user);
   await replayChains(page, 0n);
   await page.goto(`/address/${user}`);
+  await page.getByRole('tab', { name: 'Waiting to be claimed' }).click();
+  await expect(page.getByRole('region', { name: 'Waiting to be claimed' })).toContainText('Nothing waiting.');
   const link = page.getByRole('button', { name: /from another browser\? Add the withdrawal/ });
   await expect(link).toBeVisible();
   if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace('.png', '-empty.png'), fullPage: true });
@@ -106,6 +132,37 @@ test('a withdrawal sent from another browser: added by its transaction hash, the
   await input.fill(fixture.cases.find((c) => c.name === 'nova ready to claim')!.txHash);
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   const card = page.getByRole('region', { name: 'Waiting to be claimed' });
-  await expect(card.locator('.ap-claim', { hasText: 'Arbitrum Nova' })).toContainText('Ready to claim', { timeout: 20_000 });
+  await expect(card.locator('.ap-claim', { hasText: 'Arbitrum Nova' }).getByRole('button', { name: 'Claim now' })).toBeVisible({ timeout: 20_000 });
   if (process.env.SHOT) await card.screenshot({ path: process.env.SHOT.replace('.png', '-added.png') });
 });
+
+test('several withdrawals: each shows its steps and what is next; the tab counts the ones ready', async ({ page }) => {
+  await openWithClaims(page, ['lisk ready to prove', 'nova waiting', 'gravity waiting (G)', 'abstract claimed']);
+  // The balances stay on their own tab
+  await expect(page.getByRole('tab', { name: 'Balances' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('region', { name: 'Waiting to be claimed' })).toBeHidden();
+  const tab = page.getByRole('tab', { name: /Waiting to be claimed/ });
+  await expect(tab).toContainText('1 ready', { timeout: 20_000 });
+  await tab.click();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('section.ap-grp').first()).toBeHidden();
+  const card = page.getByRole('region', { name: 'Waiting to be claimed' });
+  const row = (name: string) => card.locator('.ap-claim', { hasText: name });
+  await expect(row('Lisk').getByRole('button', { name: 'Prove now' })).toBeVisible();
+  await expect(row('Lisk').locator('.ap-claim-steps li.now.ready')).toHaveText('Prove');
+  await expect(row('Arbitrum Nova').locator('.ap-claim-steps li.now')).toHaveText('Wait');
+  await expect(row('Arbitrum Nova').getByRole('button')).toHaveCount(0);
+  // Gravity's G arrives as a token on Ethereum
+  await expect(row('Gravity')).toContainText(' G');
+  await expect(row('Abstract').locator('.ap-claim-steps li.done')).toHaveCount(3);
+  await expect(row('Abstract').getByRole('button', { name: 'Remove' })).toBeVisible();
+  if (process.env.SHOT) {
+    await page.screenshot({ path: process.env.SHOT.replace('.png', '-tab.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: process.env.SHOT.replace('.png', '-tab-phone.png'), fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await page.getByRole('tab', { name: 'Balances' }).click();
+    await page.screenshot({ path: process.env.SHOT.replace('.png', '-balances.png') });
+  }
+});
+

@@ -13,7 +13,7 @@ import { tokenRouteOf, type GroupKey } from './groups';
 import type { AddressRow } from './useAddress';
 import { OFFLINE } from '../lib/env';
 import { rpcCall } from '../lib/rpc';
-import { claimCostWei, nativeExitOf, nativeSteps, parentOf, startByMs } from '../sweep/native';
+import { claimCostWei, nativeExitOf, nativeSummary, parentOf, startByMs } from '../sweep/native';
 import { track } from '../lib/events';
 
 // Sweeping one group from the address page (redesign phase 3): pick how to sign, then
@@ -258,6 +258,9 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
   // When the dialog opened, for "start by" dates (read once, not during render)
   const [openedAt, setOpenedAt] = useState(0);
   const ownBridge = plan.group === 'claim';
+  // Focus starts on Back, not the first link in the list: nothing irreversible is one keypress away
+  const backRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (open) backRef.current?.focus(); }, [open]);
   // Counted only with something to sweep ("Nothing can be swept right now" is not a confirmation)
   const anyReady = m.readyRows.length > 0;
   useEffect(() => { if (open && anyReady) track('sweep-confirm'); }, [open, anyReady]);
@@ -355,47 +358,49 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
             ))}
           </div>
         )}
+        {ownBridge && n > 0 && (
+          <div className="zd-native" role="note">
+            <p className="zd-native-h">{needClaim ? 'Nothing arrives by itself' : 'After the sweep'}</p>
+            <p className="zd-native-lead">
+              {needClaim
+                ? <>Each chain&apos;s own bridge holds the funds until they are {ready.some((r) => nativeExitOf(r.chainId)?.prove) ? 'proved and ' : ''}claimed on {parentNames}, from the &ldquo;Waiting to be claimed&rdquo; tab on this page. Any wallet can pay that gas; the funds always go to {shortAddress(m.recipient)}. ZeroDust does not claim for you.</>
+                : <>Each chain&apos;s own bridge carries the funds to {parentNames}, at {shortAddress(m.recipient)}.</>}
+            </p>
+            {ready.map((r) => {
+              const exit = nativeExitOf(r.chainId);
+              if (!exit) return null;
+              const row = plan.chains.find((c) => c.chainId === r.chainId);
+              const p = parentOf(exit);
+              const price = gasPrices[p.chainId];
+              const cost = price !== undefined ? claimCostWei(exit, price) : null;
+              const costUsd = cost !== null ? usdValue(cost, 18, m.prices[p.symbol]) : null;
+              const startBy = row?.closing ? startByMs(exit, Date.parse(row.closing.closesAt)) : null;
+              const says = nativeSummary(exit, r.name);
+              return (
+                <div key={r.chainId} className="zd-native-chain">
+                  <ChainIcon chainId={r.chainId} name={r.name} size={22} />
+                  <div>
+                    <p className="zd-native-name">{r.name}</p>
+                    <p>{says.when}.</p>
+                    <p className="zd-native-cost">
+                      {says.arrives}.{' '}
+                      {exit.relayed ? `Nothing to pay on ${p.name}.`
+                        : `${exit.prove ? 'Two transactions' : 'One transaction'} on ${p.name}: ${cost !== null ? `about ${formatAmount(cost, 18)} ${p.symbol}${costUsd !== null ? ` (${formatUsd(costUsd)})` : ''} at today's gas` : 'cost unknown right now'}.`}
+                      {!exit.relayed && costUsd !== null && row?.usd && costUsd > row.usd / 2 ? ' That is a large share of what you sweep.' : ''}
+                      {exit.bridge && <> {exit.relayed ? 'If it is late, claim it' : 'Also possible'} on <a href={exit.bridge.url} target="_blank" rel="noreferrer">{exit.bridge.name} ↗</a>.</>}
+                    </p>
+                    {startBy !== null && (
+                      <p className="zd-native-warn">{r.name} closes on {new Date(Date.parse(row!.closing!.closesAt)).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}. {startBy > openedAt
+                        ? `Start by ${new Date(startBy).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}: the ${exit.prove ? 'prove' : 'claim'} needs the chain still running.`
+                        : `It may be too late: the ${exit.prove ? 'prove' : 'claim'} needs the chain still running.`}</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
-      {ownBridge && n > 0 && (
-        <div className="zd-native" role="note">
-          <p className="zd-native-h">{needClaim ? 'Nothing arrives by itself. After the sweep:' : 'After the sweep:'}</p>
-          {ready.map((r) => {
-            const exit = nativeExitOf(r.chainId);
-            if (!exit) return null;
-            const row = plan.chains.find((c) => c.chainId === r.chainId);
-            const p = parentOf(exit);
-            const price = gasPrices[p.chainId];
-            const cost = price !== undefined ? claimCostWei(exit, price) : null;
-            const costUsd = cost !== null ? usdValue(cost, 18, m.prices[p.symbol]) : null;
-            const startBy = row?.closing ? startByMs(exit, Date.parse(row.closing.closesAt)) : null;
-            return (
-              <div key={r.chainId} className="zd-native-chain">
-                <p className="zd-native-name"><ChainIcon chainId={r.chainId} name={r.name} size={18} /> {r.name}</p>
-                <ol>{nativeSteps(exit, r.name, shortAddress(m.recipient)).map((t) => <li key={t}>{t}</li>)}</ol>
-                {exit.relayed ? (
-                  <p className="zd-native-cost">Nothing to pay on {p.name}: the relayer&apos;s fee comes out of the balance and is in the amount above.</p>
-                ) : (
-                <p className="zd-native-cost">
-                  Your {exit.prove ? 'two transactions' : 'transaction'} on {p.name}: {cost !== null ? `about ${formatAmount(cost, 18)} ${p.symbol}${costUsd !== null ? ` (${formatUsd(costUsd)})` : ''} at today's gas` : 'cost unknown right now'}.
-                  {costUsd !== null && row?.usd && costUsd > row.usd / 2 ? ' That is a large share of what you sweep.' : ''}
-                </p>
-                )}
-                {startBy !== null && (
-                  <p className="zd-native-warn">{r.name} closes on {new Date(Date.parse(row!.closing!.closesAt)).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}. {startBy > openedAt
-                    ? `Start by ${new Date(startBy).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })}: the ${exit.prove ? 'prove' : 'claim'} needs the chain still running.`
-                    : `It may be too late: the ${exit.prove ? 'prove' : 'claim'} needs the chain still running.`}</p>
-                )}
-              </div>
-            );
-          })}
-          <label className="zd-native-ok">
-            <input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} />
-            {needClaim
-              ? <>I understand: the funds arrive only after I {ready.some((r) => nativeExitOf(r.chainId)?.prove) ? 'prove and ' : ''}claim on {parentNames}{ready.some((r) => nativeExitOf(r.chainId)?.relayed) ? ' (except where the relayer delivers)' : ''}, and ZeroDust does not do it for me.</>
-              : <>I understand: the funds go through the chain&apos;s own bridge and arrive on {parentNames}, not on the chain I picked.</>}
-          </label>
-        </div>
-      )}
       <div className="zd-confirm-bottom">
         {fixedFees.length > 0 && (
           <p className="zd-note">{fixedFees.map((r) => `${routeOf(r)} keeps a fixed ${formatAmount(st(r)!.bridgeFee!, r.decimals)} ${r.token} of the transfer from ${r.name}`).join('; ')}, whatever the amount. The amounts shown are after it.</p>
@@ -406,8 +411,16 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
         {n > 0 && totals.length > 0 && (
           <p className="zd-total"><span>{ownBridge ? 'You can claim' : 'You receive at least'}, at {m.toSelf ? 'your wallet' : shortAddress(m.recipient)}{plan.group !== 'token' ? ` on ${ownBridge ? parentNames : plan.group === 'elsewhere' ? m.destOf(plan.elsewhereChain!)?.name : destName}` : ''}</span><b>{totalText}{totalUsd > 0 ? ` (${formatUsd(totalUsd)})` : ''}</b></p>
         )}
+        {ownBridge && n > 0 && (
+          <label className="zd-native-ok">
+            <input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} />
+            <span>{needClaim
+              ? <>I understand: the funds arrive only after I {ready.some((r) => nativeExitOf(r.chainId)?.prove) ? 'prove and ' : ''}claim on {parentNames}{ready.some((r) => nativeExitOf(r.chainId)?.relayed) ? ' (except where the relayer delivers)' : ''}, and ZeroDust does not do it for me.</>
+              : <>I understand: the funds go through the chain&apos;s own bridge and arrive on {parentNames}, not on the chain I picked.</>}</span>
+          </label>
+        )}
         <div className="btns">
-          <button type="button" className="btn btn-ghost" onClick={onCancel}>{n === 0 ? 'Close' : 'Back'}</button>
+          <button type="button" className="btn btn-ghost" ref={backRef} onClick={onCancel}>{n === 0 ? 'Close' : 'Back'}</button>
           {n > 0 && <button type="button" className="btn btn-primary" disabled={ownBridge && !understood} onClick={() => { confirmed.current = true; track('sweep-started'); onConfirm(); }}>Sweep {n} {n === 1 ? 'chain' : 'chains'}</button>}
         </div>
       </div>
