@@ -163,6 +163,14 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
     if (wallet?.kind === 'key') begin(plan, wallet);
     else setPending(plan);
   };
+  /** One chain's whole balance to ZeroDust, or burned, on its own chain: no bridge, whatever its group */
+  const startGive = (group: GroupKey, row: AddressRow, give: 'donate' | 'burn') => {
+    if (sweepingNow) return;
+    setSelection({ group, ids: new Set([row.chainId]) });
+    const plan: SweepPlan = { group, chains: [row], destination: destination ?? row.chainId, recipient, give };
+    if (wallet?.kind === 'key') begin(plan, wallet);
+    else setPending(plan);
+  };
   const optionOf = (chainId: number): ChainOption | undefined => data.chainOptions.find((o) => o.chainId === chainId);
 
   // What a sweep moves: the destination chain's own balance (to this same wallet) is already there
@@ -282,6 +290,7 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
                   key={c.chainId} row={c} group={g.key} selected={isActive && selectedIds.has(c.chainId)} keyOnly={keyOnlyRow(c)}
                   onToggle={() => toggle(g.key, c.chainId)} destination={destination} destName={destName}
                   onSweep={sweepable(c) && !sweepingNow && destination !== null && !(g.key === 'own-chain' && !ownAddress) ? () => startSweep(g.key, [c]) : undefined}
+                  onGive={!sweepingNow && !finished.has(c.chainId) ? (give) => startGive(g.key, c, give) : undefined}
                   destToken={destToken ?? null} estimate={estimates[c.chainId]}
                   destPrice={destToken ? data.priceOf(destToken.token) : undefined}
                   unknownRoute={data.routesOf(c.chainId).unknown === true}
@@ -513,7 +522,7 @@ function OwnChainAddress({ value, onChange }: { value: Address | null; onChange:
 
 const SHOWN_PHASES = new Set(['sweeping', 'done', 'failed']);
 
-function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destination, destName, destToken, estimate, destPrice, unknownRoute, minimum, fixedFee, nameOf, usual, senderOnly, state, bridge, arrivalExplorer, arrivalName, running }: {
+function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, onGive, destination, destName, destToken, estimate, destPrice, unknownRoute, minimum, fixedFee, nameOf, usual, senderOnly, state, bridge, arrivalExplorer, arrivalName, running }: {
   row: AddressRow;
   group: GroupKey;
   selected: boolean;
@@ -521,6 +530,8 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
   onToggle: () => void;
   /** Sweep just this chain; absent while it cannot be swept */
   onSweep: (() => void) | undefined;
+  /** Give this chain's whole balance to ZeroDust, or burn it, instead; absent while sweeping */
+  onGive: ((give: 'donate' | 'burn') => void) | undefined;
   destination: number | null;
   destName: string | null;
   destToken: { token: string; decimals: number } | null;
@@ -542,6 +553,10 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
   arrivalName: string | undefined;
   running: boolean;
 }) {
+  // Other ways out (donate, burn), opened under the row
+  const [more, setMore] = useState(false);
+  const firstGive = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (more) firstGive.current?.focus(); }, [more]);
   const shown = state && (SHOWN_PHASES.has(state.phase) || (running && state.phase === 'quoting'));
   if (shown) return <ProgressRow row={row} state={state!} bridge={bridge} arrivalExplorer={arrivalExplorer} arrivalName={arrivalName} />;
   const token = tokenRouteOf(row.chainId, destination);
@@ -606,7 +621,18 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, destinatio
       <span className="ap-bal">{formatAmount(row.balance, row.decimals)} {row.token}<small>{formatUsd(row.usd)}</small></span>
       <span className="ap-route"><span className={`tag ${route.tone}`} title={route.title}>{route.text}</span></span>
       <span className="ap-recv">{receive}</span>
-      <button type="button" className="btn btn-ghost btn-xs" disabled={!onSweep} onClick={onSweep} aria-label={`Sweep ${row.name}`}>Sweep</button>
+      <span className="ap-row-act">
+        <button type="button" className="btn btn-ghost btn-xs" disabled={!onSweep} onClick={onSweep} aria-label={`Sweep ${row.name}`}>Sweep</button>
+        <button type="button" className="btn btn-ghost btn-xs ap-more-btn" aria-label={`More for ${row.name}`} aria-expanded={more} aria-controls={`ap-more-${row.chainId}`} disabled={!onGive} onClick={() => setMore((o) => !o)}>⋯</button>
+      </span>
+      {more && onGive && (
+        <div className="ap-row-more" id={`ap-more-${row.chainId}`} role="group" aria-label={`Other ways out for ${row.name}`} onKeyDown={(e) => { if (e.key === 'Escape') setMore(false); }}>
+          <p>Instead of bridging it, on {row.name} itself:</p>
+          <button type="button" className="btn btn-ghost btn-xs" ref={firstGive} onClick={() => { setMore(false); onGive('donate'); }}>Donate it to ZeroDust</button>
+          <button type="button" className="btn btn-ghost btn-xs" onClick={() => { setMore(false); onGive('burn'); }}>Burn it</button>
+          <button type="button" className="linkbtn" onClick={() => setMore(false)}>Cancel</button>
+        </div>
+      )}
     </li>
   );
 }
