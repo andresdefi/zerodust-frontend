@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { isAddressEqual, type Address } from 'viem';
 import { KeyEntry } from '../components/KeyEntry';
 import { ChainIcon } from '../components/ChainIcon';
-import { TOKEN_EXITS } from '../direct/plan';
+import { BURN_ADDRESS, TOKEN_EXITS, ZERODUST_ADDRESS } from '../direct/plan';
 import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
 import { connectMetaMask, findMetaMask, walletErrorText, type MetaMaskSession } from '../sweep/metamask';
 import { isPaused, useServiceStatus } from '../sweep/status';
@@ -35,6 +35,8 @@ export interface SweepPlan {
   ownChainAddress?: Address;
   /** 'elsewhere' group: the chain these go to instead */
   elsewhereChain?: number;
+  /** Instead of the group's way out: give it all to ZeroDust, or burn it, on its own chain */
+  give?: 'donate' | 'burn';
 }
 
 function useDialog(open: boolean) {
@@ -187,7 +189,9 @@ export function SweepSession({ wallet, plan, onProgress, onEnd }: {
   useEffect(() => {
     if (step !== 'choices') return;
     for (const c of plan.chains) {
-      if (plan.group === 'token') {
+      if (plan.give) {
+        model.setChoice(c.chainId, plan.give);
+      } else if (plan.group === 'token') {
         if (c.direct && TOKEN_EXITS[c.chainId]) model.setChoice(c.chainId, 'exit-donate');
         else model.setChoice(c.chainId, 'elsewhere', tokenRouteOf(c.chainId, plan.destination)?.toChainId);
       } else if (plan.group === 'elsewhere' && plan.elsewhereChain !== undefined) {
@@ -288,6 +292,8 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
   // Group by route (the bridge, or same chain / an address on the chain)
   const routeOf = (r: Row) => {
     const choice = m.choices[r.chainId];
+    if (choice === 'donate') return 'Donated to ZeroDust';
+    if (choice === 'burn') return 'Burned';
     if (choice === 'address') return 'To an address on the same chain';
     if (r.chainId === plan.destination) return 'Same chain';
     return m.bridgeOf[r.chainId] ?? 'Bridge';
@@ -316,7 +322,10 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
   const totals = m.readyTotals;
   const totalText = totals.map((t) => `${formatAmount(t.amount, t.decimals)} ${t.symbol}${t.dest.chainId !== plan.destination ? ` on ${t.dest.name}` : ''}`).join(' + ');
   const totalUsd = totals.reduce((s, t) => s + (usdValue(t.amount, t.decimals, m.prices[t.isToken ? t.symbol : t.dest.token]) ?? 0), 0);
-  const title = ownBridge ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} through ${n === 1 ? 'its' : 'their'} own bridge to ${parentNames}?`
+  const names = ready.map((r) => r.name).join(', ');
+  const title = plan.give === 'donate' ? `Donate everything on ${names} to ZeroDust?`
+    : plan.give === 'burn' ? `Burn everything on ${names}?`
+    : ownBridge ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} through ${n === 1 ? 'its' : 'their'} own bridge to ${parentNames}?`
     : plan.group === 'own-chain' ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} to an address on ${n === 1 ? 'its' : 'each'} chain?`
     : plan.group === 'token' ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} as tokens?`
     : `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} to ${plan.group === 'elsewhere' ? m.destOf(plan.elsewhereChain!)?.name ?? 'another chain' : destName}?`;
@@ -325,7 +334,11 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
     <dialog ref={ref} className="modal zd-confirm" onClose={() => { if (!confirmed.current) onCancel(); }} aria-labelledby="zd-confirm-title">
       <div className="zd-confirm-top">
         <h3 id="zd-confirm-title">{n === 0 ? 'Nothing can be swept right now' : title}</h3>
-        <p className="lead">Every balance below leaves your wallet and each chain ends at exactly 0. This cannot be undone.</p>
+        <p className="lead">{plan.give === 'donate'
+          ? `The whole balance goes to ZeroDust's address on the same chain (${shortAddress(ZERODUST_ADDRESS)}), and your wallet there ends at exactly 0. Thank you. This cannot be undone.`
+          : plan.give === 'burn'
+            ? `The whole balance goes to ${shortAddress(BURN_ADDRESS)}, an address no one controls, so it is gone for good. Your wallet there ends at exactly 0. This cannot be undone.`
+            : 'Every balance below leaves your wallet and each chain ends at exactly 0. This cannot be undone.'}</p>
       </div>
       <div className="zd-confirm-list">
         {[...routes.entries()].map(([route, rows]) => {
@@ -421,7 +434,7 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
         )}
         <div className="btns">
           <button type="button" className="btn btn-ghost" ref={backRef} onClick={onCancel}>{n === 0 ? 'Close' : 'Back'}</button>
-          {n > 0 && <button type="button" className="btn btn-primary" disabled={ownBridge && !understood} onClick={() => { confirmed.current = true; track('sweep-started'); onConfirm(); }}>Sweep {n} {n === 1 ? 'chain' : 'chains'}</button>}
+          {n > 0 && <button type="button" className="btn btn-primary" disabled={ownBridge && !understood} onClick={() => { confirmed.current = true; track('sweep-started'); onConfirm(); }}>{plan.give === 'donate' ? 'Donate' : plan.give === 'burn' ? 'Burn' : 'Sweep'} {n} {n === 1 ? 'chain' : 'chains'}</button>}
         </div>
       </div>
     </dialog>

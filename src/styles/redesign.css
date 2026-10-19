@@ -126,6 +126,10 @@
 .ap-bal { text-align: right; }
 .ap-bal small { display: block; color: var(--muted); font-size: 13px; }
 .ap-recv { text-align: right; font-size: 14.5px; }
+.ap-row-act { display: flex; align-items: center; gap: 6px; }
+.ap-more-btn { padding: 0 10px; font-size: 16px; letter-spacing: 0.05em; }
+.ap-row-more { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 10px; padding: 10px 12px; border-radius: 10px; background: var(--sunken); font-size: 14px; }
+.ap-row-more p { margin: 0 auto 0 0; color: var(--muted); }
 .ap-sticky { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -12px 32px -16px rgb(26 27 30 / 0.18); padding-bottom: env(safe-area-inset-bottom); z-index: 5; }
 .ap-sticky-in { max-width: 1240px; margin: 0 auto; padding: 14px 32px; display: flex; align-items: center; gap: 20px; }
 .ap-sticky-in p { flex: 1; font-size: 15px; }
@@ -137,13 +141,14 @@
   .hm-ba { grid-template-columns: 1fr; gap: 12px; }
   .hm-arrow { transform: rotate(90deg); height: 28px; }
   .hm-safe { grid-template-columns: 1fr; }
-  .ap-row { grid-template-columns: 18px 1fr auto; grid-template-areas: 'cb chain bal' '. route recv'; row-gap: 6px; }
+  .ap-row { grid-template-columns: 18px 1fr auto auto; grid-template-areas: 'cb chain bal act' '. route recv act'; row-gap: 6px; column-gap: 12px; }
+  .ap-row > .ap-row-act { grid-area: act; }
+  .ap-row-act > .btn:not(.ap-more-btn) { display: none; }
   .ap-row > .ap-cb { grid-area: cb; }
   .ap-row > .ap-chain { grid-area: chain; }
   .ap-row > .ap-bal { grid-area: bal; }
   .ap-row > .ap-route { grid-area: route; }
   .ap-row > .ap-recv { grid-area: recv; color: var(--muted); font-size: 13px; }
-  .ap-row > .btn { display: none; }
 }
 
 @media (max-width: 760px) {

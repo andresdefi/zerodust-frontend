@@ -438,3 +438,29 @@ test("own bridges: one list with each chain's summary, Fraxtal's FRAX shown arri
   await dialog.getByRole('checkbox', { name: /I understand/ }).check();
   await expect(sweep).toBeEnabled();
 });
+
+test("any row's menu gives its whole balance to ZeroDust, or burns it, on its own chain: no bridge, and said before signing", async ({ page }) => {
+  const { key, quoted } = await openAddress(page, { mitosis: true });
+  const mitosis = row(page, 'Mitosis');
+  // Still in its own group: a small balance is not an unbridgeable chain
+  await expect(group(page, /Arrives as a token/).locator('.ap-row', { hasText: 'Mitosis' })).toBeVisible();
+  const more = mitosis.getByRole('button', { name: 'More for Mitosis' });
+  await more.click();
+  const options = page.getByRole('group', { name: 'Other ways out for Mitosis' });
+  await expect(options.getByRole('button')).toHaveText(['Donate it to ZeroDust', 'Burn it', 'Cancel']);
+  await expect(options.getByRole('button', { name: 'Donate it to ZeroDust' })).toBeFocused();
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace('.png', '-menu.png') });
+  await page.keyboard.press('Escape');
+  await expect(options).toBeHidden();
+  await more.click();
+  await options.getByRole('button', { name: 'Donate it to ZeroDust' }).click();
+  await useKey(page, key);
+  const dialog = confirmDialog(page);
+  await expect(dialog.getByRole('heading', { name: 'Donate everything on Mitosis to ZeroDust?' })).toBeVisible({ timeout: 30_000 });
+  await expect(dialog).toContainText("The whole balance goes to ZeroDust's address on the same chain (0x01eD…ff7D)");
+  await expect(dialog).toContainText('Donated to ZeroDust · 1');
+  await expect(dialog.getByRole('button', { name: 'Donate 1 chain' })).toBeVisible();
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace('.png', '-donate.png') });
+  // Quoted on Mitosis itself, to ZeroDust's address
+  expect(quoted.filter((q) => q.from === 124816).at(-1)).toEqual({ from: 124816, to: 124816, destination: '0x01eD5c94DE39E73C986b98B85C2c0A3d1BEDff7D' });
+});

@@ -447,7 +447,11 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       }
       const to = Number(p.get('toChainId'));
       quoted.push({ from, to, destination: p.get('destination')! });
-      const q = p.get('bridge') === 'native' && NATIVE_ROUTES[from] ? nativeQuote(from, p.get('destination')!) : from === MITOSIS ? mitosisQuote(p.get('destination')!) : from === ENDURANCE ? enduranceQuote(p.get('destination')!) : quote(from, to, p.get('destination')!);
+      // Token deliveries leave the chain; on the same chain (a donation, a burn) it is a plain transfer
+      const q = p.get('bridge') === 'native' && NATIVE_ROUTES[from] ? nativeQuote(from, p.get('destination')!)
+        : from === MITOSIS && to !== from ? mitosisQuote(p.get('destination')!)
+        : from === ENDURANCE && to !== from ? enduranceQuote(p.get('destination')!)
+        : quote(from, to, p.get('destination')!);
       quotes.set(q.quoteId, { ...q, from, to });
       return json(route, q);
     }
