@@ -33,7 +33,7 @@ As of 13 October 2026, `GET /direct/chains` lists 22 chains:
 | Blast | 81457 | ETH | `opguard` |
 | Ethereal | 5064014 | USDe | `arbitrum` |
 
-Read the list from the API rather than hardcoding it. Blast (26 October 2026), Gravity (1 November 2026) and Abstract (15 December 2026) are shutting down: their entries carry `closing`, and each leaves the list when it closes. Vana has `noExit: true`: no bridge takes VANA out, so only a same-chain sweep to another address is planned.
+Read the list from the API rather than hardcoding it. Blast (26 October 2026), Gravity (1 November 2026) and Abstract (15 December 2026) are shutting down: their entries carry `closing`, and each leaves the list when it closes.
 
 ## How exact zero works
 
@@ -172,7 +172,7 @@ Before signing, check that the plan is what you asked for and that the sum of `v
 
 ### GET /direct/exit
 
-For a chain with no direct route but an exit: a swap-then-bridge (LI.FI), or the chain's own token bridge (Telos: TLOS to Base through its OFT, `route: "oft"`, the token named in `receiveToken`). Takes `chainId`, `toChainId` (must differ from `chainId`), `from`, `recipient` and optional `feePaidTx`.
+For a chain with no direct route but an exit: a swap-then-bridge (LI.FI), or the chain's own token bridge (Telos: TLOS to Base through its LayerZero v1 OFT; Vana: VANA to Base through its LayerZero v2 adapter; `route: "oft"`, the token named in `receiveToken`). Takes `chainId`, `toChainId` (must differ from `chainId`), `from`, `recipient` and optional `feePaidTx`.
 
 The response has the same shape as `/direct/prepare`, with `route: "lifi"` and a `swap` transaction (or `route: "oft"` and a `sweep` into the OFT), `tool` (the tool used) and `leftoverMax`. A swap cannot use its gas limit exactly, so it leaves a small remainder. After the swap lands, sweep that remainder with `/direct/prepare` in `burn` or `donate` mode. If the balance is then above `leftoverMax`, the swap failed: stop.
 

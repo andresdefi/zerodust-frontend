@@ -1,3 +1,4 @@
+import { parseAbi } from 'viem';
 import { API_URL } from '../sweep/constants';
 import type { Closing } from '../address/closing';
 import type { L1Formula } from './l1fee';
@@ -48,29 +49,51 @@ export const GASLIMIT_CHAINS: ReadonlySet<number> = new Set([143]);
  */
 export const FIXED_PRICE_CHAINS: ReadonlySet<number> = new Set([40]);
 
-/**
- * Direct chains whose own bridge is the exit (the API's route 'oft'): a
- * LayerZero v1 native OFT that delivers the chain's token as an ERC-20 on one
- * destination, not gas (owner decision 2026-10-07, like MITO). Pinned here: a
- * plan naming another contract, chain or token is refused.
- */
-export const TOKEN_EXITS: Readonly<Record<number, {
+interface TokenExitBase {
   toChainId: number;
   oft: string;
-  lzChainId: number;
-  /** The only adapterParams accepted: type 1 with the OFT's minimum destination gas (it prices the fee) */
-  adapterParams: string;
   /** Amounts round down to a multiple of this (the OFT's shared decimals); the rounding joins the fee */
   dustRate: bigint;
   bridge: string;
   token: { symbol: string; address: string; decimals: number };
-}>> = {
+}
+
+/**
+ * Direct chains whose own bridge is the exit (the API's route 'oft'): a
+ * LayerZero native OFT that delivers the chain's token as an ERC-20 on one
+ * destination, not gas (owner decision 2026-10-07, like MITO). Pinned here: a
+ * plan naming another contract, chain or token is refused.
+ */
+export const TOKEN_EXITS: Readonly<Record<number, TokenExitBase & (
+  /** LayerZero v1: sendFrom, fee from estimateSendFee */
+  | {
+    lz: 1;
+    lzChainId: number;
+    /** The only adapterParams accepted: type 1 with the OFT's minimum destination gas (it prices the fee) */
+    adapterParams: string;
+  }
+  /** LayerZero v2 NativeOFTAdapter: send(SendParam, fee, refund), value == nativeFee + amountLD, fee from quoteSend */
+  | { lz: 2; dstEid: number }
+)>> = {
   40: {
-    toChainId: 8453, oft: '0x02Ea28694Ae65358Be92bAFeF5Cb8C211f33Db1A', lzChainId: 184,
+    lz: 1, toChainId: 8453, oft: '0x02Ea28694Ae65358Be92bAFeF5Cb8C211f33Db1A', lzChainId: 184,
     adapterParams: `0x0001${(200_000).toString(16).padStart(64, '0')}`, dustRate: 10n ** 14n, bridge: "Telos's own bridge",
     token: { symbol: 'TLOS', address: '0x7252c865c05378Ffc15120F428dd65804dD0CE63', decimals: 18 },
   },
+  // Vana's official bridge (docs.vana.org): its NativeOFTAdapter, peer on Base (eid 30184) the VANA
+  // OFT at the same address; shared decimals 6. Used where no gas bridge reaches the destination
+  1480: {
+    lz: 2, toChainId: 8453, oft: '0x7FF7Fa94b8b66Ef313f7970d4EEbd2CB3103a2C0', dstEid: 30184, dustRate: 10n ** 12n, bridge: "Vana's own bridge",
+    token: { symbol: 'VANA', address: '0x7FF7Fa94b8b66Ef313f7970d4EEbd2CB3103a2C0', decimals: 18 },
+  },
 };
+
+const SEND_PARAM = '(uint32 dstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD, bytes extraOptions, bytes composeMsg, bytes oftCmd)';
+/** LayerZero v2 OFT: send and quoteSend */
+export const OFT_V2_ABI = parseAbi([
+  `function send(${SEND_PARAM} sendParam, (uint256 nativeFee, uint256 lzTokenFee) fee, address refundAddress) payable`,
+  `function quoteSend(${SEND_PARAM} sendParam, bool payInLzToken) view returns ((uint256 nativeFee, uint256 lzTokenFee))`,
+]);
 
 /**
  * OP-stack chains without EIP-7702 (the API's kind 'opguard'), with the L1 fee formula each one

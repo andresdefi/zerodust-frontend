@@ -233,3 +233,52 @@ describe('verifyPlan: a token exit through the chain\'s own bridge (Telos -> TLO
     expect(() => verifyPlan(plan(), telosCtx({ toChainId: 1 }))).toThrow(/LI.FI/);
   });
 });
+
+describe('verifyPlan: a token exit through a LayerZero v2 adapter (Vana -> VANA on Base)', () => {
+  const OFT = '0x7FF7Fa94b8b66Ef313f7970d4EEbd2CB3103a2C0';
+  const SEND = parseAbi(['function send((uint32 dstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD, bytes extraOptions, bytes composeMsg, bytes oftCmd) sendParam, (uint256 nativeFee, uint256 lzTokenFee) fee, address refundAddress) payable']);
+  const pad = (a: string) => `0x${a.slice(2).toLowerCase().padStart(64, '0')}` as `0x${string}`;
+  const AMOUNT = 5n * 10n ** 16n;
+  const vanaCtx = (over: Partial<PlanContext> = {}) => ctx({ chainId: 1480, toChainId: 8453, recipient: OTHER, mode: 'exit', ...over });
+  function plan(o: { dstEid?: number; to?: string; refund?: string; amount?: bigint; min?: bigint; feeOff?: bigint; zro?: bigint; options?: `0x${string}`; target?: string; receive?: bigint; fn?: 'send' | 'sendFrom' } = {}): DirectPlan {
+    const gas = 430_000n;
+    const value = BALANCE - FEE - 21_000n * PRICE - gas * PRICE - 42_000n * PRICE;
+    const amount = o.amount ?? AMOUNT;
+    const data = o.fn === 'sendFrom'
+      ? encodeFunctionData({ abi: parseAbi(['function sendFrom(address from, uint16 dstChainId, bytes32 toAddress, uint256 amount, (address refundAddress, address zroPaymentAddress, bytes adapterParams) callParams) payable']), functionName: 'sendFrom', args: [FROM, 184, pad(OTHER), amount, { refundAddress: ZERODUST_ADDRESS, zroPaymentAddress: '0x0000000000000000000000000000000000000000', adapterParams: '0x' }] })
+      : encodeFunctionData({
+        abi: SEND, functionName: 'send',
+        args: [
+          { dstEid: o.dstEid ?? 30184, to: pad(o.to ?? OTHER), amountLD: amount, minAmountLD: o.min ?? amount, extraOptions: o.options ?? '0x', composeMsg: '0x', oftCmd: '0x' },
+          { nativeFee: value - amount - (o.feeOff ?? 0n), lzTokenFee: o.zro ?? 0n },
+          (o.refund ?? ZERODUST_ADDRESS) as `0x${string}`,
+        ],
+      });
+    return {
+      chainId: 1480, route: 'oft', requestId: null, receive: String(o.receive ?? amount), fee: FEE.toString(), balance: BALANCE.toString(),
+      leftoverMax: String(gas * PRICE + 42_000n * PRICE),
+      txs: [tx({ kind: 'fee', to: ZERODUST_ADDRESS, value: FEE.toString() }), tx({ nonce: 5, to: o.target ?? OFT, data, value: value.toString(), gas: gas.toString() })],
+    };
+  }
+
+  it('accepts the pinned adapter paying the recipient on Base, value = fee + amount, refund to ZeroDust', () => {
+    expect(() => verifyPlan(plan(), vanaCtx())).not.toThrow();
+  });
+
+  it('refuses another contract, call, chain, recipient, minimum, options, ZRO, refund, a value that is not fee + amount, or a shown amount that differs', () => {
+    expect(() => verifyPlan(plan({ target: OTHER }), vanaCtx())).toThrow(/Vana's own bridge/);
+    expect(() => verifyPlan(plan({ fn: 'sendFrom' }), vanaCtx())).toThrow(/not a send/);
+    expect(() => verifyPlan(plan({ dstEid: 30101 }), vanaCtx())).toThrow(/another chain/);
+    expect(() => verifyPlan(plan({ to: FROM }), vanaCtx())).toThrow(/pays someone else/);
+    expect(() => verifyPlan(plan({ min: AMOUNT - 1n }), vanaCtx())).toThrow(/accepts less/);
+    expect(() => verifyPlan(plan({ options: '0x0003' }), vanaCtx())).toThrow(/more than a plain transfer/);
+    expect(() => verifyPlan(plan({ zro: 1n }), vanaCtx())).toThrow(/ZRO/);
+    expect(() => verifyPlan(plan({ refund: FROM }), vanaCtx())).toThrow(/refund/);
+    expect(() => verifyPlan(plan({ feeOff: 1n }), vanaCtx())).toThrow(/does not fit/);
+    expect(() => verifyPlan(plan({ receive: AMOUNT + 1n }), vanaCtx())).toThrow(/amount shown/);
+  });
+
+  it('a Vana exit to any other chain is not the token exit', () => {
+    expect(() => verifyPlan(plan(), vanaCtx({ toChainId: 42161 }))).toThrow(/LI.FI/);
+  });
+});

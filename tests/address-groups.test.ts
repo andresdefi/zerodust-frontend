@@ -42,8 +42,15 @@ describe('groupOf: one group per way of sweeping and what arrives', () => {
   });
 
   it('not known yet (or no bridge answered): kept with the gas groups', () => {
-    expect(groupOf(chain(1480, { direct: true }), { gas: null }, BASE)).toBe('gas');
-    expect(groupOf(chain(1480, { direct: true }), { gas: null, unknown: true }, BASE)).toBe('gas');
+    expect(groupOf(chain(14, { direct: true }), { gas: null }, BASE)).toBe('gas');
+    expect(groupOf(chain(14, { direct: true }), { gas: null, unknown: true }, BASE)).toBe('gas');
+  });
+
+  it('Vana: gas where a bridge delivers it, gas elsewhere before its token exit, VANA on Base otherwise', () => {
+    expect(tokenRouteOf(1480, BASE)).toEqual({ symbol: 'VANA', toChainId: BASE, toChainName: 'Base' });
+    expect(groupOf(chain(1480, { direct: true }), { gas: true }, 42161)).toBe('gas');
+    expect(groupOf(chain(1480, { direct: true }), { gas: false, notToDestination: true }, BASE)).toBe('elsewhere');
+    expect(groupOf(chain(1480, { direct: true }), { gas: false }, BASE)).toBe('token');
   });
 });
 

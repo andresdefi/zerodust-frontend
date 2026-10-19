@@ -1,6 +1,6 @@
 import { verifyAcrossDeposit } from './across';
 import { decodeFunctionData, parseAbi } from 'viem';
-import { tokenExitFor } from './plan';
+import { OFT_V2_ABI, tokenExitFor } from './plan';
 import { nativeExitOf } from '../sweep/native';
 import { checkMesonCall, MESON_CONTRACT, MESON_ROUTES } from './meson';
 import {
@@ -269,8 +269,31 @@ export function verifyPlan(plan: DirectPlan, ctx: PlanContext): PlanChecks {
         if (plan.route !== 'lifi' || last.kind !== 'swap' || !eq(last.to, LIFI_DIAMOND)) fail('the swap does not go to LI.FI\'s contract');
         return {};
       }
-      // The chain's own bridge: sendFrom(wallet, destination, recipient, amount, refund elsewhere than the wallet)
       if (plan.route !== 'oft' || last.kind !== 'sweep' || !eq(last.to, tokenExit.oft)) fail(`the transfer does not go to ${tokenExit.bridge}`);
+      if (tokenExit.lz === 2) {
+        // v2: send({destination, recipient, amount, minimum = amount, no options}, {fee, no ZRO}, refund elsewhere than the wallet)
+        let v2: readonly [{ dstEid: number; to: string; amountLD: bigint; minAmountLD: bigint; extraOptions: string; composeMsg: string; oftCmd: string }, { nativeFee: bigint; lzTokenFee: bigint }, string];
+        try {
+          const decoded = decodeFunctionData({ abi: OFT_V2_ABI, data: last.data as `0x${string}` });
+          if (decoded.functionName !== 'send') return fail('the bridge call is not a send');
+          v2 = decoded.args;
+        } catch {
+          return fail('the bridge call is not a send');
+        }
+        const [param, fee, refund] = v2;
+        if (param.dstEid !== tokenExit.dstEid) fail('the bridge transfer goes to another chain');
+        if (param.to.toLowerCase() !== `0x${recipientBody.padStart(64, '0')}`) fail('the bridge transfer pays someone else');
+        if (param.minAmountLD !== param.amountLD) fail('the bridge transfer accepts less than it sends');
+        if (param.extraOptions !== '0x' || param.composeMsg !== '0x' || param.oftCmd !== '0x') fail('the bridge transfer asks for more than a plain transfer');
+        if (fee.lzTokenFee !== 0n) fail('the bridge transfer pays in ZRO');
+        // A refund to the wallet would leave dust; ZeroDust or the burn address only
+        if (!eq(refund, ZERODUST_ADDRESS) && !eq(refund, BURN_ADDRESS)) fail('the bridge fee refund does not go to ZeroDust');
+        // The adapter takes exactly this value; the fee itself is checked against the chain in run.ts
+        if (param.amountLD === 0n || fee.nativeFee + param.amountLD !== BigInt(last.value)) fail('the bridged amount does not fit in the value sent');
+        if (BigInt(plan.receive) !== param.amountLD) fail('the amount shown is not the amount bridged');
+        return {};
+      }
+      // v1: sendFrom(wallet, destination, recipient, amount, refund elsewhere than the wallet)
       let args: readonly [string, number, string, bigint, { refundAddress: string; zroPaymentAddress: string; adapterParams: string }];
       try {
         args = decodeFunctionData({ abi: OFT_SEND, data: last.data as `0x${string}` }).args as typeof args;
