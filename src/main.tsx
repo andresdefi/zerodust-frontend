@@ -9,8 +9,10 @@ import './styles/app.css';
 import './styles/redesign.css';
 import { App } from './App';
 import { applyTheme, storedTheme } from './lib/theme';
+import { trackVisit } from './lib/events';
 
 applyTheme(storedTheme(), false);
+trackVisit();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
