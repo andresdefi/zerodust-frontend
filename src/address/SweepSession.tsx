@@ -3,7 +3,7 @@ import { isAddressEqual, type Address } from 'viem';
 import { KeyEntry } from '../components/KeyEntry';
 import { ChainIcon } from '../components/ChainIcon';
 import { BURN_ADDRESS, TOKEN_EXITS, ZERODUST_ADDRESS } from '../direct/plan';
-import { formatAmount, formatUsd, shortAddress, usdValue } from '../lib/format';
+import { formatAmount, formatUsd, listNames, shortAddress, usdValue } from '../lib/format';
 import { connectMetaMask, findMetaMask, walletErrorText, type MetaMaskSession } from '../sweep/metamask';
 import { isPaused, useServiceStatus } from '../sweep/status';
 import { useSweep, type SweepModel } from '../sweep/useSweep';
@@ -322,7 +322,7 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
   const totals = m.readyTotals;
   const totalText = totals.map((t) => `${formatAmount(t.amount, t.decimals)} ${t.symbol}${t.dest.chainId !== plan.destination ? ` on ${t.dest.name}` : ''}`).join(' + ');
   const totalUsd = totals.reduce((s, t) => s + (usdValue(t.amount, t.decimals, m.prices[t.isToken ? t.symbol : t.dest.token]) ?? 0), 0);
-  const names = ready.map((r) => r.name).join(', ');
+  const names = listNames(ready.map((r) => r.name));
   const title = plan.give === 'donate' ? `Donate everything on ${names} to ZeroDust?`
     : plan.give === 'burn' ? `Burn everything on ${names}?`
     : ownBridge ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} through ${n === 1 ? 'its' : 'their'} own bridge to ${parentNames}?`

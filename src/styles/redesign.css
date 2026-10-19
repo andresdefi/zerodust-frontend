@@ -135,6 +135,8 @@
 .ap-sticky-in p { flex: 1; font-size: 15px; }
 .ap-sticky-in small { display: block; color: var(--muted); font-size: 13px; }
 .ap-sticky-in .btn { height: 50px; padding: 0 26px; font-size: 16px; }
+.ap-sticky-in .btn.ap-more-btn { flex: 0 0 auto; padding: 0 16px; }
+.ap-sticky-more { max-width: 1240px; margin: 0 auto; padding: 12px 32px 0; }
 
 @media (max-width: 900px) {
   .hm-ways { grid-template-columns: 1fr; }
@@ -179,6 +181,8 @@
   .ap-sticky-in p { flex: 1 1 100%; font-size: 14px; }
   .ap-sticky-in small { display: none; }
   .ap-sticky-in .btn { flex: 1; }
+  .ap-sticky-in .btn.ap-more-btn { flex: 0 0 auto; }
+  .ap-sticky-more { padding: 12px 16px 0; }
 }
 
 /* Phase 3: sweeping from the address page */
