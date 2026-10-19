@@ -149,21 +149,44 @@ test('refuses a direct plan that pays someone else, and sends nothing', async ({
   expect(sent).toEqual([]);
 });
 
-test('a chain whose bridges cannot reach the destination goes to another chain the user picks', async ({ page }) => {
+test('a chain whose bridges cannot reach the destination stays with the rest, says where it goes instead, and goes there', async ({ page }) => {
   const { key, swept, sent } = await openAddress(page, { direct: true, onlyTo: 10 });
-  // After the route is asked again (twice, 3 s apart), Avalanche is known not to reach Base
-  const elsewhere = group(page, "Can't reach Base");
-  await expect(elsewhere).toContainText('Avalanche', { timeout: 20_000 });
-  await elsewhere.getByRole('button', { name: 'Choose a chain' }).click();
-  await page.getByRole('dialog', { name: 'Receive on' }).getByRole('button', { name: /^Optimism/ }).click();
-  await expect(elsewhere.getByRole('button', { name: /To Optimism/ })).toBeVisible();
-  await sweepOnly(page, "Can't reach Base", ['Avalanche']);
+  // After the route is asked again (twice, 3 s apart), Avalanche is known not to reach Base, but Optimism
+  const gas = group(page, 'Arrives as gas on Base');
+  const avax = gas.locator('.ap-row', { hasText: 'Avalanche' });
+  await expect(avax).toContainText('To Optimism, not Base', { timeout: 20_000 });
+  await expect(avax).toContainText(/ETH on Optimism/);
+  await expect(page.getByRole('heading', { name: /Can't reach/ })).toHaveCount(0);
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace('.png', '-alt.png') });
+  await sweepOnly(page, 'Arrives as gas on Base', ['Avalanche']);
   await useKey(page, key);
-  await expect(confirmDialog(page).getByRole('heading', { name: 'Sweep 1 chain to Optimism?' })).toBeVisible({ timeout: 30_000 });
+  const dialog = confirmDialog(page);
+  await expect(dialog.getByRole('heading', { name: 'Sweep 1 chain to Optimism?' })).toBeVisible({ timeout: 30_000 });
+  await expect(dialog).toContainText('on Optimism');
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace('.png', '-alt-confirm.png') });
   await confirmSweep(page, 1);
   await expect(row(page, 'Avalanche')).toContainText('Done · 0 left', { timeout: 60_000 });
   expect(sent).toHaveLength(2);
   expect(swept.has(43114)).toBe(true);
+});
+
+test('a sponsored chain no bridge takes to the destination right now is quoted to another chain and swept there with the rest', async ({ page }) => {
+  const { key, quoted } = await openAddress(page, { busyTo: 10 });
+  const gas = group(page, 'Arrives as gas on Base');
+  const op = gas.locator('.ap-row', { hasText: 'Optimism' });
+  // Base first, then the next candidate a bridge serves: Arbitrum
+  await expect(op).toContainText('To Arbitrum, not Base', { timeout: 20_000 });
+  await expect(op).toContainText(/ETH on Arbitrum/);
+  await expect(page.locator('.ap-sticky')).toContainText('1 chain to another chain, as each row says');
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace('.png', '-busy.png') });
+  await page.locator('.ap-sticky .btn-primary').click();
+  await useKey(page, key);
+  const dialog = confirmDialog(page);
+  await expect(dialog.getByRole('heading', { name: 'Sweep 1 chain to Arbitrum?' })).toBeVisible({ timeout: 30_000 });
+  await expect(dialog).toContainText('on Arbitrum');
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace('.png', '-busy-confirm.png') });
+  // The sweep's own quote goes to Arbitrum
+  expect(quoted.filter((q) => q.from === 10).at(-1)?.to).toBe(42161);
 });
 
 test('a passing "unknown" route does not send a chain elsewhere', async ({ page }) => {

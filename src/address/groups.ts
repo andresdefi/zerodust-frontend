@@ -35,6 +35,11 @@ export interface ChainRoutes {
   gas: boolean | null;
   /** Gas bridges exist, but none reaches the chosen destination */
   notToDestination?: boolean;
+  /**
+   * The chain a bridge takes it to instead, chosen for it (owner, 2026-10-19: show where it can go
+   * and sweep it with the rest): it stays in the gas group, its row naming that chain
+   */
+  alt?: number;
   /** Asked, and no bridge gave an answer either way (throttled, down): not selected by default */
   unknown?: boolean;
   /** Below every bridge's minimum: the least a bridge takes (stays in its gas group, not selected) */
@@ -95,7 +100,7 @@ export function groupOf(chain: AddressChain, routes: ChainRoutes, destination: n
   // Staying on the same chain is always a plain transfer
   if (destination !== null && chain.chainId === destination) return signer;
   if (routes.gas === true || routes.minimum !== undefined) return signer;
-  if (routes.notToDestination) return 'elsewhere';
+  if (routes.notToDestination) return routes.alt !== undefined ? signer : 'elsewhere';
   if (tokenRouteOf(chain.chainId)) return 'token';
   // Not known yet: the gas groups, until a bridge says otherwise
   if (routes.gas === null) return signer;

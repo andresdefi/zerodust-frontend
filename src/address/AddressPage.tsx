@@ -91,8 +91,10 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
   const gasChains = groups.filter((g) => g.key === 'gas').flatMap((g) => g.chains);
   // A direct chain's estimate is a full plan (several bridge quotes): asked once its route check
   // says a bridge takes it, not while the check runs or after it said no (2026-10-13, Relay's limit)
-  const estimated = gasChains.filter((c) => !c.direct || c.chainId === destination || routesOf(c.chainId).gas === true);
-  const estimates = useEstimates(address, estimated, destination, recipient);
+  const estimated = gasChains.filter((c) => !c.direct || c.chainId === destination || routesOf(c.chainId).gas === true || routesOf(c.chainId).alt !== undefined);
+  const estimates = useEstimates(address, estimated, destination, recipient, (id) => routesOf(id).alt);
+  /** Where a gas chain arrives when no bridge reaches the destination right now (its estimate, else its route check) */
+  const arrivesOn = (chainId: number): number | undefined => estimates[chainId]?.toChainId ?? routesOf(chainId).alt;
   // How long each bridge usually takes (GET /bridges/timing), to set expectations on each row
   const [timings, setTimings] = useState<BridgeTimings>(NO_TIMINGS);
   useEffect(() => { void fetchTimings().then(setTimings, () => undefined); }, []);
@@ -158,7 +160,8 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
     if (group === 'own-chain' && !ownAddress) return;
     if (group === 'elsewhere' && elsewhereChain === null) { setPickingElsewhere(true); return; }
     setSelection({ group, ids: new Set(chains.map((c) => c.chainId)) });
-    const plan: SweepPlan = { group, chains, destination, recipient, ownChainAddress: ownAddress ?? undefined, elsewhereChain: elsewhereChain ?? undefined };
+    const alts = group === 'gas' ? Object.fromEntries(chains.flatMap((c) => { const to = arrivesOn(c.chainId); return to !== undefined ? [[c.chainId, to]] : []; })) : {};
+    const plan: SweepPlan = { group, chains, destination, recipient, ownChainAddress: ownAddress ?? undefined, elsewhereChain: elsewhereChain ?? undefined, ...(Object.keys(alts).length > 0 ? { alts } : {}) };
     // A loaded key signs for every chain: no need to ask again
     if (wallet?.kind === 'key') begin(plan, wallet);
     else setPending(plan);
@@ -176,7 +179,8 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
   // What a sweep moves: the destination chain's own balance (to this same wallet) is already there
   const toSweepUsd = leaving.reduce((s, r) => s + (r.usd ?? 0), 0);
   const selectedRows = active ? active.chains.filter((c) => selectedIds.has(c.chainId) && !finished.has(c.chainId)) : [];
-  const quotedRows = selectedRows.filter((r) => estimates[r.chainId]?.receive !== undefined);
+  const quotedRows = selectedRows.filter((r) => estimates[r.chainId]?.receive !== undefined && arrivesOn(r.chainId) === undefined);
+  const elsewhereCount = selectedRows.filter((r) => arrivesOn(r.chainId) !== undefined).length;
   const selectedReceive = quotedRows.reduce((s, r) => s + estimates[r.chainId]!.receive!, 0n);
   // The sticky bar's own menu: donate or burn every selected chain in one go
   const [stickyMore, setStickyMore] = useState(false);
@@ -297,8 +301,9 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
                   onToggle={() => toggle(g.key, c.chainId)} destination={destination} destName={destName}
                   onSweep={sweepable(c) && !sweepingNow && destination !== null && !(g.key === 'own-chain' && !ownAddress) ? () => startSweep(g.key, [c]) : undefined}
                   onGive={!sweepingNow && !finished.has(c.chainId) ? (give) => startGive(g.key, [c], give) : undefined}
-                  destToken={destToken ?? null} estimate={estimates[c.chainId]}
-                  destPrice={destToken ? data.priceOf(destToken.token) : undefined}
+                  destToken={(arrivesOn(c.chainId) !== undefined ? optionOf(arrivesOn(c.chainId)!) : destToken) ?? null} estimate={estimates[c.chainId]}
+                  arrivesOn={arrivesOn(c.chainId) !== undefined ? optionOf(arrivesOn(c.chainId)!)?.name ?? `chain ${arrivesOn(c.chainId)}` : undefined}
+                  destPrice={(() => { const t = arrivesOn(c.chainId) !== undefined ? optionOf(arrivesOn(c.chainId)!) : destToken; return t ? data.priceOf(t.token) : undefined; })()}
                   unknownRoute={data.routesOf(c.chainId).unknown === true}
                   minimum={data.routesOf(c.chainId).minimum}
                   fixedFee={data.routesOf(c.chainId).fixedFee}
@@ -332,8 +337,11 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
           <div className="ap-sticky-in">
             <p>
               <b>{groupText(active.key, destName).title} · {selectedRows.length} {selectedRows.length === 1 ? 'chain' : 'chains'}</b>
-              {gasGroup && destination !== null && quotedRows.length > 0 && destToken
-                ? <span> · you receive at least {formatAmount(selectedReceive, destToken.decimals)} {destToken.token} on {destName}{quotedRows.length < selectedRows.length ? ` (${quotedRows.length} of ${selectedRows.length} quoted)` : ''}</span>
+              {gasGroup && destination !== null && (quotedRows.length > 0 || elsewhereCount > 0) && destToken
+                ? <span>
+                  {quotedRows.length > 0 && <> · you receive at least {formatAmount(selectedReceive, destToken.decimals)} {destToken.token} on {destName}{quotedRows.length + elsewhereCount < selectedRows.length ? ` (${quotedRows.length} of ${selectedRows.length - elsewhereCount} quoted)` : ''}</>}
+                  {elsewhereCount > 0 && <> · {chainCount(elsewhereCount)} to another chain, as each row says</>}
+                </span>
                 : gasGroup && destination === null ? <span> · choose where it goes</span> : null}
               <small>Groups are swept one at a time.</small>
             </p>
@@ -539,7 +547,7 @@ function OwnChainAddress({ value, onChange }: { value: Address | null; onChange:
 
 const SHOWN_PHASES = new Set(['sweeping', 'done', 'failed']);
 
-function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, onGive, destination, destName, destToken, estimate, destPrice, unknownRoute, minimum, fixedFee, nameOf, usual, senderOnly, state, bridge, arrivalExplorer, arrivalName, running }: {
+function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, onGive, destination, destName, destToken, estimate, arrivesOn, destPrice, unknownRoute, minimum, fixedFee, nameOf, usual, senderOnly, state, bridge, arrivalExplorer, arrivalName, running }: {
   row: AddressRow;
   group: GroupKey;
   selected: boolean;
@@ -553,6 +561,8 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, onGive, de
   destName: string | null;
   destToken: { token: string; decimals: number } | null;
   estimate: Estimate | undefined;
+  /** No bridge reaches the destination right now: the chain it goes to instead */
+  arrivesOn: string | undefined;
   destPrice: number | undefined;
   unknownRoute: boolean;
   /** Below every bridge's minimum (direct chains: known before any quote) */
@@ -601,9 +611,11 @@ function ChainRow({ row, group, selected, keyOnly, onToggle, onSweep, onGive, de
         : usual?.slowLately ? { text: `${estimate.route} · slower lately`, tone: 'warn', title: `Usually ${durationText(usual.seconds)}, but slower than usual lately` }
         : usual ? { text: `${estimate.route} · usually ${durationText(usual.seconds)}`, tone: 'ok' }
         : { text: estimate.route, tone: 'ok' };
+      // Said first: it does not arrive where the rest does (owner, 2026-10-19)
+      if (arrivesOn) route = { text: fixed ? `To ${arrivesOn} · ${estimate.route} keeps ${fixed}` : `To ${arrivesOn}, not ${destName}`, tone: 'warn', title: `No bridge takes ${row.token} from ${row.name} to ${destName} right now, so it goes to ${arrivesOn} instead (${estimate.route}), to the same address. ${route.title ?? ''}`.trim() };
     }
     else route = { text: row.chainId === destination ? 'Same chain' : 'Checking…', tone: 'plain' };
-    if (estimate?.receive !== undefined && destToken && minimum === undefined) receive = `${formatAmount(estimate.receive, destToken.decimals)} ${destToken.token}`;
+    if (estimate?.receive !== undefined && destToken && minimum === undefined) receive = `${formatAmount(estimate.receive, destToken.decimals)} ${destToken.token}${arrivesOn ? ` on ${arrivesOn}` : ''}`;
   } else if (group === 'token' && token) {
     route = senderOnly
       ? { text: 'Your wallet only', tone: 'warn', title: `${row.name} can only be swept to your own wallet: its bridge pays only the wallet that sends` }

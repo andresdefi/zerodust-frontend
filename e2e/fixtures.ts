@@ -290,11 +290,13 @@ function telosLeftoverPlan(nonce: number) {
 
 /** Everything the page may call, answered offline; returns what was swept */
 /**
+ * `busyTo`: no bridge takes this sponsored chain to Base right now (BRIDGE_UNAVAILABLE), as
+ * Gas.zip from Kaia while short of liquidity on Base; other chains quote.
  * `onlyTo`: the direct chain's bridges reach only this chain; any other answers
  * "unknown" (as Gas.zip's "Please Try Again" does for Lens to Base);
  * `hiccups`: the first route checks answer "unknown", then the real answer
  */
-export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean; scam?: string[]; scamCheckDown?: boolean; unchecked?: number; closing?: Record<number, 'closing' | 'cutoff'>; nova?: boolean; fraxtal?: boolean; taiko?: boolean; opbnb?: boolean | 'native'; xlayer?: boolean } = {}) {
+export async function mockNetwork(page: Page, user: Address, opts: { direct?: boolean; monad?: boolean; tamper?: boolean; onlyTo?: number; hiccups?: number; mitosis?: boolean; endurance?: boolean; telos?: boolean; tooSmall?: 'direct' | 'check' | 'sweep'; paused?: boolean; timings?: unknown; metamaskSmartAccount?: boolean; scam?: string[]; scamCheckDown?: boolean; unchecked?: number; closing?: Record<number, 'closing' | 'cutoff'>; nova?: boolean; fraxtal?: boolean; taiko?: boolean; opbnb?: boolean | 'native'; xlayer?: boolean; busyTo?: number } = {}) {
   const chains = [...CHAINS, ...(opts.mitosis ? [MITOSIS_CHAIN] : []), ...(opts.endurance ? [ENDURANCE_CHAIN] : []), ...(opts.nova ? [NOVA_CHAIN] : []), ...(opts.fraxtal ? [FRAXTAL_CHAIN] : []), ...(opts.taiko ? [TAIKO_CHAIN] : []), ...(opts.opbnb ? [BSC_CHAIN] : []), ...(opts.xlayer ? [XLAYER_CHAIN] : [])];
   const funded = [...FUNDED, ...(opts.mitosis ? [MITOSIS] : []), ...(opts.endurance ? [ENDURANCE] : []), ...(opts.nova ? [NOVA] : []), ...(opts.fraxtal ? [FRAXTAL] : []), ...(opts.taiko ? [TAIKO] : []), ...(opts.xlayer ? [XLAYER] : []), ...(opts.unchecked !== undefined ? [42161] : [])];
   // Chains that announced their shutdown, as GET /chains and /direct/chains report them
@@ -446,6 +448,9 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
         }, 400);
       }
       const to = Number(p.get('toChainId'));
+      if (opts.busyTo === from && to === 8453) {
+        return json(route, { error: 'No bridge route from Optimism to Base right now (gaszip: Quote: Please Try Again).', code: 'BRIDGE_UNAVAILABLE' }, 400);
+      }
       quoted.push({ from, to, destination: p.get('destination')! });
       // Token deliveries leave the chain; on the same chain (a donation, a burn) it is a plain transfer
       const q = p.get('bridge') === 'native' && NATIVE_ROUTES[from] ? nativeQuote(from, p.get('destination')!)

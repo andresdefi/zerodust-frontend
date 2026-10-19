@@ -32,6 +32,8 @@ interface DirectReach {
   available: boolean | null;
   /** No bridge to the destination, but one to another chain */
   elsewhere?: boolean;
+  /** That other chain, the first of ALT_CANDIDATES a bridge takes it to */
+  alt?: number;
   /** Below every bridge's minimum: the least that would go */
   minimum?: bigint;
   /** Its bridge keeps a fixed fee whatever the amount (Meson), to the destination or the chain found instead */
@@ -143,7 +145,7 @@ export interface AddressData {
 export function useAddressData(address: Address | null, destination: number | null, recipient: Address | null, version = 0): AddressData {
   const [base, setBase] = useState<{ address: Address; rows: AddressRow[]; info: Map<number, ChainInfo>; chainOptions: ChainOption[]; prices: Record<string, number>; unchecked: string[] } | { address: Address; error: string } | null>(null);
   // Per destination: sponsored sources that cannot reach it, direct routes
-  const [destRoutes, setDestRoutes] = useState<{ key: string; unreachable: Set<number>; direct: Record<number, DirectReach> } | null>(null);
+  const [destRoutes, setDestRoutes] = useState<{ key: string; unreachable: Set<number>; altOf: Record<number, number>; direct: Record<number, DirectReach> } | null>(null);
 
   useEffect(() => {
     if (!address) return;
@@ -213,9 +215,15 @@ export function useAddressData(address: Address | null, destination: number | nu
       const sponsored = ready.rows.filter((r) => !r.direct && r.chainId !== destination && gasBridges(ready.info.get(r.chainId)));
       const lists = await Promise.all(sponsored.map((r) => client.getDestinations(r.chainId).catch(() => null)));
       const unreachable = new Set<number>();
+      // Where each of those goes instead: the first candidate its bridges list
+      const altOf: Record<number, number> = {};
       sponsored.forEach((r, i) => {
         const list = lists[i];
-        if (list && !list.some((d) => d.chainId === destination)) unreachable.add(r.chainId);
+        if (list && !list.some((d) => d.chainId === destination)) {
+          unreachable.add(r.chainId);
+          const alt = ALT_CANDIDATES.find((id) => id !== destination && id !== r.chainId && list.some((d) => d.chainId === id));
+          if (alt !== undefined) altOf[r.chainId] = alt;
+        }
       });
       const direct: Record<number, DirectReach> = {};
       await inPool(ready.rows.filter((r) => r.direct && r.chainId !== destination), QUOTE_POOL, async (r) => {
@@ -235,19 +243,20 @@ export function useAddressData(address: Address | null, destination: number | nu
         // somewhere else? Unconfirmed counts as blocked only when another chain is confirmed instead.
         // Not while Relay is over its limit: those checks would ask it again
         let elsewhere = false;
+        let found: number | undefined;
         const feeOf = (answer: typeof res, toChainId: number): FixedFee | undefined =>
           answer.bridgeFeeWei && answer.bridge ? { amount: BigInt(answer.bridgeFeeWei), bridge: answer.bridge, toChainId } : undefined;
         let fixedFee = res.available === true ? feeOf(res, destination) : undefined;
         if (res.available !== true && !relayBusy(res)) {
-          for (const alt of ALT_CANDIDATES.filter((id) => id !== destination && id !== r.chainId)) {
+          for (const candidate of ALT_CANDIDATES.filter((id) => id !== destination && id !== r.chainId)) {
             if (cancelled) break;
-            const other = await probe(alt);
-            if (other.available === true) { elsewhere = true; fixedFee = feeOf(other, alt); break; }
+            const other = await probe(candidate);
+            if (other.available === true) { elsewhere = true; found = candidate; fixedFee = feeOf(other, candidate); break; }
           }
         }
-        direct[r.chainId] = { available: res.available, elsewhere, ...(fixedFee ? { fixedFee } : {}) };
+        direct[r.chainId] = { available: res.available, elsewhere, ...(found !== undefined ? { alt: found } : {}), ...(fixedFee ? { fixedFee } : {}) };
       });
-      if (!cancelled) setDestRoutes({ key: destKey, unreachable, direct });
+      if (!cancelled) setDestRoutes({ key: destKey, unreachable, altOf, direct });
     })();
     return () => { cancelled = true; };
   }, [ready, destination, recipient, destKey]);
@@ -262,13 +271,13 @@ export function useAddressData(address: Address | null, destination: number | nu
       const reach = routes.direct[chainId];
       const gas = reach?.available ?? null;
       if (reach?.minimum !== undefined) return { gas: false, minimum: reach.minimum };
-      if (reach?.elsewhere) return { gas: false, notToDestination: true, ...(reach.fixedFee ? { fixedFee: reach.fixedFee } : {}) };
+      if (reach?.elsewhere) return { gas: false, notToDestination: true, ...(reach.alt !== undefined ? { alt: reach.alt } : {}), ...(reach.fixedFee ? { fixedFee: reach.fixedFee } : {}) };
       return gas === null ? { gas: null, unknown: true } : { gas };
     }
     const c = ready.info.get(chainId);
     const gas = gasBridges(c);
     if (!gas) return { gas: c?.crossChain?.available === null ? null : false };
-    if (destination !== null && routes?.unreachable.has(chainId)) return { gas: false, notToDestination: true };
+    if (destination !== null && routes?.unreachable.has(chainId)) return { gas: false, notToDestination: true, ...(routes.altOf[chainId] !== undefined ? { alt: routes.altOf[chainId] } : {}) };
     return { gas: true };
   }, [ready, routes, destination]);
 
@@ -290,13 +299,19 @@ export interface Estimate {
   route?: string;
   /** A fixed fee the bridge keeps whatever the amount (Meson), in the chain's token; already out of receive */
   bridgeFee?: bigint;
+  /** Where it arrives when that is not the destination: no bridge reaches the destination right now */
+  toChainId?: number;
   error?: string;
 }
 
-/** "You receive" for these chains, from real quotes (nothing signed), asked a few at a time */
-export function useEstimates(address: Address | null, rows: AddressRow[], destination: number | null, recipient: Address | null): Record<number, Estimate> {
+/**
+ * "You receive" for these chains, from real quotes (nothing signed), asked a few at a time. A
+ * chain whose route check found another chain instead (`altOf`) is quoted there; a sponsored chain
+ * no bridge takes to the destination right now is quoted on the first candidate one does.
+ */
+export function useEstimates(address: Address | null, rows: AddressRow[], destination: number | null, recipient: Address | null, altOf: (chainId: number) => number | undefined = () => undefined): Record<number, Estimate> {
   const [store, setStore] = useState<{ key: string; values: Record<number, Estimate> }>({ key: '', values: {} });
-  const ids = rows.map((r) => r.chainId).join();
+  const ids = rows.map((r) => `${r.chainId}${altOf(r.chainId) !== undefined ? `>${altOf(r.chainId)}` : ''}`).join();
   const key = `${address}:${destination}:${recipient}:${ids}`;
   useEffect(() => {
     if (!address || destination === null || !recipient || rows.length === 0) return;
@@ -305,14 +320,32 @@ export function useEstimates(address: Address | null, rows: AddressRow[], destin
     void inPool(rows, QUOTE_POOL, async (r) => {
       // A newer run replaced this one (the chain list or destination changed): stop asking
       if (cancelled) return;
+      const alt = altOf(r.chainId);
+      const to = alt ?? destination;
+      const elsewhere = alt !== undefined ? { toChainId: alt } : {};
       try {
         if (r.direct) {
-          const plan = await preparePlan({ chainId: r.chainId, toChainId: destination, from: address, recipient, mode: 'route' });
-          if (!cancelled) put(r.chainId, { receive: BigInt(plan.receive), route: plan.route === 'transfer' ? 'Same chain' : DIRECT_ROUTE_NAMES[plan.route] ?? plan.route, ...(plan.bridgeFee ? { bridgeFee: BigInt(plan.bridgeFee) } : {}) });
+          const plan = await preparePlan({ chainId: r.chainId, toChainId: to, from: address, recipient, mode: 'route' });
+          if (!cancelled) put(r.chainId, { receive: BigInt(plan.receive), route: plan.route === 'transfer' ? 'Same chain' : DIRECT_ROUTE_NAMES[plan.route] ?? plan.route, ...(plan.bridgeFee ? { bridgeFee: BigInt(plan.bridgeFee) } : {}), ...elsewhere });
         } else {
-          const q = await estimateQuote({ fromChainId: r.chainId, toChainId: destination, userAddress: address, destination: recipient });
-          const bridge = (q as { bridge?: { displayName?: string } }).bridge?.displayName;
-          if (!cancelled) put(r.chainId, { receive: BigInt(q.estimatedReceive), route: r.chainId === destination ? 'Same chain' : bridge ?? 'Bridge' });
+          const sponsored = async (toChainId: number) => {
+            const q = await estimateQuote({ fromChainId: r.chainId, toChainId, userAddress: address, destination: recipient });
+            return { receive: BigInt(q.estimatedReceive), route: r.chainId === toChainId ? 'Same chain' : q.bridge?.displayName ?? 'Bridge' };
+          };
+          try {
+            const e = await sponsored(to);
+            if (!cancelled) put(r.chainId, { ...e, ...elsewhere });
+          } catch (error) {
+            // No bridge takes it to the destination right now (Gas.zip short of liquidity there):
+            // the first candidate one does, said on the row (owner, 2026-10-19)
+            if ((error as { code?: string }).code !== 'BRIDGE_UNAVAILABLE' || alt !== undefined || r.chainId === destination) throw error;
+            for (const candidate of ALT_CANDIDATES.filter((id) => id !== destination && id !== r.chainId)) {
+              if (cancelled) return;
+              const e = await sponsored(candidate).catch(() => null);
+              if (e) { put(r.chainId, { ...e, toChainId: candidate }); return; }
+            }
+            throw error;
+          }
         }
       } catch (error) {
         if (!cancelled) put(r.chainId, { error: error instanceof Error ? error.message : 'No quote' });
@@ -341,8 +374,8 @@ function estimateQuote(p: { fromChainId: number; toChainId: number; userAddress:
   if (pending) return pending;
   const request = (async () => {
     const res = await fetch(url);
-    const body = (await res.json().catch(() => ({}))) as { estimatedReceive?: string; bridge?: { displayName?: string }; error?: string };
-    if (!res.ok || body.estimatedReceive === undefined) throw new Error(body.error ?? 'No quote');
+    const body = (await res.json().catch(() => ({}))) as { estimatedReceive?: string; bridge?: { displayName?: string }; error?: string; code?: string };
+    if (!res.ok || body.estimatedReceive === undefined) throw Object.assign(new Error(body.error ?? 'No quote'), body.code ? { code: body.code } : {});
     return { estimatedReceive: body.estimatedReceive, ...(body.bridge ? { bridge: body.bridge } : {}) };
   })().finally(() => inFlight.delete(url));
   inFlight.set(url, request);
