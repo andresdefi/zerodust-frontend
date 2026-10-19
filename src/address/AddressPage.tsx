@@ -4,7 +4,7 @@ import { isAddressEqual, type Address } from 'viem';
 import { deliversOnlyToSender } from '@zerodust/sdk';
 import { ChainIcon } from '../components/ChainIcon';
 import { DestinationPicker } from '../components/DestinationPicker';
-import { formatAmount, formatUsd, shortAddress } from '../lib/format';
+import { formatAmount, formatUsd, listNames, shortAddress } from '../lib/format';
 import { groupChains, groupOf, groupText, tokenRouteOf, type FixedFee, type GroupKey } from './groups';
 import { nativeExitOf, parentOf, pendingClaimsOf, waitText } from '../sweep/native';
 import { PendingClaims } from './PendingClaims';
@@ -163,11 +163,11 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
     if (wallet?.kind === 'key') begin(plan, wallet);
     else setPending(plan);
   };
-  /** One chain's whole balance to ZeroDust, or burned, on its own chain: no bridge, whatever its group */
-  const startGive = (group: GroupKey, row: AddressRow, give: 'donate' | 'burn') => {
-    if (sweepingNow) return;
-    setSelection({ group, ids: new Set([row.chainId]) });
-    const plan: SweepPlan = { group, chains: [row], destination: destination ?? row.chainId, recipient, give };
+  /** Each chain's whole balance to ZeroDust, or burned, on its own chain: no bridge, whatever its group */
+  const startGive = (group: GroupKey, chains: AddressRow[], give: 'donate' | 'burn') => {
+    if (sweepingNow || chains.length === 0) return;
+    setSelection({ group, ids: new Set(chains.map((c) => c.chainId)) });
+    const plan: SweepPlan = { group, chains, destination: destination ?? chains[0]!.chainId, recipient, give };
     if (wallet?.kind === 'key') begin(plan, wallet);
     else setPending(plan);
   };
@@ -178,6 +178,12 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
   const selectedRows = active ? active.chains.filter((c) => selectedIds.has(c.chainId) && !finished.has(c.chainId)) : [];
   const quotedRows = selectedRows.filter((r) => estimates[r.chainId]?.receive !== undefined);
   const selectedReceive = quotedRows.reduce((s, r) => s + estimates[r.chainId]!.receive!, 0n);
+  // The sticky bar's own menu: donate or burn every selected chain in one go
+  const [stickyMore, setStickyMore] = useState(false);
+  const firstStickyGive = useRef<HTMLButtonElement>(null);
+  const stickyMoreBtn = useRef<HTMLButtonElement>(null);
+  useEffect(() => { if (stickyMore) firstStickyGive.current?.focus(); }, [stickyMore]);
+  const closeStickyMore = () => { setStickyMore(false); stickyMoreBtn.current?.focus(); };
 
   return (
     <main className="ap">
@@ -290,7 +296,7 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
                   key={c.chainId} row={c} group={g.key} selected={isActive && selectedIds.has(c.chainId)} keyOnly={keyOnlyRow(c)}
                   onToggle={() => toggle(g.key, c.chainId)} destination={destination} destName={destName}
                   onSweep={sweepable(c) && !sweepingNow && destination !== null && !(g.key === 'own-chain' && !ownAddress) ? () => startSweep(g.key, [c]) : undefined}
-                  onGive={!sweepingNow && !finished.has(c.chainId) ? (give) => startGive(g.key, c, give) : undefined}
+                  onGive={!sweepingNow && !finished.has(c.chainId) ? (give) => startGive(g.key, [c], give) : undefined}
                   destToken={destToken ?? null} estimate={estimates[c.chainId]}
                   destPrice={destToken ? data.priceOf(destToken.token) : undefined}
                   unknownRoute={data.routesOf(c.chainId).unknown === true}
@@ -313,6 +319,16 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
 
       {active && data.rows.length > 0 && (
         <div className="ap-sticky">
+          {stickyMore && selectedRows.length > 0 && (
+            <div className="ap-sticky-more">
+              <div className="ap-row-more" id="ap-more-selected" role="group" aria-label="Other ways out for the selected chains" onKeyDown={(e) => { if (e.key === 'Escape') closeStickyMore(); }}>
+                <p>Instead of bridging {selectedRows.length === 1 ? 'it' : 'them'}, on each chain itself:</p>
+                <button type="button" className="btn btn-ghost btn-xs" ref={firstStickyGive} onClick={() => { setStickyMore(false); startGive(active.key, selectedRows, 'donate'); }}>Donate {chainCount(selectedRows.length)} to ZeroDust</button>
+                <button type="button" className="btn btn-ghost btn-xs" onClick={() => { setStickyMore(false); startGive(active.key, selectedRows, 'burn'); }}>Burn {chainCount(selectedRows.length)}</button>
+                <button type="button" className="linkbtn" onClick={closeStickyMore}>Cancel</button>
+              </div>
+            </div>
+          )}
           <div className="ap-sticky-in">
             <p>
               <b>{groupText(active.key, destName).title} · {selectedRows.length} {selectedRows.length === 1 ? 'chain' : 'chains'}</b>
@@ -329,6 +345,7 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
             >
               {sweepingNow ? 'Sweeping…' : `Sweep ${selectedRows.length} ${selectedRows.length === 1 ? 'chain' : 'chains'}`}
             </button>
+            <button type="button" className="btn btn-ghost ap-more-btn" ref={stickyMoreBtn} aria-label="More for the selected chains" aria-expanded={stickyMore && selectedRows.length > 0} aria-controls="ap-more-selected" disabled={sweepingNow || selectedRows.length === 0} onClick={() => setStickyMore((o) => !o)}>⋯</button>
           </div>
         </div>
       )}
@@ -485,8 +502,8 @@ function ClosingNotice({ rows, stopped }: { rows: AddressRow[]; stopped: Address
 }
 
 /** "A", "A and B", "A, B and C" */
-function listNames(names: string[]): string {
-  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+function chainCount(n: number): string {
+  return `${n} ${n === 1 ? 'chain' : 'chains'}`;
 }
 
 /** The address the 'Stays on its own chain' group sends to, on each of its chains */

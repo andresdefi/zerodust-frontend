@@ -141,7 +141,8 @@ test('sweeps a group with the key of this address: the key stays out of the page
   await expect(page.getByRole('button', { name: 'Refresh balances' })).toBeVisible();
   // A chain swept to 0 is not offered again until the balances are read again
   await expect(group('Arrives as gas on Base').getByRole('button', { name: 'Sweep 0 chains' })).toBeDisabled();
-  await expect(page.locator('.ap-sticky').getByRole('button')).toBeDisabled();
+  await expect(page.locator('.ap-sticky .btn-primary')).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'More for the selected chains' })).toBeDisabled();
   await watch.checkPage();
   expect(watch.leaks).toEqual([]);
 });

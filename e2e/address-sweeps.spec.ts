@@ -464,3 +464,29 @@ test("any row's menu gives its whole balance to ZeroDust, or burns it, on its ow
   // Quoted on Mitosis itself, to ZeroDust's address
   expect(quoted.filter((q) => q.from === 124816).at(-1)).toEqual({ from: 124816, to: 124816, destination: '0x01eD5c94DE39E73C986b98B85C2c0A3d1BEDff7D' });
 });
+
+test('the bar under the list donates every selected chain in one go, each on its own chain', async ({ page }) => {
+  const { key, quoted } = await openAddress(page, { mitosis: true, endurance: true });
+  await group(page, /Arrives as a token/).getByRole('checkbox', { name: /^Select all in/ }).check();
+  const more = page.getByRole('button', { name: 'More for the selected chains' });
+  await more.click();
+  const options = page.getByRole('group', { name: 'Other ways out for the selected chains' });
+  await expect(options).toContainText('Instead of bridging them, on each chain itself:');
+  await expect(options.getByRole('button')).toHaveText(['Donate 2 chains to ZeroDust', 'Burn 2 chains', 'Cancel']);
+  await expect(options.getByRole('button', { name: 'Donate 2 chains to ZeroDust' })).toBeFocused();
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace('.png', '-bar.png') });
+  await page.keyboard.press('Escape');
+  await expect(options).toBeHidden();
+  await expect(more).toBeFocused();
+  await more.click();
+  await options.getByRole('button', { name: 'Donate 2 chains to ZeroDust' }).click();
+  await useKey(page, key);
+  const dialog = confirmDialog(page);
+  await expect(dialog.getByRole('button', { name: 'Donate 2 chains' })).toBeVisible({ timeout: 30_000 });
+  await expect(dialog.getByRole('heading', { name: 'Donate everything on Endurance and Mitosis to ZeroDust?' })).toBeVisible();
+  await expect(dialog).toContainText('Donated to ZeroDust · 2');
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace('.png', '-donate2.png') });
+  for (const from of [124816, 648]) {
+    expect(quoted.filter((q) => q.from === from).at(-1)).toEqual({ from, to: from, destination: '0x01eD5c94DE39E73C986b98B85C2c0A3d1BEDff7D' });
+  }
+});

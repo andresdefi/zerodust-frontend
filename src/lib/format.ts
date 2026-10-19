@@ -37,3 +37,8 @@ export function formatUsd(value: number | null): string {
 export function shortAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
+
+/** Optimism, Base and Ink */
+export function listNames(names: string[]): string {
+  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
