@@ -135,9 +135,13 @@ export interface PendingClaim {
   amount: string;
   txHash: string;
   sentAt: number;
+  /** When the page first saw it delivered or claimed: it leaves the list DONE_KEEP_MS later */
+  doneAt?: number;
 }
 
 const STORE = 'zd.pending-claims.v1';
+/** How long a delivered or claimed withdrawal stays listed (owner, 2026-10-19: no manual removal) */
+export const DONE_KEEP_MS = 10 * 60_000;
 
 function load(): PendingClaim[] {
   try {
@@ -157,8 +161,21 @@ function save(list: PendingClaim[]): void {
   }
 }
 
-export function pendingClaimsOf(address: string): PendingClaim[] {
-  return load().filter((c) => c.from.toLowerCase() === address.toLowerCase()).sort((a, b) => b.sentAt - a.sentAt);
+/** This address's withdrawals still listed; those done DONE_KEEP_MS ago are dropped from the store */
+export function pendingClaimsOf(address: string, now = Date.now()): PendingClaim[] {
+  const all = load();
+  const kept = all.filter((c) => c.doneAt === undefined || now < c.doneAt + DONE_KEEP_MS);
+  if (kept.length < all.length) save(kept);
+  return kept.filter((c) => c.from.toLowerCase() === address.toLowerCase()).sort((a, b) => b.sentAt - a.sentAt);
+}
+
+/** Notes that a withdrawal was delivered or claimed (the first time only: the countdown starts then) */
+export function markClaimDone(txHash: string, now = Date.now()): void {
+  const list = load();
+  const c = list.find((x) => x.txHash.toLowerCase() === txHash.toLowerCase());
+  if (!c || c.doneAt !== undefined) return;
+  c.doneAt = now;
+  save(list);
 }
 
 export function addPendingClaim(claim: PendingClaim): void {

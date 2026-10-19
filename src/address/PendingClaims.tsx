@@ -3,7 +3,7 @@ import type { Address, Hex } from 'viem';
 import { ChainIcon } from '../components/ChainIcon';
 import { formatAmount, shortAddress } from '../lib/format';
 import { claimState, findWithdrawal, readWithdrawal, type ClaimState, type Withdrawal } from '../sweep/claims';
-import { addPendingClaim, claimableFrom, nativeExitOf, parentOf, pendingClaimsOf, removePendingClaim, type PendingClaim } from '../sweep/native';
+import { addPendingClaim, claimableFrom, DONE_KEEP_MS, markClaimDone, nativeExitOf, parentOf, pendingClaimsOf, removePendingClaim, type PendingClaim } from '../sweep/native';
 import { ClaimDialog, type ClaimStep } from './ClaimDialog';
 
 interface Live {
@@ -35,6 +35,11 @@ export function PendingClaims({ address, version, onSummary }: {
       const withdrawal = await readWithdrawal(c.chainId, c.txHash as Hex);
       const state = withdrawal ? await claimState(withdrawal) : undefined;
       setLive((l) => ({ ...l, [c.txHash]: { withdrawal, state } }));
+      // Delivered or claimed: it leaves the list by itself a few minutes from now
+      if (state?.stage === 'claimed' && c.doneAt === undefined) {
+        markClaimDone(c.txHash);
+        setList(pendingClaimsOf(c.from));
+      }
     } catch {
       setLive((l) => ({ ...l, [c.txHash]: { error: true } }));
     }
@@ -60,6 +65,14 @@ export function PendingClaims({ address, version, onSummary }: {
     void read(pendingClaimsOf(address).find((c) => c.txHash === txHash)!);
     return null;
   };
+
+  // Drop each done withdrawal when its few minutes are up
+  useEffect(() => {
+    const next = Math.min(...list.map((c) => (c.doneAt === undefined ? Infinity : c.doneAt + DONE_KEEP_MS)));
+    if (next === Infinity) return;
+    const timer = setTimeout(() => setList(pendingClaimsOf(address)), Math.max(0, next - Date.now()) + 1_000);
+    return () => clearTimeout(timer);
+  }, [list, address]);
 
   const ready = list.filter((c) => { const st = live[c.txHash]?.state?.stage; return (st === 'prove' || st === 'claim') && !!live[c.txHash]?.withdrawal; }).length;
   useEffect(() => { onSummary?.({ total: list.length, ready }); }, [list.length, ready, onSummary]);
@@ -108,7 +121,7 @@ export function PendingClaims({ address, version, onSummary }: {
                 <p className="ap-claim-links">
                   {c.explorerUrl && <a href={`${c.explorerUrl.replace(/\/$/, '')}/tx/${c.txHash}`} target="_blank" rel="noreferrer">Withdrawal ↗</a>}
                   {s?.stage !== 'claimed' && exit.bridge && <a href={exit.bridge.url} target="_blank" rel="noreferrer">{exit.bridge.name} ↗</a>}
-                  {(s?.stage === 'claimed' || l?.withdrawal === null) && <button type="button" className="linkbtn" onClick={() => remove(c.txHash)}>Remove</button>}
+                  {l?.withdrawal === null && <button type="button" className="linkbtn" onClick={() => remove(c.txHash)}>Remove</button>}
                 </p>
               </li>
             );
@@ -201,7 +214,7 @@ function detailText(c: PendingClaim, l: Live | undefined): string {
   if (l?.error) return 'Could not read it from the chain right now; the date is the usual wait.';
   if (l?.withdrawal === null) return 'This transaction holds no withdrawal.';
   if (exit.relayed) {
-    if (l?.state?.stage === 'claimed') return `Delivered on ${parentOf(exit).name} by ${c.chainName}'s relayer.`;
+    if (l?.state?.stage === 'claimed') return `Delivered on ${parentOf(exit).name} by ${c.chainName}'s relayer. It leaves this list in a few minutes.`;
     return l?.state?.stage === 'waiting' && l.state.until
       ? `${c.chainName}'s relayer delivers it; nothing to claim.`
       : `${c.chainName}'s relayer has not delivered it yet. If it does not within a few hours, claim it on ${exit.bridge?.name ?? `${c.chainName}'s bridge`} with the recipient's wallet.`;
@@ -210,7 +223,7 @@ function detailText(c: PendingClaim, l: Live | undefined): string {
     case 'prove': return `${c.chainName}'s state covering it is on ${parentOf(exit).name}: prove it now to start the wait.`;
     case 'proved': return `Proved on ${parentOf(exit).name}. Claim when the wait ends.`;
     case 'claim': return 'The wait is over.';
-    case 'claimed': return `Claimed on ${parentOf(exit).name}.`;
+    case 'claimed': return `Claimed on ${parentOf(exit).name}. It leaves this list in a few minutes.`;
     case 'waiting': return exit.prove ? `Waiting for ${c.chainName} to post its state on ${parentOf(exit).name}; then prove it.` : `Waiting for ${parentOf(exit).name} to confirm it.`;
     default: return '';
   }

@@ -206,3 +206,54 @@ describe('planChecked: a fixed-price chain (Telos)', () => {
     await expect(run.planChecked(telosTarget, 'route')).rejects.toThrow(/disagree on how this chain prices gas/);
   });
 });
+
+describe('planChecked: a LayerZero v2 token exit (Vana -> VANA on Base)', () => {
+  const VANA = 1480;
+  const OFT = '0x7FF7Fa94b8b66Ef313f7970d4EEbd2CB3103a2C0';
+  const NETWORK = 100_000_000n;
+  const LZFEE = 279_514_811_844_449_823n;
+  const SEND = parseAbi(['function send((uint32 dstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD, bytes extraOptions, bytes composeMsg, bytes oftCmd) sendParam, (uint256 nativeFee, uint256 lzTokenFee) fee, address refundAddress) payable']);
+  const bal = 5n * 10n ** 18n;
+  const gas = 430_000n;
+  const value = bal - gas * NETWORK - 42_000n * NETWORK;
+  const exitPlan = (amount: bigint): DirectPlan => ({
+    chainId: VANA, route: 'oft', requestId: null, fee: '0', balance: bal.toString(), receive: amount.toString(),
+    leftoverMax: String(gas * NETWORK + 42_000n * NETWORK),
+    txs: [{ kind: 'sweep', to: OFT, value: value.toString(), gas: gas.toString(), gasPrice: NETWORK.toString(), nonce: 0,
+      data: encodeFunctionData({ abi: SEND, functionName: 'send', args: [
+        { dstEid: 30184, to: `0x${OTHER.slice(2).padStart(64, '0')}`, amountLD: amount, minAmountLD: amount, extraOptions: '0x', composeMsg: '0x', oftCmd: '0x' },
+        { nativeFee: value - amount, lzTokenFee: 0n },
+        '0x01eD5c94DE39E73C986b98B85C2c0A3d1BEDff7D',
+      ] }) }],
+  });
+  const calls: string[] = [];
+  const vanaNet = (plan: DirectPlan) => vi.fn(async (url: string, init?: RequestInit) => {
+    const reply = (result: unknown) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
+    if (url.includes('/direct/chains')) return new Response(JSON.stringify({ chains: [{ chainId: VANA, name: 'Vana', token: 'VANA', decimals: 18, explorerUrl: '', rpcUrl: '', kind: 'evm' }], prices: {} }));
+    if (url.includes('/direct/exit')) return new Response(JSON.stringify(plan));
+    const { method } = JSON.parse(String(init!.body)) as { method: string };
+    if (method === 'eth_gasPrice') return reply(hex(NETWORK));
+    if (method === 'eth_call') {
+      const data = String((JSON.parse(String(init!.body)) as { params: [{ data: string }] }).params[0].data);
+      calls.push(data.slice(0, 10));
+      // quoteSend: LayerZero's fee for the send
+      if (data.startsWith('0x3b6f743b')) return reply(`0x${LZFEE.toString(16).padStart(64, '0')}${'0'.repeat(64)}`);
+      throw new Error(`stop after the fee check: ${data.slice(0, 10)}`);
+    }
+    if (method === 'eth_getBalance') return reply(hex(bal));
+    if (method === 'eth_getTransactionCount') return reply('0x0');
+    throw new Error(`stop after the fee check: ${method}`);
+  });
+  const target = { chainId: VANA, toChainId: 8453, from: FROM, recipient: OTHER };
+
+  it("checks the fee against the adapter's quoteSend, and reads no wrapped balance (a v2 adapter holds none)", async () => {
+    calls.length = 0;
+    vi.stubGlobal('fetch', vanaNet(exitPlan(10n ** 18n)));
+    await expect(run.planChecked(target, 'exit')).rejects.toThrow(/above what the bridge quotes/);
+    expect(calls).toEqual(['0x3b6f743b']);
+    // The quoted fee with 10%: past the fee check
+    const amount = ((value - (LZFEE * 110n) / 100n) / 10n ** 12n) * 10n ** 12n;
+    vi.stubGlobal('fetch', vanaNet(exitPlan(amount)));
+    await expect(run.planChecked(target, 'exit')).rejects.not.toThrow(/above what the bridge quotes|refused/);
+  });
+});

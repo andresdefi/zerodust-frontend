@@ -155,7 +155,11 @@ test('several withdrawals: each shows its steps and what is next; the tab counts
   // Gravity's G arrives as a token on Ethereum
   await expect(row('Gravity')).toContainText(' G');
   await expect(row('Abstract').locator('.ap-claim-steps li.done')).toHaveCount(3);
-  await expect(row('Abstract').getByRole('button', { name: 'Remove' })).toBeVisible();
+  // Claimed: it leaves the list by itself, no Remove to press
+  await expect(row('Abstract')).toContainText('It leaves this list in a few minutes.');
+  await expect(row('Abstract').getByRole('button', { name: 'Remove' })).toHaveCount(0);
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('zd.pending-claims.v1') ?? '[]') as Array<{ chainName: string; doneAt?: number }>);
+  expect(stored.filter((c) => c.doneAt !== undefined).map((c) => c.chainName)).toEqual(['Abstract']);
   if (process.env.SHOT) {
     await page.screenshot({ path: process.env.SHOT.replace('.png', '-tab.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -166,3 +170,20 @@ test('several withdrawals: each shows its steps and what is next; the tab counts
   }
 });
 
+
+test('a claimed withdrawal leaves the list by itself 10 minutes after the page first sees it claimed', async ({ page }) => {
+  await page.clock.install();
+  await openWithClaims(page, ['nova waiting', 'abstract claimed']);
+  const tab = page.getByRole('tab', { name: /Waiting to be claimed/ });
+  await tab.click();
+  const card = page.getByRole('region', { name: 'Waiting to be claimed' });
+  await expect(card.locator('.ap-claim', { hasText: 'Abstract' })).toContainText('It leaves this list in a few minutes.', { timeout: 20_000 });
+  await page.clock.fastForward('09:00');
+  await expect(card.locator('.ap-claim', { hasText: 'Abstract' })).toBeVisible();
+  await page.clock.fastForward('01:30');
+  await expect(card.locator('.ap-claim', { hasText: 'Abstract' })).toHaveCount(0);
+  await expect(card.locator('.ap-claim', { hasText: 'Arbitrum Nova' })).toBeVisible();
+  // And from the store, so a reload does not bring it back
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('zd.pending-claims.v1') ?? '[]') as Array<{ chainName: string }>);
+  expect(stored.map((c) => c.chainName)).toEqual(['Arbitrum Nova']);
+});

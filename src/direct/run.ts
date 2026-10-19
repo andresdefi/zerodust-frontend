@@ -5,7 +5,7 @@ import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { isRegisteredSettler, ZEROX_DEPLOYER, ZEROX_REGISTRY_CALLS } from './across';
 import { hexToBytes, OP_GAS_PRICE_ORACLE, settleL1Value, type L1Params } from './l1fee';
 import {
-  directChains, FIXED_PRICE_CHAINS, GASLIMIT_CHAINS, GUARD_CHAINS, MAX_GAS_PRICE_FACTOR, OFT_FEE_MARGIN_PERCENT, tokenExitFor, ZERODUST_GUARD, ZERODUST_GUARD_CODEHASH, ZK_PAYMASTERS,
+  directChains, FIXED_PRICE_CHAINS, GASLIMIT_CHAINS, GUARD_CHAINS, MAX_GAS_PRICE_FACTOR, OFT_FEE_MARGIN_PERCENT, OFT_V2_ABI, tokenExitFor, ZERODUST_GUARD, ZERODUST_GUARD_CODEHASH, ZK_PAYMASTERS,
   prepareExit, preparePlan, TX_GAP_BLOCKS, type DirectPlan, type PlanMode, type Target,
 } from './plan';
 import { checkReplay, replay, rpc as rpcAt } from './replay';
@@ -83,8 +83,8 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string,
   // Gas is the one cost the API sets: a price far above the chain's own would spend the balance on it
   if (plan.txs.some((tx) => BigInt(tx.gasPrice) > MAX_GAS_PRICE_FACTOR * network)) throw new Error('Plan refused: its gas price is far above the network\'s');
   const tokenExit = mode === 'exit' ? tokenExitFor(t.chainId, t.toChainId) : undefined;
-  if (tokenExit) {
-    // The OFT spends a wrapped balance first and would keep the native value as its fee
+  if (tokenExit?.lz === 1) {
+    // A v1 OFT spends a wrapped balance first and would keep the native value as its fee (a v2 adapter holds none)
     const wrapped = await rpc<string>(t.chainId, 'eth_call', [{ to: tokenExit.oft, data: `0x70a08231${t.from.slice(2).toLowerCase().padStart(64, '0')}` }, 'latest']);
     if (BigInt(wrapped) !== 0n) throw new Error(`Plan refused: this wallet holds wrapped ${tokenExit.token.symbol} on the bridge; unwrap it first`);
   }
@@ -102,10 +102,20 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string,
     // What the bridge keeps as its fee (value - amount, refunded beyond the real fee to ZeroDust) may
     // be at most LayerZero's own quote, read here, plus 10% and the rounding to shared decimals
     const send = plan.txs.at(-1)!;
-    const { args } = decodeFunctionData({ abi: OFT_SEND_ABI, data: send.data as Hex });
-    const quoted = await rpc<string>(t.chainId, 'eth_call', [{ to: tokenExit.oft, data: encodeFunctionData({ abi: OFT_FEE_ABI, functionName: 'estimateSendFee', args: [tokenExit.lzChainId, args[2], args[3], false, tokenExit.adapterParams as Hex] }) }, 'latest']);
-    const [nativeFee] = decodeFunctionResult({ abi: OFT_FEE_ABI, functionName: 'estimateSendFee', data: quoted as Hex });
-    if (BigInt(send.value) - args[3] > (nativeFee * OFT_FEE_MARGIN_PERCENT) / 100n + tokenExit.dustRate) {
+    let amount: bigint;
+    let nativeFee: bigint;
+    if (tokenExit.lz === 2) {
+      const { args: [param] } = decodeFunctionData({ abi: OFT_V2_ABI, data: send.data as Hex }) as { args: readonly [{ dstEid: number; to: Hex; amountLD: bigint; minAmountLD: bigint; extraOptions: Hex; composeMsg: Hex; oftCmd: Hex }, ...unknown[]] };
+      amount = param.amountLD;
+      const quoted = await rpc<string>(t.chainId, 'eth_call', [{ to: tokenExit.oft, data: encodeFunctionData({ abi: OFT_V2_ABI, functionName: 'quoteSend', args: [param, false] }) }, 'latest']);
+      nativeFee = decodeFunctionResult({ abi: OFT_V2_ABI, functionName: 'quoteSend', data: quoted as Hex }).nativeFee;
+    } else {
+      const { args } = decodeFunctionData({ abi: OFT_SEND_ABI, data: send.data as Hex });
+      amount = args[3];
+      const quoted = await rpc<string>(t.chainId, 'eth_call', [{ to: tokenExit.oft, data: encodeFunctionData({ abi: OFT_FEE_ABI, functionName: 'estimateSendFee', args: [tokenExit.lzChainId, args[2], args[3], false, tokenExit.adapterParams as Hex] }) }, 'latest']);
+      [nativeFee] = decodeFunctionResult({ abi: OFT_FEE_ABI, functionName: 'estimateSendFee', data: quoted as Hex });
+    }
+    if (BigInt(send.value) - amount > (nativeFee * OFT_FEE_MARGIN_PERCENT) / 100n + tokenExit.dustRate) {
       throw new Error('Plan refused: the bridge fee in it is above what the bridge quotes');
     }
   }

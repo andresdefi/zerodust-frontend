@@ -4,7 +4,7 @@ import { groupOf, type AddressChain } from '../src/address/groups';
 import { ZERODUST_ADDRESS, ZK_PAYMASTERS, type DirectPlan, type PlanTx } from '../src/direct/plan';
 import { checkNativeCall, NATIVE_BRIDGE_CONTRACT, verifyPlan, type PlanContext } from '../src/direct/verify';
 import {
-  addPendingClaim, claimableFrom, claimCostWei, NATIVE_EXITS, nativeSummary, pendingClaimsOf, removePendingClaim, startByMs, waitText,
+  addPendingClaim, claimableFrom, claimCostWei, DONE_KEEP_MS, markClaimDone, NATIVE_EXITS, nativeSummary, pendingClaimsOf, removePendingClaim, startByMs, waitText,
   type PendingClaim,
 } from '../src/sweep/native';
 
@@ -163,6 +163,20 @@ describe('pending claims (this browser only)', () => {
     removePendingClaim('0xB2');
     expect(pendingClaimsOf(FROM).map((c) => c.txHash)).toEqual(['0xa6f1']);
     expect(new Date(claimableFrom(claim())).toISOString()).toBe('2026-10-17T07:06:21.000Z');
+  });
+
+  it('a delivered or claimed withdrawal leaves the list by itself 10 minutes after it is first seen done', () => {
+    const t0 = Date.parse('2026-10-19T15:00:00Z');
+    addPendingClaim(claim());
+    addPendingClaim(claim({ txHash: '0xb2' }));
+    markClaimDone('0xA6F1', t0);
+    // Seen done again later: the countdown does not restart
+    markClaimDone('0xa6f1', t0 + 5 * 60_000);
+    expect(DONE_KEEP_MS).toBe(10 * 60_000);
+    expect(pendingClaimsOf(FROM, t0 + DONE_KEEP_MS - 1).map((c) => c.txHash)).toEqual(['0xa6f1', '0xb2']);
+    expect(pendingClaimsOf(FROM, t0 + DONE_KEEP_MS).map((c) => c.txHash)).toEqual(['0xb2']);
+    // Gone from the store too, not only hidden
+    expect(JSON.parse(store['zd.pending-claims.v1']!).map((c: PendingClaim) => c.txHash)).toEqual(['0xb2']);
   });
 
   it('drops unknown chains and survives broken storage', () => {
