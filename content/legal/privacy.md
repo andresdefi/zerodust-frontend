@@ -11,7 +11,7 @@ ZeroDust is a community tool built and run by [andresdefi](https://x.com/andresd
 - **With MetaMask**, the site receives your address, the permissions you grant and the message you sign. Your key stays in MetaMask.
 - **Your private key**, when you load a wallet with it, stays in your browser tab's memory. It is never sent to us or anyone else, never stored, and never logged. Only signatures and signed transactions leave the tab.
 - **No cookies, no tracking.** The site stores one thing in your browser, and only if you choose a theme: your light or dark preference (local storage).
-- **Daily counts of a few steps.** When a page opens, and when you connect MetaMask, open the sweep dialog or choose the key, the page sends the API only the step's name (for example "home"). The API adds it to that day's totals and keeps nothing else: no address, no IP address, no identifier. The offline page sends none.
+- **Daily counts of a few steps.** When a page opens, and when you connect MetaMask, open the sweep dialog, choose or enter the key, see the confirmation or start a sweep, the page sends the API only the step's name (for example "home"). Once per visit it also sends the kind of site you came from, worked out from what your browser shows as the previous page: X, hiddenfunds.xyz, a search engine, another site, or none. Never the page itself. If the page hits an error it did not handle, it sends "page-error", once. The API adds each name to that day's totals and keeps nothing else: no address, no IP address, no identifier, and nothing that links one step to another. The offline page sends none.
 - **Hosting.** The site is served by Vercel, which processes the connection data any web server needs to deliver a page (such as your IP address). We do not add analytics to it.
 
 ## What the ZeroDust API receives and keeps
@@ -25,7 +25,7 @@ To quote and run a sweep, the API (api.zerodust.xyz) receives your wallet addres
 | Your signatures for a sweep, and with MetaMask the permission you granted | To execute it | Deleted 7 days after the sweep ends (once its delegation is revoked) |
 | Sweep reports: wallet address, chains, route, transaction hashes, the result and its message, the site version | Sent by the page when a direct-chain sweep ends or a sweep fails, so we can look into it from the reference shown on the page. Never your key | Deleted after 400 days |
 | Daily counts of quotes per chain pair, and of sweeps per chain pair and outcome | Capacity and usage, no addresses | Kept |
-| Daily counts of page steps: pages opened, MetaMask connects, the sweep dialog, the key chosen | To see where people stop before a sweep. Names and totals only, no addresses | Kept |
+| Daily counts of page steps: pages opened, the kind of site a visit came from, MetaMask connects, the sweep dialog, the key chosen and entered, the confirmation, sweeps started, page errors | To see where people come from, where they stop before a sweep, and when the page breaks. Names and totals only, no addresses | Kept |
 | Delivery accuracy per bridge route: amount quoted vs delivered, how long delivery took, the chains and the bridge | To keep the amounts we show at or below what arrives. No addresses, no transaction hashes | Deleted after 400 days |
 
 - **The API stores no IP addresses.** Its request logs record only the method, the route (for example `/balances/:address`, never the address itself), the status and the time taken. It uses your IP address in memory to apply rate limits and does not write it anywhere. (The web server in front of the API, on the same Hetzner server, keeps no access log either.)
@@ -54,4 +54,4 @@ You can ask what data ZeroDust holds about your wallet address, and ask for it t
 
 We will update this page when what we collect changes, and change the date below.
 
-Last updated: 14 October 2026.
+Last updated: 19 October 2026.

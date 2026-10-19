@@ -143,6 +143,7 @@ export function SweepWithDialog({ open, plan, address, session, onWallet, onClos
                 setError(`That key belongs to ${shortAddress(account.address)}, not ${shortAddress(address)}. Nothing was loaded.`);
                 return;
               }
+              track('key-entered');
               setMode(start);
               setError(null);
               onWallet({ kind: 'key', account });
@@ -257,6 +258,9 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
   // When the dialog opened, for "start by" dates (read once, not during render)
   const [openedAt, setOpenedAt] = useState(0);
   const ownBridge = plan.group === 'claim';
+  // Counted only with something to sweep ("Nothing can be swept right now" is not a confirmation)
+  const anyReady = m.readyRows.length > 0;
+  useEffect(() => { if (open && anyReady) track('sweep-confirm'); }, [open, anyReady]);
   useEffect(() => {
     if (!open || !ownBridge) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -404,7 +408,7 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
         )}
         <div className="btns">
           <button type="button" className="btn btn-ghost" onClick={onCancel}>{n === 0 ? 'Close' : 'Back'}</button>
-          {n > 0 && <button type="button" className="btn btn-primary" disabled={ownBridge && !understood} onClick={() => { confirmed.current = true; onConfirm(); }}>Sweep {n} {n === 1 ? 'chain' : 'chains'}</button>}
+          {n > 0 && <button type="button" className="btn btn-primary" disabled={ownBridge && !understood} onClick={() => { confirmed.current = true; track('sweep-started'); onConfirm(); }}>Sweep {n} {n === 1 ? 'chain' : 'chains'}</button>}
         </div>
       </div>
     </dialog>
