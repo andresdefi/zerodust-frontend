@@ -20,7 +20,12 @@ const day = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: 'n
  * chain (sweep/native.ts). Each one's stage is read from the chain and the parent (sweep/claims.ts), and
  * the prove and claim are sent from here; the chain's bridge site, where it has one, stays linked as the fallback.
  */
-export function PendingClaims({ address, version }: { address: Address; version: number }) {
+export function PendingClaims({ address, version, onSummary }: {
+  address: Address;
+  version: number;
+  /** How many there are, and how many can be proved or claimed now (the tab's count) */
+  onSummary?: (summary: { total: number; ready: number }) => void;
+}) {
   const [list, setList] = useState<PendingClaim[]>([]);
   const [live, setLive] = useState<Record<string, Live>>({});
   const [acting, setActing] = useState<{ claim: PendingClaim; step: ClaimStep } | null>(null);
@@ -56,47 +61,60 @@ export function PendingClaims({ address, version }: { address: Address; version:
     return null;
   };
 
-  if (list.length === 0) return <AddClaim onAdd={add} />;
+  const ready = list.filter((c) => { const st = live[c.txHash]?.state?.stage; return (st === 'prove' || st === 'claim') && !!live[c.txHash]?.withdrawal; }).length;
+  useEffect(() => { onSummary?.({ total: list.length, ready }); }, [list.length, ready, onSummary]);
+
   const needsProve = list.some((c) => nativeExitOf(c.chainId)?.prove);
-  // Where they are claimed: Ethereum, BNB Chain (opBNB), or both
-  const parents = [...new Set(list.map((c) => parentOf(nativeExitOf(c.chainId)!).name))];
-  const on = parents.join(' or ');
+  const remove = (txHash: string) => { removePendingClaim(txHash); setList(pendingClaimsOf(address)); };
   return (
     <section className="ap-card ap-claims" aria-label="Waiting to be claimed">
-      <header className="ap-grp-h">
-        <div className="ap-grp-t">
-          <h2>Waiting to be claimed<span className="tag acc">On {on}</span></h2>
-          <p>Withdrawals into a chain&apos;s own bridge, kept in this browser. Nothing arrives until it is {needsProve ? 'proved and ' : ''}claimed on {parents.length > 1 ? 'the chain it settles on' : on}, from here (or on the chain&apos;s bridge site, where it has one). Any wallet can pay that gas; the funds go to the recipient either way.</p>
-        </div>
-      </header>
-      <ul className="ap-rows">
-        {list.map((c) => {
-          const exit = nativeExitOf(c.chainId)!;
-          const l = live[c.txHash];
-          const s = l?.state;
-          const tag = statusTag(c, l);
-          return (
-            <li key={c.txHash} className="ap-row ap-claim">
-              <span className="ap-chain"><ChainIcon chainId={c.chainId} name={c.chainName} size={28} /><span>{c.chainName}</span></span>
-              <span className="ap-bal">{formatAmount(BigInt(c.amount), c.decimals)} {c.symbol}<small>sent {day(c.sentAt)}</small></span>
-              <span className="ap-route"><span className={`tag ${tag.tone}`}>{tag.text}</span></span>
-              <span className="ap-prog-detail">{detailText(c, l)} To {shortAddress(c.recipient)} on {parentOf(exit).name}{exit.token ? `, as ${exit.token.symbol}` : ''}.</span>
-              <span className="ap-links-tx">
-                {c.explorerUrl && <a href={`${c.explorerUrl.replace(/\/$/, '')}/tx/${c.txHash}`} target="_blank" rel="noreferrer">Withdrawal ↗</a>}
-                {s?.stage !== 'claimed' && exit.bridge && <a href={exit.bridge.url} target="_blank" rel="noreferrer">{exit.bridge.name} ↗</a>}
-                {s?.stage === 'claimed'
-                  ? <button type="button" className="linkbtn" onClick={() => { removePendingClaim(c.txHash); setList(pendingClaimsOf(address)); }}>Remove</button>
-                  : l?.withdrawal === null && <button type="button" className="linkbtn" onClick={() => { removePendingClaim(c.txHash); setList(pendingClaimsOf(address)); }}>Remove</button>}
-                {(s?.stage === 'prove' || s?.stage === 'claim') && l?.withdrawal && (
-                  <button type="button" className="btn btn-primary btn-sm" onClick={() => setActing({ claim: c, step: s.stage as ClaimStep })}>
-                    {s.stage === 'prove' ? 'Prove' : 'Claim'}
-                  </button>
-                )}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
+      <p className="ap-claims-lead">
+        {list.length === 0
+          ? 'Nothing waiting. A sweep through a chain\'s own bridge shows up here until it is claimed.'
+          : <>Withdrawals into a chain&apos;s own bridge, kept in this browser. Nothing arrives until it is {needsProve ? 'proved and ' : ''}claimed, from here or on the chain&apos;s bridge site. Any wallet can pay that gas; the funds go to the recipient either way.</>}
+      </p>
+      {list.length > 0 && (
+        <ul className="ap-claim-list">
+          {list.map((c) => {
+            const exit = nativeExitOf(c.chainId)!;
+            const l = live[c.txHash];
+            const s = l?.state;
+            const tag = statusTag(c, l);
+            const canAct = (s?.stage === 'prove' || s?.stage === 'claim') && !!l?.withdrawal;
+            const steps = stepsOf(c, l);
+            return (
+              <li key={c.txHash} className="ap-claim">
+                <div className="ap-claim-top">
+                  <span className="ap-claim-chain">
+                    <ChainIcon chainId={c.chainId} name={c.chainName} size={30} />
+                    <span><b>{c.chainName}</b><small>sent {day(c.sentAt)}</small></span>
+                  </span>
+                  <span className="ap-claim-amt">
+                    <b>{formatAmount(BigInt(c.amount), c.decimals)} {exit.token?.symbol ?? c.symbol}</b>
+                    <small>to {shortAddress(c.recipient)} on {parentOf(exit).name}</small>
+                  </span>
+                  <span className="ap-claim-act">
+                    {canAct
+                      ? <button type="button" className="btn btn-primary btn-sm" onClick={() => setActing({ claim: c, step: s!.stage as ClaimStep })}>{s!.stage === 'prove' ? 'Prove now' : 'Claim now'}</button>
+                      : <span className={`tag ${tag.tone}`}>{tag.text}</span>}
+                  </span>
+                </div>
+                <ol className="ap-claim-steps" aria-label="Progress">
+                  {steps.labels.map((label, i) => (
+                    <li key={label} className={i < steps.done ? 'done' : i === steps.done ? (steps.ready ? 'now ready' : 'now') : ''} aria-current={i === steps.done ? 'step' : undefined}>{label}</li>
+                  ))}
+                </ol>
+                <p className="ap-claim-detail">{detailText(c, l)}</p>
+                <p className="ap-claim-links">
+                  {c.explorerUrl && <a href={`${c.explorerUrl.replace(/\/$/, '')}/tx/${c.txHash}`} target="_blank" rel="noreferrer">Withdrawal ↗</a>}
+                  {s?.stage !== 'claimed' && exit.bridge && <a href={exit.bridge.url} target="_blank" rel="noreferrer">{exit.bridge.name} ↗</a>}
+                  {(s?.stage === 'claimed' || l?.withdrawal === null) && <button type="button" className="linkbtn" onClick={() => remove(c.txHash)}>Remove</button>}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       <AddClaim onAdd={add} />
       {acting && live[acting.claim.txHash]?.withdrawal && (
         <ClaimDialog
@@ -145,6 +163,19 @@ function AddClaim({ onAdd }: { onAdd: (txHash: Hex) => Promise<string | null> })
       {error && <p className="field-error" role="alert">{error}</p>}
     </form>
   );
+}
+
+/** The withdrawal's steps, how many are done, and whether the next one can be sent now */
+function stepsOf(c: PendingClaim, l: Live | undefined): { labels: string[]; done: number; ready: boolean } {
+  const exit = nativeExitOf(c.chainId)!;
+  const stage = l?.withdrawal ? l.state?.stage : undefined;
+  if (exit.relayed) return { labels: ['Sent', 'Delivered'], done: stage === 'claimed' ? 2 : 1, ready: false };
+  if (exit.prove) {
+    const done = stage === 'claimed' ? 4 : stage === 'claim' ? 3 : stage === 'proved' ? 2 : 1;
+    return { labels: ['Sent', 'Prove', 'Wait', 'Claim'], done, ready: stage === 'prove' || stage === 'claim' };
+  }
+  const done = stage === 'claimed' ? 3 : stage === 'claim' ? 2 : 1;
+  return { labels: ['Sent', 'Wait', 'Claim'], done, ready: stage === 'claim' };
 }
 
 function statusTag(c: PendingClaim, l: Live | undefined): { text: string; tone: string } {

@@ -92,7 +92,7 @@
 .ap-kpis { display: flex; gap: 34px; margin-left: auto; text-align: right; }
 .ap-kpis dt { font-size: 11.5px; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; text-transform: uppercase; }
 .ap-kpis dd { margin: 0; font-size: 22px; font-weight: 700; }
-.ap-dest { margin-top: 14px; padding: 14px 18px; font-size: 15px; }
+.ap-dest { margin: 0 0 14px; padding: 14px 18px; font-size: 15px; }
 .ap-dest.is-default { background: var(--accent-soft); box-shadow: 0 0 0 1.5px var(--accent), var(--shadow); }
 .ap-dest-line { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; }
 .ap-dest-btns { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
@@ -218,7 +218,7 @@
 .zd-claim-review .btns { margin-top: 10px; }
 .zd-confirm { width: min(600px, calc(100vw - 24px)); max-height: min(820px, calc(100dvh - 32px)); padding: 0; display: flex; flex-direction: column; }
 .zd-confirm-top { padding: 22px 22px 12px; }
-.zd-confirm-list { flex: 1; overflow-y: auto; padding: 0 22px 8px; border-top: 1px solid var(--line); }
+.zd-confirm-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 22px 8px; border-top: 1px solid var(--line); }
 .zd-confirm-bottom { padding: 14px 22px 20px; border-top: 1px solid var(--line); }
 .zd-route-h { display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 600; color: var(--muted); letter-spacing: 0.05em; text-transform: uppercase; padding: 14px 0 6px; }
 .zd-cl { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center; padding: 7px 0; font-size: 14.5px; }
@@ -238,31 +238,46 @@
 }
 
 /* A chain's own bridge: the steps after the sweep, accepted before signing (sweep/native.ts) */
-.zd-native { margin: 0 22px 12px; padding: 14px 16px; border-radius: 12px; background: var(--accent-soft); color: var(--ink); font-size: 14px; line-height: 1.45; max-height: 40dvh; overflow-y: auto; }
-.zd-native-h { margin: 0 0 8px; font-weight: 600; }
-.zd-native-chain + .zd-native-chain { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
-.zd-native-name { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-weight: 600; }
-.zd-native ol { margin: 0 0 6px; padding-left: 20px; }
-.zd-native ol li + li { margin-top: 3px; }
-.zd-native-cost { margin: 0; color: var(--muted); }
-.zd-native-warn { margin: 6px 0 0; color: var(--warn); font-weight: 600; }
-.zd-native-ok { display: flex; gap: 10px; align-items: flex-start; margin-top: 12px; font-weight: 600; cursor: pointer; }
-.zd-native-ok input { margin-top: 3px; flex: none; }
-.ap-claims .ap-claim { grid-template-columns: minmax(160px, 1.1fr) minmax(130px, 0.9fr) auto; grid-template-areas: 'chain bal route' 'detail detail links'; row-gap: 6px; }
-.ap-claim > .ap-chain { grid-area: chain; }
-.ap-claim > .ap-bal { grid-area: bal; }
-.ap-claim > .ap-route { grid-area: route; justify-self: end; }
-.ap-claim > .ap-prog-detail { grid-area: detail; color: var(--muted); font-size: 14px; }
-.ap-claim > .ap-links-tx { grid-area: links; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: flex-end; }
+.zd-native { margin: 14px 0 6px; padding: 14px 16px; border-radius: 12px; background: var(--accent-soft); color: var(--ink); font-size: 14px; line-height: 1.45; }
+.zd-native p { margin: 0; }
+.zd-native-h { font-weight: 600; }
+.zd-native .zd-native-lead { margin-top: 4px; }
+.zd-native-chain { display: grid; grid-template-columns: 22px 1fr; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.zd-native-name { font-weight: 600; }
+.zd-native .zd-native-cost { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.zd-native .zd-native-warn { margin-top: 4px; color: var(--warn); font-weight: 600; }
+.zd-native-ok { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 14px; font-size: 14px; font-weight: 600; line-height: 1.4; cursor: pointer; }
+.zd-native-ok input { margin-top: 2px; flex: none; }
 .ap-claims-add { padding: 12px 16px; font-size: 14px; color: var(--muted); }
 .ap-claims > .ap-claims-add { border-top: 1px solid var(--line); }
+.ap-claims-lead { margin: 0; padding: 14px 16px; font-size: 14px; color: var(--muted); line-height: 1.45; }
+.ap-claim-list { list-style: none; margin: 0; padding: 0; }
+.ap-claim { padding: 16px; border-top: 1px solid var(--line); }
+.ap-claim-top { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; align-items: center; }
+.ap-claim-chain { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.ap-claim-chain b, .ap-claim-amt b { display: block; font-size: 15.5px; }
+.ap-claim-chain small, .ap-claim-amt small { display: block; color: var(--muted); font-size: 13px; }
+.ap-claim-amt { text-align: right; }
+.ap-claim-act { display: flex; justify-content: flex-end; min-width: 150px; }
+.ap-claim-steps { display: flex; list-style: none; margin: 14px 0 0; padding: 0; gap: 6px; }
+.ap-claim-steps li { flex: 1; font-size: 12.5px; font-weight: 600; color: var(--muted); padding-top: 8px; border-top: 3px solid var(--line); }
+.ap-claim-steps li.done { color: var(--ink); border-top-color: var(--accent); }
+.ap-claim-steps li.now { color: var(--ink); border-top-color: var(--accent); border-top-style: dashed; }
+.ap-claim-steps li.now.ready { border-top-color: var(--ok); border-top-style: solid; color: var(--ok); }
+.ap-claim-detail { margin: 10px 0 0; font-size: 14px; color: var(--muted); line-height: 1.45; }
+.ap-claim-links { display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0 0; font-size: 13.5px; font-weight: 600; }
+.ap-claim-links a { text-decoration: none; color: var(--accent-text); }
+.ap-tabs { display: flex; gap: 4px; margin: 26px 0 14px; border-bottom: 1px solid var(--line); flex: 1; min-width: 0; overflow-x: auto; }
+.ap-tab { appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 8px 12px 10px; font: inherit; font-size: 17px; font-weight: 600; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.ap-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.ap-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
+.ap-tab-n { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--sunken); color: var(--muted); border: 1px solid var(--line); }
+.ap-tab-n.ready { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+@media (max-width: 640px) {
+  .ap-claim-top { grid-template-columns: minmax(0, 1fr) auto; }
+  .ap-claim-act { grid-column: 1 / -1; justify-content: flex-start; min-width: 0; }
+  .ap-tab { font-size: 15.5px; padding: 8px 8px 10px; }
+}
 .ap-claims-form label { display: block; margin-bottom: 6px; }
 .ap-claims-form > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ap-claims-form input { flex: 1; min-width: 240px; height: 36px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 0 12px; font: inherit; font-size: 14px; color: var(--ink); }
-@media (max-width: 900px) {
-  .ap-claims .ap-claim { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'chain' 'route' 'bal' 'detail' 'links'; }
-  .ap-claim > * { min-width: 0; }
-  .ap-claim > .ap-route { justify-self: start; }
-  .ap-claim > .ap-bal { text-align: left; }
-  .ap-claim > .ap-links-tx { justify-content: flex-start; }
-}

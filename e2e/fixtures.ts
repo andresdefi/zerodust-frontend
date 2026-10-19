@@ -137,6 +137,26 @@ function quote(fromChainId: number, toChainId: number, destination: string) {
   };
 }
 
+/** A chain's own bridge (bridge=native): Nova's ArbSys.withdrawEth, Fraxtal's message passer (FRAX arrives as FXS) */
+const NATIVE_ROUTES: Record<number, { target: Address; data: (to: Address) => Hex }> = {
+  [NOVA]: { target: '0x0000000000000000000000000000000000000064', data: (to) => encodeFunctionData({ abi: parseAbi(['function withdrawEth(address destination) payable returns (uint256)']), args: [to] }) },
+  [FRAXTAL]: { target: '0x4200000000000000000000000000000000000016', data: (to) => encodeFunctionData({ abi: parseAbi(['function initiateWithdrawal(address _target, uint256 _gasLimit, bytes _data) payable']), args: [to, 200_000n, '0x'] }) },
+};
+
+function nativeQuote(fromChainId: number, destination: string) {
+  const q = quote(fromChainId, 1, destination);
+  const route = NATIVE_ROUTES[fromChainId]!;
+  const callData = route.data(destination as Address);
+  const routed = BALANCE - BigInt(q.fees.maxTotalFeeWei);
+  return {
+    ...q,
+    estimatedReceive: routed.toString(),
+    bridge: { name: 'native', displayName: 'Own bridge', inputAmount: routed.toString(), expectedOutput: routed.toString() },
+    relayRouteToken: undefined,
+    intent: { ...q.intent, callTarget: route.target.toLowerCase(), callData, routeHash: keccak256(callData), minReceive: routed.toString() },
+  };
+}
+
 function authorization(q: Pick<ReturnType<typeof quote>, 'mode' | 'intent' | 'fees' | 'deadline' | 'nonce'>, fromChainId: number, user: Address) {
   return {
     sweepType: q.mode === 0 ? 'same-chain' : 'cross-chain',
@@ -427,7 +447,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
       }
       const to = Number(p.get('toChainId'));
       quoted.push({ from, to, destination: p.get('destination')! });
-      const q = from === MITOSIS ? mitosisQuote(p.get('destination')!) : from === ENDURANCE ? enduranceQuote(p.get('destination')!) : quote(from, to, p.get('destination')!);
+      const q = p.get('bridge') === 'native' && NATIVE_ROUTES[from] ? nativeQuote(from, p.get('destination')!) : from === MITOSIS ? mitosisQuote(p.get('destination')!) : from === ENDURANCE ? enduranceQuote(p.get('destination')!) : quote(from, to, p.get('destination')!);
       quotes.set(q.quoteId, { ...q, from, to });
       return json(route, q);
     }
@@ -507,6 +527,8 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
         const data = String((r.params?.[0] as { data?: string } | undefined)?.data ?? '');
         // Telos's bridge: LayerZero's fee (3.2 TLOS) for estimateSendFee
         if (data.startsWith('0x365260b4')) return { jsonrpc: '2.0', id: r.id, result: `0x${(32n * 10n ** 17n).toString(16).padStart(64, '0')}${'0'.repeat(64)}` };
+        // Arbitrum Nova's NodeInterface: the L1 part of a tx in gas units (gasEstimateL1Component)
+        if (data.startsWith('0x77d488a2')) return { jsonrpc: '2.0', id: r.id, result: `0x${[1000n, GAS_PRICE, GAS_PRICE].map((n) => n.toString(16).padStart(64, '0')).join('')}` };
         return { jsonrpc: '2.0', id: r.id, result: addressWord(data.startsWith('0x6352211e') ? ACROSS.settler : ZERO) };
       }
       const result = {

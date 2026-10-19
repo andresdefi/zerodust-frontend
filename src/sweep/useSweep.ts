@@ -462,7 +462,7 @@ export function useSweep(wallet: Wallet) {
           const quote = await permissionQuote({ fromChainId: row.chainId, toChainId: target.toChainId, user: address, destination: getAddress(target.recipient) });
           setBridge(row.chainId, quote.bridge?.displayName);
           setState(row.chainId, isRouted(choice) && !isExit(choice)
-            ? { phase: 'ready', choice, receive: BigInt(quote.estimatedReceive), toChainId: target.toChainId, token: rowToken(row.chainId, target.toChainId) }
+            ? { phase: 'ready', choice, receive: BigInt(quote.estimatedReceive), toChainId: target.toChainId, token: tokenFor(row, target.toChainId) }
             : { phase: 'ready', choice });
         } catch (error) {
           setState(row.chainId, { phase: 'no-route', detail: error instanceof Error ? error.message : 'No quote' });
@@ -478,7 +478,7 @@ export function useSweep(wallet: Wallet) {
       } else if (result.success && result.quote) {
         setBridge(row.chainId, quoteBridge(result.quote));
         setState(row.chainId, isRouted(choice) && !isExit(choice)
-          ? { phase: 'ready', choice, receive: BigInt(result.quote.estimatedReceive), toChainId: target.toChainId, token: rowToken(row.chainId, target.toChainId) }
+          ? { phase: 'ready', choice, receive: BigInt(result.quote.estimatedReceive), toChainId: target.toChainId, token: tokenFor(row, target.toChainId) }
           : { phase: 'ready', choice });
       } else {
         setState(row.chainId, { phase: 'no-route', detail: result.error ?? 'No quote' });

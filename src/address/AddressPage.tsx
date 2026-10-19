@@ -6,7 +6,7 @@ import { ChainIcon } from '../components/ChainIcon';
 import { DestinationPicker } from '../components/DestinationPicker';
 import { formatAmount, formatUsd, shortAddress } from '../lib/format';
 import { groupChains, groupOf, groupText, tokenRouteOf, type FixedFee, type GroupKey } from './groups';
-import { nativeExitOf, parentOf, waitText } from '../sweep/native';
+import { nativeExitOf, parentOf, pendingClaimsOf, waitText } from '../sweep/native';
 import { PendingClaims } from './PendingClaims';
 import { announcementHref, closesLong, closesShort, cutoffLong, stillSwept } from './closing';
 import { directRouteName, isListedScam, resolveName, useAddressData, useEstimates, useResolved, type AddressRow, type ChainOption, type Estimate } from './useAddress';
@@ -117,6 +117,10 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
   };
 
   // Sweeping: the wallet chosen to sign (kept for the next group), the group waiting for one, the run
+  // Two tabs: the balances to sweep, and withdrawals into a chain's own bridge waiting to be claimed
+  const [tab, setTab] = useState<'balances' | 'claims'>('balances');
+  const [claims, setClaims] = useState(() => ({ total: pendingClaimsOf(address).length, ready: 0 }));
+  const onClaims = useCallback((c: { total: number; ready: number }) => setClaims(c), []);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [pending, setPending] = useState<SweepPlan | null>(null);
   const [run, setRun] = useState<{ id: number; plan: SweepPlan; wallet: Wallet } | null>(null);
@@ -191,18 +195,33 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
         </dl>
       </section>
 
+
+      <div className="ap-tabbar">
+        <div className="ap-tabs" role="tablist" aria-label="This address" onKeyDown={(e) => {
+          if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+          const next = tab === 'balances' ? 'claims' : 'balances';
+          setTab(next);
+          document.getElementById(`ap-tab-${next}`)?.focus();
+        }}>
+          <button type="button" role="tab" id="ap-tab-balances" aria-controls="ap-panel-balances" aria-selected={tab === 'balances'} tabIndex={tab === 'balances' ? 0 : -1} className="ap-tab" onClick={() => setTab('balances')}>
+            Balances
+          </button>
+          <button type="button" role="tab" id="ap-tab-claims" aria-controls="ap-panel-claims" aria-selected={tab === 'claims'} tabIndex={tab === 'claims' ? 0 : -1} className="ap-tab" onClick={() => setTab('claims')}>
+            Waiting to be claimed
+            {claims.total > 0 && <span className={`ap-tab-n${claims.ready > 0 ? ' ready' : ''}`} title={claims.ready > 0 ? `${claims.ready} ready to prove or claim` : undefined}>{claims.ready > 0 ? `${claims.ready} ready` : claims.total}</span>}
+          </button>
+        </div>
+        {tab === 'balances' && anyResult && !sweepingNow && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={refresh}>Refresh balances</button>
+        )}
+      </div>
+
+      <div role="tabpanel" id="ap-panel-balances" aria-labelledby="ap-tab-balances" hidden={tab !== 'balances'}>
       <DestinationBar
         address={address} recipient={recipient} destination={destination} destName={destName} isDefault={isDefault}
         here={here} onPickChain={() => setPicking(true)}
         onRecipient={(r) => { setRecipient(r); setSelection(null); }}
       />
-
-      <div className="ap-tabbar">
-        <h2 className="ap-section-title">Balances</h2>
-        {anyResult && !sweepingNow && (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={refresh}>Refresh balances</button>
-        )}
-      </div>
 
       {data.state === 'loading' && <div className="ap-state">Reading balances on every chain…</div>}
       {data.state === 'error' && <div className="ap-state" role="alert">{data.error}</div>}
@@ -305,7 +324,11 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
         </div>
       )}
 
-      <PendingClaims address={address} version={finished.size} />
+      </div>
+
+      <div role="tabpanel" id="ap-panel-claims" aria-labelledby="ap-tab-claims" hidden={tab !== 'claims'}>
+        <PendingClaims address={address} version={finished.size} onSummary={onClaims} />
+      </div>
 
       <DestinationPicker
         open={pickingElsewhere}

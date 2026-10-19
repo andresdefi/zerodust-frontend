@@ -109,27 +109,13 @@ export function waitText(exit: NativeExit): string {
   return h < 48 ? `about ${h < 30 ? 'a day' : `${Math.round(h / 24)} days`}` : `about ${Math.round((h / 24) * 2) / 2} days`;
 }
 
-/** What happens after the sweep, step by step, before anything is signed */
-export function nativeSteps(exit: NativeExit, chainName: string, recipient: string): string[] {
+/** What happens after the sweep, for one chain, before anything is signed: when, and what arrives */
+export function nativeSummary(exit: NativeExit, chainName: string): { when: string; arrives: string } {
   const p = parentOf(exit);
-  const arrives = exit.token ? `${exit.token.symbol} (${exit.token.name}), a token on ${p.name}, not ${p.symbol}` : `${p.symbol} on ${p.name}`;
-  if (exit.relayed) {
-    return [
-      `The sweep sends everything into ${chainName}'s own bridge, with a fee for its relayer taken from the balance. The wallet on ${chainName} ends at exactly 0.`,
-      `${chainName}'s relayer delivers it as ${arrives} in ${waitText(exit)}, at ${recipient}, with the part of its fee it did not use. Nothing to claim.`,
-      `If it has not arrived after a few hours, claim it on ${exit.bridge ? `${exit.bridge.name} (${exit.bridge.url})` : `${chainName}'s bridge`} with the wallet at ${recipient}.`,
-    ];
-  }
-  const steps = [`The sweep sends everything into ${chainName}'s own bridge. The wallet on ${chainName} ends at exactly 0.`];
-  if (exit.prove) {
-    steps.push(`Within a few hours, prove the withdrawal on ${p.name} (one transaction, paid in ${p.symbol} there).`);
-    steps.push(`Wait ${waitText(exit)} in total, then claim it on ${p.name} (a second transaction).`);
-  } else {
-    steps.push(`Wait ${waitText(exit)}, then claim it on ${p.name} (one transaction, paid in ${p.symbol} there).`);
-  }
-  steps.push(`It arrives as ${arrives}, at ${recipient}. Nothing arrives until it is claimed; ZeroDust does not claim for you.`);
-  steps.push(`${exit.prove ? 'Prove and claim' : 'Claim'} on this page (under "Waiting to be claimed")${exit.bridge ? ` or on ${exit.bridge.name} (${exit.bridge.url})` : ''}: any wallet with ${p.symbol} on ${p.name} may send ${exit.prove ? 'them' : 'it'}, the funds always go to the address above.`);
-  return steps;
+  const arrives = exit.token ? `Arrives as ${exit.token.symbol} (${exit.token.name}), a token on ${p.name}, not ${p.symbol}` : `Arrives as ${p.symbol} on ${p.name}`;
+  if (exit.relayed) return { when: `${chainName}'s relayer delivers it in ${waitText(exit)}, its fee taken from the balance. Nothing to claim`, arrives };
+  if (exit.prove) return { when: `Prove it within a few hours, then claim it after ${waitText(exit)} in total`, arrives };
+  return { when: `Claim it after ${waitText(exit)}`, arrives };
 }
 
 // ---- Withdrawals waiting to be claimed, kept in this browser only ----

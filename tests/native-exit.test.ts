@@ -4,7 +4,7 @@ import { groupOf, type AddressChain } from '../src/address/groups';
 import { ZERODUST_ADDRESS, ZK_PAYMASTERS, type DirectPlan, type PlanTx } from '../src/direct/plan';
 import { checkNativeCall, NATIVE_BRIDGE_CONTRACT, verifyPlan, type PlanContext } from '../src/direct/verify';
 import {
-  addPendingClaim, claimableFrom, claimCostWei, NATIVE_EXITS, nativeSteps, pendingClaimsOf, removePendingClaim, startByMs, waitText,
+  addPendingClaim, claimableFrom, claimCostWei, NATIVE_EXITS, nativeSummary, pendingClaimsOf, removePendingClaim, startByMs, waitText,
   type PendingClaim,
 } from '../src/sweep/native';
 
@@ -112,13 +112,13 @@ describe('groupOf: the claim group', () => {
 });
 
 describe('steps, costs and dates', () => {
-  it('says every step before signing, the prove where there is one, and what arrives', () => {
-    const lisk = nativeSteps(NATIVE_EXITS[LISK]!, 'Lisk', '0x22…2222');
-    expect(lisk.join(' ')).toMatch(/prove the withdrawal/);
-    expect(lisk.join(' ')).toMatch(/ZeroDust does not claim for you/);
-    const gravity = nativeSteps(NATIVE_EXITS[GRAVITY]!, 'Gravity', '0x22…2222');
-    expect(gravity.join(' ')).not.toMatch(/prove/i);
-    expect(gravity.join(' ')).toMatch(/G \(Gravity\), a token on Ethereum, not ETH/);
+  it('says when each chain is proved and claimed, and what arrives, before signing', () => {
+    const lisk = nativeSummary(NATIVE_EXITS[LISK]!, 'Lisk');
+    expect(lisk.when).toMatch(/^Prove it within a few hours, then claim it after about/);
+    expect(lisk.arrives).toBe('Arrives as ETH on Ethereum');
+    const gravity = nativeSummary(NATIVE_EXITS[GRAVITY]!, 'Gravity');
+    expect(gravity.when).not.toMatch(/prove/i);
+    expect(gravity.arrives).toBe('Arrives as G (Gravity), a token on Ethereum, not ETH');
     expect(waitText(NATIVE_EXITS[NOVA]!)).toBe('about 6.5 days');
     expect(waitText(NATIVE_EXITS[BLAST]!)).toBe('about a day');
   });
@@ -252,18 +252,15 @@ describe('Reya, HPP, RISE (2026-10-14): own bridges, a bridge site only where on
     for (const id of [81224, 1750]) {
       expect(NATIVE_EXITS[id]).toMatchObject({ stack: 'op', toChainId: 1, prove: true });
       expect(NATIVE_EXITS[id]!.bridge).toBeUndefined();
-      expect(nativeSteps(NATIVE_EXITS[id]!, NATIVE_EXITS[id]!.chainName, TO).join(' ')).toContain('Prove and claim on this page (under "Waiting to be claimed"):');
+      expect(nativeSummary(NATIVE_EXITS[id]!, NATIVE_EXITS[id]!.chainName).when).toMatch(/^Prove it within a few hours, then claim it after/);
     }
   });
 
-  it('sends the claim to this page alone when no bridge site claims it, and names the site when one does', () => {
-    const reya = nativeSteps(NATIVE_EXITS[1729]!, 'Reya', TO).join(' ');
-    expect(reya).toContain('Claim on this page (under "Waiting to be claimed"):');
-    expect(reya).not.toMatch(/undefined|https:/);
-    const hpp = nativeSteps(NATIVE_EXITS[190415]!, 'HPP', TO).join(' ');
-    expect(hpp).toContain('or on Arbitrum Bridge (https://bridge.arbitrum.io)');
-    const rise = nativeSteps(NATIVE_EXITS[4153]!, 'RISE', TO).join(' ');
-    expect(rise).toContain('Prove and claim on this page (under "Waiting to be claimed"):');
-    expect(rise).not.toMatch(/undefined/);
+  it('says when and what for chains without a bridge site, with nothing left undefined', () => {
+    for (const [id, name] of [[1729, 'Reya'], [190415, 'HPP'], [4153, 'RISE']] as const) {
+      const says = nativeSummary(NATIVE_EXITS[id]!, name);
+      expect(`${says.when} ${says.arrives}`).not.toMatch(/undefined|https:/);
+    }
+    expect(nativeSummary(NATIVE_EXITS[1729]!, 'Reya').when).toMatch(/^Claim it after/);
   });
 });
