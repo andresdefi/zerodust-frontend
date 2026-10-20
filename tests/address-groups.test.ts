@@ -41,6 +41,11 @@ describe('groupOf: one group per way of sweeping and what arrives', () => {
     expect(groupOf(chain(1329), { gas: false, notToDestination: true }, BASE)).toBe('elsewhere');
   });
 
+  it('not to the destination but to a chain found for it: stays with the gas, its row naming that chain', () => {
+    expect(groupOf(chain(1329), { gas: false, notToDestination: true, alt: 10 }, BASE)).toBe('gas');
+    expect(groupOf(chain(1480, { direct: true }), { gas: false, notToDestination: true, alt: 42161 }, BASE)).toBe('gas');
+  });
+
   it('not known yet (or no bridge answered): kept with the gas groups', () => {
     expect(groupOf(chain(14, { direct: true }), { gas: null }, BASE)).toBe('gas');
     expect(groupOf(chain(14, { direct: true }), { gas: null, unknown: true }, BASE)).toBe('gas');

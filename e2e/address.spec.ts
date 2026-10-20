@@ -285,11 +285,11 @@ test('opBNB: Meson\'s fixed fee is on the row before anything is chosen, and aft
   const user = privateKeyToAccount(generatePrivateKey()).address;
   await mockNetwork(page, user, { opbnb: true });
   await page.goto(`/address/${user}`);
-  // Gas goes to Base: Meson only reaches BNB Chain, and says what it keeps
-  const elsewhere = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: /Can't reach Base/ }) });
-  const row = elsewhere.locator('.ap-row', { hasText: 'opBNB' });
-  await expect(row).toContainText('Only to BNB Chain');
-  await expect(row).toContainText('Meson keeps 0.00051 BNB');
+  // Gas goes to Base: Meson only reaches BNB Chain, so it goes there with the rest, and says what it keeps
+  const gasGroup = page.locator('section.ap-grp', { has: page.getByRole('heading', { name: 'Arrives as gas on Base' }) });
+  const row = gasGroup.locator('.ap-row', { hasText: 'opBNB' });
+  await expect(row).toContainText('To BNB Chain · Meson keeps 0.00051 BNB', { timeout: 20_000 });
+  await expect(row).toContainText('BNB on BNB Chain');
   if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT.replace('.png', '-elsewhere.png'), fullPage: true });
   // Gas goes to BNB Chain: the row names Meson's fixed fee, and what arrives is after it
   const dest = page.getByRole('region', { name: 'Where swept gas goes' });

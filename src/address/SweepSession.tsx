@@ -35,6 +35,8 @@ export interface SweepPlan {
   ownChainAddress?: Address;
   /** 'elsewhere' group: the chain these go to instead */
   elsewhereChain?: number;
+  /** Gas group chains no bridge takes to the destination right now: the chain each goes to instead */
+  alts?: Record<number, number>;
   /** Instead of the group's way out: give it all to ZeroDust, or burn it, on its own chain */
   give?: 'donate' | 'burn';
 }
@@ -191,6 +193,8 @@ export function SweepSession({ wallet, plan, onProgress, onEnd }: {
     for (const c of plan.chains) {
       if (plan.give) {
         model.setChoice(c.chainId, plan.give);
+      } else if (plan.alts?.[c.chainId] !== undefined) {
+        model.setChoice(c.chainId, 'elsewhere', plan.alts[c.chainId]);
       } else if (plan.group === 'token') {
         if (c.direct && TOKEN_EXITS[c.chainId]) model.setChoice(c.chainId, 'exit-donate');
         else model.setChoice(c.chainId, 'elsewhere', tokenRouteOf(c.chainId, plan.destination)?.toChainId);
@@ -306,7 +310,9 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
     if (s?.receive === undefined) return '';
     const to = s.toChainId !== undefined ? m.destOf(s.toChainId) : null;
     const symbol = s.token?.symbol ?? to?.token ?? '';
-    return `${formatAmount(s.receive, s.token?.decimals ?? to?.decimals ?? 18)} ${symbol}`;
+    // Gas arriving somewhere other than the rest says where
+    const where = !s.token && to && to.chainId !== plan.destination ? ` on ${to.name}` : '';
+    return `${formatAmount(s.receive, s.token?.decimals ?? to?.decimals ?? 18)} ${symbol}${where}`;
   };
   const takes = (r: Row) => {
     const s = st(r);
@@ -320,15 +326,19 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
   const fixedFees = ready.filter((r) => st(r)?.bridgeFee !== undefined);
   const destName = m.destOf(plan.destination)?.name ?? 'the destination';
   const totals = m.readyTotals;
-  const totalText = totals.map((t) => `${formatAmount(t.amount, t.decimals)} ${t.symbol}${t.dest.chainId !== plan.destination ? ` on ${t.dest.name}` : ''}`).join(' + ');
+  // Gas arriving somewhere other than the destination: every amount names its chain, the label none
+  const splitGas = plan.group === 'gas' && totals.some((t) => !t.isToken && t.dest.chainId !== plan.destination);
+  const totalText = totals.map((t) => `${formatAmount(t.amount, t.decimals)} ${t.symbol}${splitGas || t.dest.chainId !== plan.destination ? ` on ${t.dest.name}` : ''}`).join(' + ');
   const totalUsd = totals.reduce((s, t) => s + (usdValue(t.amount, t.decimals, m.prices[t.isToken ? t.symbol : t.dest.token]) ?? 0), 0);
   const names = listNames(ready.map((r) => r.name));
+  // A gas group whose chains partly go elsewhere (no bridge to the destination right now) names every chain they reach
+  const gasDestNames = listNames([...new Set(ready.map((r) => { const to = st(r)?.toChainId; return to !== undefined && to !== plan.destination ? m.destOf(to)?.name ?? `chain ${to}` : destName; }))]);
   const title = plan.give === 'donate' ? `Donate everything on ${names} to ZeroDust?`
     : plan.give === 'burn' ? `Burn everything on ${names}?`
     : ownBridge ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} through ${n === 1 ? 'its' : 'their'} own bridge to ${parentNames}?`
     : plan.group === 'own-chain' ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} to an address on ${n === 1 ? 'its' : 'each'} chain?`
     : plan.group === 'token' ? `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} as tokens?`
-    : `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} to ${plan.group === 'elsewhere' ? m.destOf(plan.elsewhereChain!)?.name ?? 'another chain' : destName}?`;
+    : `Sweep ${n} ${n === 1 ? 'chain' : 'chains'} to ${plan.group === 'elsewhere' ? m.destOf(plan.elsewhereChain!)?.name ?? 'another chain' : gasDestNames}?`;
 
   return (
     <dialog ref={ref} className="modal zd-confirm" onClose={() => { if (!confirmed.current) onCancel(); }} aria-labelledby="zd-confirm-title">
@@ -422,7 +432,7 @@ function ConfirmSweep({ open, model: m, plan, onCancel, onConfirm }: {
           <p className="zd-note">{eaten.length === 1 ? '1 chain loses' : `${eaten.length} chains lose`} most of its value to the bridge: {eaten.map((r) => `${r.name} (${Math.round(takes(r) * 100)}%)`).join(', ')}. Untick {eaten.length === 1 ? 'it' : 'them'} on the page to keep {eaten.length === 1 ? 'it' : 'them'}.</p>
         )}
         {n > 0 && totals.length > 0 && (
-          <p className="zd-total"><span>{ownBridge ? 'You can claim' : 'You receive at least'}, at {m.toSelf ? 'your wallet' : shortAddress(m.recipient)}{plan.group !== 'token' ? ` on ${ownBridge ? parentNames : plan.group === 'elsewhere' ? m.destOf(plan.elsewhereChain!)?.name : destName}` : ''}</span><b>{totalText}{totalUsd > 0 ? ` (${formatUsd(totalUsd)})` : ''}</b></p>
+          <p className="zd-total"><span>{ownBridge ? 'You can claim' : 'You receive at least'}, at {m.toSelf ? 'your wallet' : shortAddress(m.recipient)}{plan.group !== 'token' && !splitGas ? ` on ${ownBridge ? parentNames : plan.group === 'elsewhere' ? m.destOf(plan.elsewhereChain!)?.name : destName}` : ''}</span><b>{totalText}{totalUsd > 0 ? ` (${formatUsd(totalUsd)})` : ''}</b></p>
         )}
         {ownBridge && n > 0 && (
           <label className="zd-native-ok">
