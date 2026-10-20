@@ -14,7 +14,7 @@ const fixture = JSON.parse(readFileSync(new URL('../tests/fixtures/claims-2026-1
   responses: Record<string, { result?: unknown; error?: unknown }>;
 };
 const ETH = new URL(RPC_URLS[1]!).origin;
-const L2 = [1135, 42170, 81457, 2741, 1625].map((id) => new URL((RPC_URLS[id] ?? DIRECT_RPC_URLS[id])!).origin);
+const L2 = [1135, 42170, 81457, 2741, 1625, 167000].map((id) => new URL((RPC_URLS[id] ?? DIRECT_RPC_URLS[id])!).origin);
 const ORIGINS = new Set([ETH, new URL(ETHEREUM_FALLBACK_RPC).origin, ...L2]);
 const GWEI = 1_000_000_000n;
 
@@ -75,6 +75,7 @@ async function openWithClaims(page: Page, names: string[]) {
     42170: { chainName: 'Arbitrum Nova', explorerUrl: 'https://nova.arbiscan.io', symbol: 'ETH' },
     1625: { chainName: 'Gravity', explorerUrl: 'https://explorer.gravity.xyz', symbol: 'G' },
     2741: { chainName: 'Abstract', explorerUrl: 'https://abscan.org', symbol: 'ETH' },
+    167000: { chainName: 'Taiko', explorerUrl: 'https://taikoscan.io', symbol: 'ETH' },
   };
   const claims = names.map((name, i) => {
     const c = fixture.cases.find((k) => k.name === name)!;
@@ -186,4 +187,16 @@ test('a claimed withdrawal leaves the list by itself 10 minutes after the page f
   // And from the store, so a reload does not bring it back
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('zd.pending-claims.v1') ?? '[]') as Array<{ chainName: string }>);
   expect(stored.map((c) => c.chainName)).toEqual(['Arbitrum Nova']);
+});
+
+test('a withdrawal its relayer already delivered (Taiko) is never listed, and leaves the store', async ({ page }) => {
+  await openWithClaims(page, ['nova waiting', 'taiko delivered']);
+  const tab = page.getByRole('tab', { name: /Waiting to be claimed/ });
+  await tab.click();
+  const card = page.getByRole('region', { name: 'Waiting to be claimed' });
+  await expect(card.locator('.ap-claim', { hasText: 'Arbitrum Nova' })).toBeVisible({ timeout: 20_000 });
+  await expect.poll(async () => page.evaluate(() => (JSON.parse(localStorage.getItem('zd.pending-claims.v1') ?? '[]') as Array<{ chainName: string }>).map((c) => c.chainName)), { timeout: 20_000 }).toEqual(['Arbitrum Nova']);
+  await expect(card.locator('.ap-claim', { hasText: 'Taiko' })).toHaveCount(0);
+  await expect(tab.locator('.ap-tab-n')).toHaveText('1');
+  if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT, fullPage: true });
 });

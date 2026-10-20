@@ -121,7 +121,7 @@ function Loaded({ address, name, session, onSession }: { address: Address; name:
   // Sweeping: the wallet chosen to sign (kept for the next group), the group waiting for one, the run
   // Two tabs: the balances to sweep, and withdrawals into a chain's own bridge waiting to be claimed
   const [tab, setTab] = useState<'balances' | 'claims'>('balances');
-  const [claims, setClaims] = useState(() => ({ total: pendingClaimsOf(address).length, ready: 0 }));
+  const [claims, setClaims] = useState(() => ({ total: pendingClaimsOf(address).filter((c) => !nativeExitOf(c.chainId)?.relayed).length, ready: 0 }));
   const onClaims = useCallback((c: { total: number; ready: number }) => setClaims(c), []);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [pending, setPending] = useState<SweepPlan | null>(null);

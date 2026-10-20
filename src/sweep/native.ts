@@ -135,12 +135,12 @@ export interface PendingClaim {
   amount: string;
   txHash: string;
   sentAt: number;
-  /** When the page first saw it delivered or claimed: it leaves the list DONE_KEEP_MS later */
+  /** When the page first saw it claimed: it leaves the list DONE_KEEP_MS later (a delivered one leaves at once) */
   doneAt?: number;
 }
 
 const STORE = 'zd.pending-claims.v1';
-/** How long a delivered or claimed withdrawal stays listed (owner, 2026-10-19: no manual removal) */
+/** How long a claimed withdrawal stays listed (owner, 2026-10-19: no manual removal) */
 export const DONE_KEEP_MS = 10 * 60_000;
 
 function load(): PendingClaim[] {

@@ -35,7 +35,13 @@ export function PendingClaims({ address, version, onSummary }: {
       const withdrawal = await readWithdrawal(c.chainId, c.txHash as Hex);
       const state = withdrawal ? await claimState(withdrawal) : undefined;
       setLive((l) => ({ ...l, [c.txHash]: { withdrawal, state } }));
-      // Delivered or claimed: it leaves the list by itself a few minutes from now
+      // Delivered by the chain's relayer: nothing was left to do, so it leaves the list at once (owner, 2026-10-20)
+      if (state?.stage === 'claimed' && nativeExitOf(c.chainId)?.relayed) {
+        removePendingClaim(c.txHash);
+        setList(pendingClaimsOf(c.from));
+        return;
+      }
+      // Claimed: it leaves the list by itself a few minutes from now
       if (state?.stage === 'claimed' && c.doneAt === undefined) {
         markClaimDone(c.txHash);
         setList(pendingClaimsOf(c.from));
@@ -74,21 +80,23 @@ export function PendingClaims({ address, version, onSummary }: {
     return () => clearTimeout(timer);
   }, [list, address]);
 
-  const ready = list.filter((c) => { const st = live[c.txHash]?.state?.stage; return (st === 'prove' || st === 'claim') && !!live[c.txHash]?.withdrawal; }).length;
-  useEffect(() => { onSummary?.({ total: list.length, ready }); }, [list.length, ready, onSummary]);
+  // A relayed withdrawal (Taiko) is listed only once read and not delivered: never one that needs nothing
+  const shown = list.filter((c) => !nativeExitOf(c.chainId)?.relayed || live[c.txHash] !== undefined);
+  const ready = shown.filter((c) => { const st = live[c.txHash]?.state?.stage; return (st === 'prove' || st === 'claim') && !!live[c.txHash]?.withdrawal; }).length;
+  useEffect(() => { onSummary?.({ total: shown.length, ready }); }, [shown.length, ready, onSummary]);
 
-  const needsProve = list.some((c) => nativeExitOf(c.chainId)?.prove);
+  const needsProve = shown.some((c) => nativeExitOf(c.chainId)?.prove);
   const remove = (txHash: string) => { removePendingClaim(txHash); setList(pendingClaimsOf(address)); };
   return (
     <section className="ap-card ap-claims" aria-label="Waiting to be claimed">
       <p className="ap-claims-lead">
-        {list.length === 0
+        {shown.length === 0
           ? 'Nothing waiting. A sweep through a chain\'s own bridge shows up here until it is claimed.'
           : <>Withdrawals into a chain&apos;s own bridge, kept in this browser. Nothing arrives until it is {needsProve ? 'proved and ' : ''}claimed, from here or on the chain&apos;s bridge site. Any wallet can pay that gas; the funds go to the recipient either way.</>}
       </p>
-      {list.length > 0 && (
+      {shown.length > 0 && (
         <ul className="ap-claim-list">
-          {list.map((c) => {
+          {shown.map((c) => {
             const exit = nativeExitOf(c.chainId)!;
             const l = live[c.txHash];
             const s = l?.state;
@@ -194,7 +202,6 @@ function stepsOf(c: PendingClaim, l: Live | undefined): { labels: string[]; done
 function statusTag(c: PendingClaim, l: Live | undefined): { text: string; tone: string } {
   if (!l) return { text: 'Checking…', tone: 'plain' };
   if (nativeExitOf(c.chainId)?.relayed && !l.error && l.withdrawal) {
-    if (l.state?.stage === 'claimed') return { text: 'Arrived', tone: 'ok' };
     return l.state?.stage === 'waiting' && l.state.until ? { text: `Arrives about ${day(l.state.until)}`, tone: 'plain' } : { text: 'Not arrived yet', tone: 'warn' };
   }
   if (l.error) return { text: `Claim from about ${day(claimableFrom(c))}`, tone: 'plain' };
@@ -214,7 +221,6 @@ function detailText(c: PendingClaim, l: Live | undefined): string {
   if (l?.error) return 'Could not read it from the chain right now; the date is the usual wait.';
   if (l?.withdrawal === null) return 'This transaction holds no withdrawal.';
   if (exit.relayed) {
-    if (l?.state?.stage === 'claimed') return `Delivered on ${parentOf(exit).name} by ${c.chainName}'s relayer. It leaves this list in a few minutes.`;
     return l?.state?.stage === 'waiting' && l.state.until
       ? `${c.chainName}'s relayer delivers it; nothing to claim.`
       : `${c.chainName}'s relayer has not delivered it yet. If it does not within a few hours, claim it on ${exit.bridge?.name ?? `${c.chainName}'s bridge`} with the recipient's wallet.`;
