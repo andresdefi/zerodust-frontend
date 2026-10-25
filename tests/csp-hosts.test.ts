@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { DIRECT_RPC_URLS, ETHEREUM_FALLBACK_RPC, RPC_URLS } from '../src/chains/rpcs';
+import { DIRECT_RPC_URLS, ETHEREUM_FALLBACK_RPC, HISTORY_RPCS, RPC_URLS } from '../src/chains/rpcs';
 
 const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8')) as {
   headers: Array<{ headers: Array<{ key: string; value: string }> }>;
@@ -24,7 +24,7 @@ const MESON_API = 'https://relayer.meson.fi';
 
 describe('connect-src', () => {
   it('is exactly the page itself, the API, the RPC hosts the page reads, the Gas.zip chain map, Relay and Meson', () => {
-    const rpcOrigins = [...Object.values(RPC_URLS), ...Object.values(DIRECT_RPC_URLS), ETHEREUM_FALLBACK_RPC].map((u) => new URL(u).origin);
+    const rpcOrigins = [...Object.values(RPC_URLS), ...Object.values(DIRECT_RPC_URLS), ...Object.values(HISTORY_RPCS), ETHEREUM_FALLBACK_RPC].map((u) => new URL(u).origin);
     expect(new Set(connectSrc)).toEqual(new Set(["'self'", 'https://api.zerodust.xyz', GASZIP_CHAIN_MAP, RELAY_API, MESON_API, ...rpcOrigins]));
   });
 

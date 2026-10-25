@@ -80,6 +80,14 @@ export const RPC_URLS: Record<number, string> = {
  */
 export const ETHEREUM_FALLBACK_RPC = 'https://ethereum-rpc.publicnode.com';
 
+/**
+ * A chain's full-history RPC, for a withdrawal's transaction its usual RPC has pruned: publicnode
+ * no longer had a 12-day-old opBNB withdrawal on 2026-10-25, claimed 7+ days after it is sent.
+ */
+export const HISTORY_RPCS: Readonly<Record<number, string>> = {
+  204: 'https://opbnb-mainnet-rpc.bnbchain.org',
+};
+
 export const DIRECT_RPC_URLS: Record<number, string> = {
   43114: 'https://api.avax.network/ext/bc/C/rpc',
   25: 'https://evm.cronos.org',
