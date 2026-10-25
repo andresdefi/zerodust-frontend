@@ -15,7 +15,7 @@ describe('chain logos', () => {
   });
 
   it('the project logos added on 2026-10-08 are all there (no more initials for these chains)', () => {
-    for (const id of [360, 648, 1155, 1514, 1672, 2818, 5031, 5330, 16661, 42018, 97477, 124816, 685689, 5064014]) expect(LOGO_IDS.has(id), String(id)).toBe(true);
+    for (const id of [360, 648, 1155, 1514, 1672, 2818, 5031, 16661, 42018, 97477, 124816, 685689, 5064014]) expect(LOGO_IDS.has(id), String(id)).toBe(true);
   });
 
   it('PNG logos are real 96x96 PNGs, SVG logos carry nothing active', () => {

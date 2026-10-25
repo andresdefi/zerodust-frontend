@@ -30,7 +30,6 @@ export const RPC_URLS: Record<number, string> = {
   5000: 'https://mantle-rpc.publicnode.com',
   5031: 'https://api.infra.mainnet.somnia.network',
   5042: 'https://rpc.blockdaemon.mainnet.arc.io',
-  5330: 'https://mainnet.superseed.xyz',
   8453: 'https://base-rpc.publicnode.com',
   9745: 'https://rpc.plasma.to',
   33139: 'https://rpc.apechain.com',

@@ -36,7 +36,6 @@ unless noted.
 1672 Pharos: ethereum-lists/chains icon "pharos", padded to square
 2818 Morph: morph.network apple-touch-icon
 5031 Somnia: SOMI token logo (CoinGecko), the network's mark
-5330 Superseed: ethereum-lists/chains icon "superseed"
 16661 0G: ethereum-lists/chains icon "0g" (SVG, unchanged)
 42018 Mythos: mythos.foundation apple-touch-icon
 97477 Doma: ethereum-lists/chains icon "doma"
