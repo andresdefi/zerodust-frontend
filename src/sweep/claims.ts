@@ -4,10 +4,10 @@
 // Every contract is pinned here, nothing comes from the API.
 import {
   createPublicClient, decodeAbiParameters, fallback, decodeEventLog, encodeFunctionData, http, isAddressEqual, parseAbi, parseEventLogs,
-  slice, toEventSelector, type Address, type Hex, type PublicClient, type TransactionReceipt,
+  slice, toEventSelector, TransactionReceiptNotFoundError, type Address, type Hex, type PublicClient, type TransactionReceipt,
 } from 'viem';
 import { buildProveWithdrawal, getWithdrawals } from 'viem/op-stack';
-import { DIRECT_RPC_URLS, ETHEREUM_FALLBACK_RPC, RPC_URLS } from '../chains/rpcs';
+import { DIRECT_RPC_URLS, ETHEREUM_FALLBACK_RPC, HISTORY_RPCS, RPC_URLS } from '../chains/rpcs';
 import { nativeExitOf } from './native';
 import { AGG_L1, aggClaimData, aggProof, aggWithdrawalOf, type AggContracts, type AggProof, type AggWithdrawal } from './agglayer';
 
@@ -103,8 +103,13 @@ export interface Withdrawal {
 /** The withdrawal a sweep's transaction made, or null when it holds none (another of the sweep's transactions) */
 export async function readWithdrawal(chainId: number, txHash: Hex): Promise<Withdrawal | null> {
   if (!CLAIM_CONTRACTS[chainId]) return null;
-  const l2 = client(chainId);
-  const receipt = await l2.getTransactionReceipt({ hash: txHash });
+  let l2 = client(chainId);
+  const receipt = await l2.getTransactionReceipt({ hash: txHash }).catch((e: unknown) => {
+    // Pruned by the usual RPC: the chain's full-history one
+    if (!(e instanceof TransactionReceiptNotFoundError) || !HISTORY_RPCS[chainId]) throw e;
+    l2 = createPublicClient({ transport: http(HISTORY_RPCS[chainId], { timeout: 15_000, retryCount: 2, retryDelay: 600 }) }) as PublicClient;
+    return l2.getTransactionReceipt({ hash: txHash });
+  });
   if (receipt.status !== 'success') return null;
   const block = await l2.getBlock({ blockNumber: receipt.blockNumber });
   return withdrawalOf(chainId, receipt, Number(block.timestamp) * 1000);

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { decodeFunctionData, keccak256, parseAbi, type Hex } from 'viem';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ETHEREUM_FALLBACK_RPC, RPC_URLS } from '../src/chains/rpcs';
+import { ETHEREUM_FALLBACK_RPC, HISTORY_RPCS, RPC_URLS } from '../src/chains/rpcs';
 import { formatTransactionReceipt, toEventSelector, type TransactionReceipt } from 'viem';
 import { CLAIM_CONTRACTS, claimCall, claimState, findWithdrawal, proveCall, readWithdrawal, withdrawalOf, type ClaimState } from '../src/sweep/claims';
 
@@ -188,4 +188,32 @@ describe('Ethereum RPC', () => {
     expect(await claimState(w, fixture.now)).toEqual({ stage: 'claimed' });
     expect(fetch.mock.calls.some(([u]) => new URL(String(u)).origin === ETH_2)).toBe(true);
   }, 20_000);
+});
+
+describe('a withdrawal its chain\'s usual RPC has pruned', () => {
+  const op = JSON.parse(readFileSync(new URL('./fixtures/opbnb-withdrawal-2026-10-25.json', import.meta.url), 'utf8')) as { txHash: Hex; receipt: unknown; block: unknown };
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  /** publicnode answers null for the receipt (pruned); the full-history RPC has it */
+  function pruned(history: boolean) {
+    return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const origin = new URL(String(input)).origin;
+      const body = JSON.parse(String(init!.body)) as { id: number; method: string };
+      let result: unknown = null;
+      if (history && origin === new URL(HISTORY_RPCS[204]!).origin) result = body.method === 'eth_getTransactionReceipt' ? op.receipt : op.block;
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }), { headers: { 'content-type': 'application/json' } });
+    });
+  }
+
+  it('opBNB: read from its full-history RPC, which the site may reach', async () => {
+    vi.stubGlobal('fetch', pruned(true));
+    const w = await readWithdrawal(204, op.txHash);
+    expect(w?.amount).toBe(951468453764531n);
+    expect(w?.recipient.toLowerCase()).toBe('0xbd6dc8d37b1e3fee84b04d1ae08b34f9e871958a');
+  });
+
+  it('a chain with no full-history RPC still says the transaction was not found', async () => {
+    vi.stubGlobal('fetch', pruned(false));
+    await expect(readWithdrawal(1135, op.txHash)).rejects.toThrow(/could not be found/);
+  });
 });
