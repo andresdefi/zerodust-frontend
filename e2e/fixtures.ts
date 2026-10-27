@@ -335,6 +335,8 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
   const quoted: Array<{ from: number; to: number; destination: string }> = [];
   /** POST /sweep bodies' closing authorization targets, in order */
   const closings: string[] = [];
+  /** GET /direct/route requests, as "from->to", in order */
+  const routeChecks: string[] = [];
 
   await page.route(`${API}/**`, async (route) => {
     const url = new URL(route.request().url());
@@ -399,6 +401,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     }
     if (path === '/direct/route') {
       const to = Number(url.searchParams.get('toChainId'));
+      routeChecks.push(`${url.searchParams.get('chainId')}->${to}`);
       // opBNB: Meson, only to BNB Chain, for a fixed 0.00051 BNB
       // opBNB with Meson paused: no route anywhere, so its own bridge to BNB Chain
       if (opts.opbnb === 'native') return json(route, { available: false, exit: false, reason: 'No bridge takes BNB out of opBNB; it can be swept to another address on opBNB' });
@@ -572,7 +575,7 @@ export async function mockNetwork(page: Page, user: Address, opts: { direct?: bo
     route.abort('blockedbyclient')
   );
 
-  return { swept, sent, reports, quoted, closings };
+  return { swept, sent, reports, quoted, closings, routeChecks };
 }
 
 /** Watches a page for the key anywhere it must never be: requests, the console, the DOM, input values, storage */

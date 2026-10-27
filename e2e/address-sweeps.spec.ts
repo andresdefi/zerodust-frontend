@@ -197,6 +197,16 @@ test('a passing "unknown" route does not send a chain elsewhere', async ({ page 
   await expect(page.getByRole('heading', { name: /Can't reach/ })).toHaveCount(0);
 });
 
+test('the sweep reuses the page\'s route check instead of asking the API again', async ({ page }) => {
+  // One address on ~30 chains made 95 route checks in 20 s and the API refused 35 (2026-10-27)
+  const { key, routeChecks } = await openAddress(page, { direct: true });
+  await expect(group(page, 'Arrives as gas on Base').locator('.ap-row', { hasText: 'Avalanche' })).toContainText('Gas.zip');
+  await sweepOnly(page, 'Arrives as gas on Base', ['Avalanche']);
+  await useKey(page, key);
+  await expect(confirmDialog(page).getByRole('heading', { name: 'Sweep 1 chain to Base?' })).toBeVisible({ timeout: 30_000 });
+  expect(routeChecks.filter((c) => c === `${AVAX}->8453`)).toHaveLength(1);
+});
+
 test('token delivery: Mitosis is swept to exactly 0 and arrives as MITO (a token) on BNB Chain, said plainly', async ({ page }) => {
   const { key, swept } = await openAddress(page, { mitosis: true });
   const tokens = group(page, 'Arrives as a token');

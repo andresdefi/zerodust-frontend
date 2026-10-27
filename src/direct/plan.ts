@@ -2,6 +2,7 @@ import { parseAbi } from 'viem';
 import { API_URL } from '../sweep/constants';
 import type { Closing } from '../address/closing';
 import type { L1Formula } from './l1fee';
+import { pacer, reuse } from '../lib/pace';
 
 // Direct chains: no EIP-7702 in ZeroDust, swept by the wallet itself with
 // exact legacy transactions. The API plans (/direct/*, quote-only); this page
@@ -249,7 +250,18 @@ export const directBalances = (address: string) => get<DirectBalance[]>(`balance
  */
 export const relayBusy = (r: { reason?: string } | object) => 'reason' in r && typeof r.reason === 'string' && /Relay: busy/.test(r.reason);
 
-export const directRoute = (t: Target) => get<{ available: boolean | null; exit?: boolean; reason?: string; minimumBalanceWei?: string; bridge?: string; bridgeFeeWei?: string }>('route', { ...t });
+export type RouteAnswer = { available: boolean | null; exit?: boolean; reason?: string; minimumBalanceWei?: string; bridge?: string; bridgeFeeWei?: string };
+
+/** Below the API's 60 route checks a minute per visitor (quoteRateLimitConfig) */
+const routeSlot = pacer(50, 60_000);
+/** The address page's answers serve the sweep dialog too; an unknown route is asked again */
+const routeAnswers = reuse<RouteAnswer>(30_000, (a) => a.available !== null);
+
+export const directRoute = (t: Target): Promise<RouteAnswer> =>
+  routeAnswers(`${t.chainId}:${t.toChainId}:${t.from}:${t.recipient}`.toLowerCase(), async () => {
+    await routeSlot();
+    return get<RouteAnswer>('route', { ...t });
+  });
 
 /** bridge 'native': the chain's own bridge to Ethereum (sweep/native.ts), only where no other route exists */
 export const preparePlan = (t: Target & { mode: Exclude<PlanMode, 'exit'>; feePaidTx?: string; bridge?: 'native' }) =>
