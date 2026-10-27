@@ -6,6 +6,7 @@ import { normalize } from 'viem/ens';
 import { ZeroDust } from '@zerodust/sdk';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { directBalances, directChains, directRoute, preparePlan, relayBusy } from '../direct/plan';
+import { pacer, reuse } from '../lib/pace';
 import { inPool } from '../lib/pool';
 import { API_URL } from '../sweep/constants';
 import type { AddressChain, ChainRoutes, FixedFee } from './groups';
@@ -364,22 +365,24 @@ export function useEstimates(address: Address | null, rows: AddressRow[], destin
  * answer for 30 s. The sweep itself still takes a real quote (sweep/useSweep.ts).
  */
 type Estimated = { estimatedReceive: string; bridge?: { displayName?: string } };
-/** Estimates in flight, so the same chain asked twice at once (a re-render) shares one request */
-const inFlight = new Map<string, Promise<Estimated>>();
+/** Below the API's 60 quotes a minute per visitor (quoteRateLimitConfig) */
+const estimateSlot = pacer(50, 60_000);
+/**
+ * The same chain asked again within 30 s (a re-render, or every chain re-estimated once the route
+ * checks name another chain for one) shares one answer, as the API repeats it for 30 s anyway
+ */
+const estimates = reuse<Estimated>(30_000);
 
 function estimateQuote(p: { fromChainId: number; toChainId: number; userAddress: Address; destination: Address }): Promise<Estimated> {
   const query = new URLSearchParams({ fromChainId: String(p.fromChainId), toChainId: String(p.toChainId), userAddress: p.userAddress, destination: p.destination, estimate: 'true' });
   const url = `${API_URL}/quote?${query}`;
-  const pending = inFlight.get(url);
-  if (pending) return pending;
-  const request = (async () => {
+  return estimates(url, async () => {
+    await estimateSlot();
     const res = await fetch(url);
     const body = (await res.json().catch(() => ({}))) as { estimatedReceive?: string; bridge?: { displayName?: string }; error?: string; code?: string };
     if (!res.ok || body.estimatedReceive === undefined) throw Object.assign(new Error(body.error ?? 'No quote'), body.code ? { code: body.code } : {});
     return { estimatedReceive: body.estimatedReceive, ...(body.bridge ? { bridge: body.bridge } : {}) };
-  })().finally(() => inFlight.delete(url));
-  inFlight.set(url, request);
-  return request;
+  });
 }
 
 /** A direct plan's bridge as people know it */
