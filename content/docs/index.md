@@ -75,7 +75,6 @@ Asked for explicitly (`bridge=native` on [`GET /quote`](/docs/api#get-quote) and
 | X Layer (196) | AggLayer | about an hour | OKB on Ethereum, an ERC-20 token |
 | Taiko (167000) | Taiko | none: Taiko's relayer delivers in ~30 min, its fee taken from the amount | ETH on Ethereum |
 | opBNB (204), direct | OP Stack | prove, then 7 days | BNB on BNB Chain |
-| Blast (81457), direct | OP Stack (older oracle) | an output (~1 h), prove, then 1 day | ETH on Ethereum |
 | Abstract (2741), direct | ZK Stack | until its batch is executed on Ethereum (hours) | ETH on Ethereum |
 | Gravity (1625), direct | Arbitrum Orbit | ~5.6 days | G on Ethereum, an ERC-20 token |
 

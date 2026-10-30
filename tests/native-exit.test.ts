@@ -17,7 +17,7 @@ const STRANGER = '0x3333333333333333333333333333333333333333';
 const NOVA = 42170;
 const GRAVITY = 1625;
 const ABSTRACT = 2741;
-const BLAST = 81457;
+const RISE = 4153;
 const LISK = 1135;
 
 const OP = parseAbi(['function bridgeETHTo(address _to, uint32 _minGasLimit, bytes _extraData) payable']);
@@ -29,7 +29,7 @@ const zkData = (to: string) => encodeFunctionData({ abi: ZK, functionName: 'with
 
 describe('checkNativeCall', () => {
   it('accepts each stack\'s withdrawal to the recipient, on Ethereum', () => {
-    expect(() => checkNativeCall(BLAST, 1, NATIVE_BRIDGE_CONTRACT.op, opData(TO), TO)).not.toThrow();
+    expect(() => checkNativeCall(RISE, 1, NATIVE_BRIDGE_CONTRACT.op, opData(TO), TO)).not.toThrow();
     expect(() => checkNativeCall(GRAVITY, 1, NATIVE_BRIDGE_CONTRACT.arb, arbData(TO), TO)).not.toThrow();
     expect(() => checkNativeCall(ABSTRACT, 1, NATIVE_BRIDGE_CONTRACT.zk, zkData(TO), TO)).not.toThrow();
   });
@@ -38,8 +38,8 @@ describe('checkNativeCall', () => {
     ['a withdrawal to someone else', () => checkNativeCall(GRAVITY, 1, NATIVE_BRIDGE_CONTRACT.arb, arbData(STRANGER), TO)],
     ['another contract', () => checkNativeCall(GRAVITY, 1, STRANGER, arbData(TO), TO)],
     ['another stack\'s contract', () => checkNativeCall(GRAVITY, 1, NATIVE_BRIDGE_CONTRACT.op, opData(TO), TO)],
-    ['other message gas', () => checkNativeCall(BLAST, 1, NATIVE_BRIDGE_CONTRACT.op, opData(TO, 1), TO)],
-    ['extra data', () => checkNativeCall(BLAST, 1, NATIVE_BRIDGE_CONTRACT.op, opData(TO, 200_000, '0x01'), TO)],
+    ['other message gas', () => checkNativeCall(RISE, 1, NATIVE_BRIDGE_CONTRACT.op, opData(TO, 1), TO)],
+    ['extra data', () => checkNativeCall(RISE, 1, NATIVE_BRIDGE_CONTRACT.op, opData(TO, 200_000, '0x01'), TO)],
     ['calldata that is not the withdrawal', () => checkNativeCall(GRAVITY, 1, NATIVE_BRIDGE_CONTRACT.arb, '0xdeadbeef', TO)],
     ['a chain the page does not know', () => checkNativeCall(8453, 1, NATIVE_BRIDGE_CONTRACT.op, opData(TO), TO)],
     ['another destination than Ethereum', () => checkNativeCall(GRAVITY, 8453, NATIVE_BRIDGE_CONTRACT.arb, arbData(TO), TO)],
@@ -104,8 +104,8 @@ describe('groupOf: the claim group', () => {
   it('leaves it where a bridge, another destination or a minimum still applies', () => {
     expect(groupOf(chain(NOVA), { gas: true }, 8453)).toBe('gas');
     expect(groupOf(chain(LISK), { gas: false, notToDestination: true }, 8453)).toBe('elsewhere');
-    expect(groupOf(chain(BLAST, { direct: true }), { gas: false, minimum: 10n }, 8453)).toBe('gas');
-    expect(groupOf(chain(BLAST, { direct: true }), { gas: null }, 8453)).toBe('gas');
+    expect(groupOf(chain(ABSTRACT, { direct: true }), { gas: false, minimum: 10n }, 8453)).toBe('gas');
+    expect(groupOf(chain(ABSTRACT, { direct: true }), { gas: null }, 8453)).toBe('gas');
     // No own bridge: stays on its chain
     expect(groupOf(chain(8217), { gas: false }, 8453)).toBe('own-chain');
   });
@@ -120,7 +120,6 @@ describe('steps, costs and dates', () => {
     expect(gravity.when).not.toMatch(/prove/i);
     expect(gravity.arrives).toBe('Arrives as G (Gravity), a token on Ethereum, not ETH');
     expect(waitText(NATIVE_EXITS[NOVA]!)).toBe('about 6.5 days');
-    expect(waitText(NATIVE_EXITS[BLAST]!)).toBe('about a day');
   });
 
   it('prices the prove and the claim at the given gas', () => {

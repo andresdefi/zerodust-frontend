@@ -5,10 +5,10 @@ import { flzCompressLen, hexToBytes, l1FeeOf, settleL1Value, type L1Params } fro
 import type { DirectPlan } from '../src/direct/plan';
 import { verifyPlan, type PlanContext } from '../src/direct/verify';
 
-// Guard chains (Blast, Boba): the exact L1 fee from signed bytes, the settle search, the plan
+// Guard chains (Boba, opBNB): the exact L1 fee from signed bytes, the settle search, the plan
 // checks, and planChecked / signPlan against an offline chain that runs the real guard bytecode.
 
-/** The two real guard sweeps (2026-10-08): signed bytes, the oracle at their block, the receipt's l1Fee */
+/** The two real guard sweeps (2026-10-08; Blast has since closed, its Ecotone sweep stays as a formula vector) */
 const REAL = {
   blast: {
     raw: '0xf90151808310ca36830156a6942f95e6ed90a7dd67fc3fae5c5628647e6a83e48e865adc70975aebb8e41a8b33c40000000000000000000000004cd00e387622c35bddb9b4c962c136462338bc310000000000000000000000000000000000000000000000000000048c27a3236d0000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000004449290c1c000000000000000000000000e6914746fb229811073fe24f8d4f80d4b0fa05671a44934bd221cd5b8458c9c91c64e643f35d612270a0ba9196c3b8056cbc3f250000000000000000000000000000000000000000000000000000000083027c86a0ce92d098807834acee5a71c4c98e53bd33fe8c5e8fb0954f0bca8753a60c40c1a018012b1d32be4715379c71b423402dcf6e9ec0df070bc5a76dae7922c56c25a2',
@@ -29,7 +29,7 @@ const GUARD = '0x2f95e6ED90a7dD67fc3Fae5c5628647E6A83e48e';
 const RELAY = '0x4cd00e387622c35bddb9b4c962c136462338bc31';
 const ZERODUST = '0x01eD5c94DE39E73C986b98B85C2c0A3d1BEDff7D';
 const OTHER = '0x2222222222222222222222222222222222222222';
-const BLAST = 81457;
+const BOBA = 288;
 const BASE = 8453;
 const SWEEP = parseAbi(['function sweep(address target, uint256 fee, bytes data) payable']);
 const hex = (n: bigint | number) => `0x${n.toString(16)}`;
@@ -66,7 +66,7 @@ describe('settleL1Value', () => {
         const settled = await settleL1Value({
           balance, gas, gasPrice, formula, params, firstValue: balance - gas * gasPrice,
           sign: async (value, g) => hexToBytes(await account.signTransaction({
-            type: 'legacy', chainId: BLAST, nonce: 0, to: GUARD, value, gas: g, gasPrice,
+            type: 'legacy', chainId: BOBA, nonce: 0, to: GUARD, value, gas: g, gasPrice,
             data: encodeFunctionData({ abi: SWEEP, functionName: 'sweep', args: [RELAY, value - forwarded, `0x49290c1c${'ab'.repeat(64)}`] }),
           })),
         });
@@ -92,7 +92,7 @@ describe('settleL1Value', () => {
 const BAL = 10n ** 14n;
 const GAS = 87_718n;
 const PRICE = 1_100_342n;
-const L1 = 651_928_081n;
+const L1 = REAL.boba.l1Fee;
 const FEE = 5_000_000_000_000n;
 const FROM = '0xe6914746fb229811073fe24f8d4f80d4b0fa0567';
 const RELAY_DATA = `0x49290c1c000000000000000000000000${FROM.slice(2)}${'1a'.repeat(32)}`;
@@ -103,12 +103,12 @@ function guardPlan(o: { target?: string; data?: string; fee?: bigint; route?: Di
   const target = o.target ?? RELAY;
   const data = o.data ?? RELAY_DATA;
   return {
-    chainId: BLAST, route: o.route ?? 'relay', requestId: '0x01', receive: '1', fee: fee.toString(), balance: BAL.toString(),
+    chainId: BOBA, route: o.route ?? 'relay', requestId: '0x01', receive: '1', fee: fee.toString(), balance: BAL.toString(),
     txs: [{ kind: 'sweep', to: GUARD, data: encodeFunctionData({ abi: SWEEP, functionName: 'sweep', args: [target as Hex, fee, data as Hex] }), value: value.toString(), gas: GAS.toString(), gasPrice: PRICE.toString(), nonce: 0 }],
-    guard: { address: GUARD, target, data, forwarded: (value - fee).toString(), l1Fee: L1.toString(), absorb: o.absorb ?? 'fee', l1Formula: 'ecotone' },
+    guard: { address: GUARD, target, data, forwarded: (value - fee).toString(), l1Fee: L1.toString(), absorb: o.absorb ?? 'fee', l1Formula: 'fjord' },
   };
 }
-const ctx = (o: Partial<PlanContext> = {}): PlanContext => ({ chainId: BLAST, toChainId: BASE, from: FROM, recipient: OTHER, mode: 'route', balance: BAL, nonce: 0, ...o });
+const ctx = (o: Partial<PlanContext> = {}): PlanContext => ({ chainId: BOBA, toChainId: BASE, from: FROM, recipient: OTHER, mode: 'route', balance: BAL, nonce: 0, ...o });
 
 describe('verifyPlan: guard chains', () => {
   it('accepts a Relay deposit through the guard that spends the balance with the L1 estimate', () => {
@@ -118,22 +118,24 @@ describe('verifyPlan: guard chains', () => {
   it('accepts a same-chain transfer and a burn, each moving the amount', () => {
     const same = guardPlan({ target: OTHER, data: '0x', route: 'transfer', absorb: 'amount' });
     same.receive = same.guard!.forwarded;
-    expect(verifyPlan(same, ctx({ toChainId: BLAST }))).toEqual({});
+    expect(verifyPlan(same, ctx({ toChainId: BOBA }))).toEqual({});
     expect(verifyPlan(guardPlan({ target: '0x000000000000000000000000000000000000dEaD', data: '0x', route: 'burn', absorb: 'amount', fee: 0n }), ctx({ mode: 'burn' }))).toEqual({});
   });
 
   it('accepts its own bridge through the guard when chosen: 1:1 to the recipient, the amount moving', () => {
+    // opBNB: the guard chain with its own bridge (to BNB Chain)
+    const op = (pl: DirectPlan): DirectPlan => ({ ...pl, chainId: 204 });
     const data = encodeFunctionData({ abi: parseAbi(['function bridgeETHTo(address _to, uint32 _minGasLimit, bytes _extraData) payable']), functionName: 'bridgeETHTo', args: [OTHER, 200_000, '0x'] });
-    const plan = guardPlan({ target: '0x4200000000000000000000000000000000000010', data, route: 'native', absorb: 'amount' });
+    const plan = op(guardPlan({ target: '0x4200000000000000000000000000000000000010', data, route: 'native', absorb: 'amount' }));
     plan.receive = plan.guard!.forwarded;
-    expect(verifyPlan(plan, ctx({ toChainId: 1, bridge: 'native' }))).toEqual({ native: true });
+    expect(verifyPlan(plan, ctx({ chainId: 204, toChainId: 56, bridge: 'native' }))).toEqual({ native: true });
     // Not chosen, a fee moving the amount, or a withdrawal to someone else
-    expect(() => verifyPlan(plan, ctx({ toChainId: 1 }))).toThrow(/did not choose/);
-    expect(() => verifyPlan({ ...plan, guard: { ...plan.guard!, absorb: 'fee' } }, ctx({ toChainId: 1, bridge: 'native' }))).toThrow(/wrong amount/);
+    expect(() => verifyPlan(plan, ctx({ chainId: 204, toChainId: 56 }))).toThrow(/did not choose/);
+    expect(() => verifyPlan({ ...plan, guard: { ...plan.guard!, absorb: 'fee' } }, ctx({ chainId: 204, toChainId: 56, bridge: 'native' }))).toThrow(/wrong amount/);
     const stranger = encodeFunctionData({ abi: parseAbi(['function bridgeETHTo(address _to, uint32 _minGasLimit, bytes _extraData) payable']), functionName: 'bridgeETHTo', args: [FROM as Hex, 200_000, '0x'] });
-    const other = guardPlan({ target: '0x4200000000000000000000000000000000000010', data: stranger, route: 'native', absorb: 'amount' });
+    const other = op(guardPlan({ target: '0x4200000000000000000000000000000000000010', data: stranger, route: 'native', absorb: 'amount' }));
     other.receive = other.guard!.forwarded;
-    expect(() => verifyPlan(other, ctx({ toChainId: 1, bridge: 'native' }))).toThrow(/pays someone else/);
+    expect(() => verifyPlan(other, ctx({ chainId: 204, toChainId: 56, bridge: 'native' }))).toThrow(/pays someone else/);
   });
 
   const refusals: Array<[string, () => DirectPlan, Partial<PlanContext>?]> = [
@@ -147,7 +149,7 @@ describe('verifyPlan: guard chains', () => {
     ['a value that leaves dust', () => { const p = guardPlan(); p.guard!.l1Fee = (L1 - 1n).toString(); return p; }],
     ['a fee shown that is not the fee paid', () => { const p = guardPlan(); p.fee = '1'; return p; }],
     ['a forwarded amount that does not add up', () => { const p = guardPlan(); p.guard!.forwarded = '1'; return p; }],
-    ['another L1 formula', () => { const p = guardPlan(); p.guard!.l1Formula = 'fjord'; return p; }],
+    ['another L1 formula', () => { const p = guardPlan(); p.guard!.l1Formula = 'ecotone'; return p; }],
     ['two transactions', () => { const p = guardPlan(); p.txs.push({ ...p.txs[0]!, nonce: 1 }); return p; }],
     ['a stale nonce', () => guardPlan(), { nonce: 3 }],
     ['more gas than a guard sweep needs (all of it burned)', () => {
@@ -253,7 +255,7 @@ function network(net: Net, account: string) {
   return vi.fn(async (url: string, init?: RequestInit) => {
     const reply = (result: unknown) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
     const revert = () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: 3, message: 'execution reverted' } }));
-    if (url.includes('/direct/chains')) return new Response(JSON.stringify({ chains: [{ chainId: BLAST, name: 'Blast', token: 'ETH', decimals: 18, explorerUrl: '', rpcUrl: '', kind: net.kind ?? 'opguard', l1Formula: 'ecotone' }], prices: {} }));
+    if (url.includes('/direct/chains')) return new Response(JSON.stringify({ chains: [{ chainId: BOBA, name: 'Boba', token: 'ETH', decimals: 18, explorerUrl: '', rpcUrl: '', kind: net.kind ?? 'opguard', l1Formula: 'fjord' }], prices: {} }));
     if (url.includes('/direct/prepare')) return new Response(JSON.stringify(net.plan));
     const { method, params } = JSON.parse(String(init!.body)) as { method: string; params: unknown[] };
     const who = String(params[0]).toLowerCase();
@@ -272,9 +274,9 @@ function network(net: Net, account: string) {
         // L1Block.sequenceNumber(): the L1 origin is fresh every third block here
         if (data === '0x64ca23ef') return reply(hex((net.head ?? 1000) % 3 === 0 ? 0 : 4));
         const flag = (v: boolean | 'revert' | undefined, dflt: boolean | 'revert') => ((v ?? dflt) === 'revert' ? revert() : reply(`0x${((v ?? dflt) ? 1 : 0).toString(16).padStart(64, '0')}`));
-        if (data === selector('isFjord')) return flag(net.fjord, 'revert');
+        if (data === selector('isFjord')) return flag(net.fjord, true);
         if (data === selector('isIsthmus')) return flag(net.isthmus, 'revert');
-        const p = REAL.blast.params;
+        const p = REAL.boba.params;
         const v = data === selector('l1BaseFee') ? p.l1BaseFee : data === selector('blobBaseFee') ? p.blobBaseFee : data === selector('baseFeeScalar') ? p.baseFeeScalar : p.blobBaseFeeScalar;
         return reply(`0x${v.toString(16).padStart(64, '0')}`);
       }
@@ -290,13 +292,13 @@ beforeEach(async () => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-describe('planChecked and signPlan on Blast (the real guard bytecode on a fork)', () => {
+describe('planChecked and signPlan on Boba (the real guard bytecode on a fork)', () => {
   const account = privateKeyToAccount(generatePrivateKey());
   const planFor = (o: Parameters<typeof guardPlan>[0] = {}) => {
     const data = `0x49290c1c000000000000000000000000${account.address.slice(2).toLowerCase()}${'1a'.repeat(32)}`;
     return guardPlan({ data, ...o });
   };
-  const t = { chainId: BLAST, toChainId: BASE, from: account.address, recipient: OTHER };
+  const t = { chainId: BOBA, toChainId: BASE, from: account.address, recipient: OTHER };
 
   it('replays the guard: it pays the fee, deposits, and burns every unit of gas', async () => {
     vi.stubGlobal('fetch', network({ plan: planFor() }, account.address));
@@ -325,7 +327,7 @@ describe('planChecked and signPlan on Blast (the real guard bytecode on a fork)'
     await expect(run.signPlan(account, await run.planChecked(t, 'route'))).rejects.toThrow(/above 5%/);
   });
 
-  it('refuses when the API does not call Blast a guard chain', async () => {
+  it('refuses when the API does not call Boba a guard chain', async () => {
     vi.stubGlobal('fetch', network({ plan: planFor(), kind: 'evm' }, account.address));
     await expect(run.planChecked(t, 'route')).rejects.toThrow(/disagree/);
   });
@@ -344,7 +346,7 @@ describe('planChecked and signPlan on Blast (the real guard bytecode on a fork)'
     const forwarded = BigInt(plan.guard!.forwarded);
     const [raw] = await run.signPlan(account, plan);
     const tx = parseTransaction(raw!);
-    const l1 = l1FeeOf(hexToBytes(raw!), 'ecotone', REAL.blast.params);
+    const l1 = l1FeeOf(hexToBytes(raw!), 'fjord', REAL.boba.params);
     expect(tx.value! + tx.gas! * tx.gasPrice! + l1).toBe(BAL);
     expect(plan.txs[0]!.gas).toBe(tx.gas!.toString());
     const { args: [target, fee, data] } = decodeFunctionData({ abi: SWEEP, data: tx.data! });
@@ -359,14 +361,14 @@ describe('planChecked and signPlan on Blast (the real guard bytecode on a fork)'
   });
 
   it('refuses to sign when the oracle reports another formula or an operator fee', async () => {
-    vi.stubGlobal('fetch', network({ plan: planFor(), fjord: true }, account.address));
+    vi.stubGlobal('fetch', network({ plan: planFor(), fjord: false }, account.address));
     await expect(run.signPlan(account, await run.planChecked(t, 'route'))).rejects.toThrow(/changed how it charges/);
     vi.stubGlobal('fetch', network({ plan: planFor(), isthmus: true }, account.address));
     await expect(run.signPlan(account, await run.planChecked(t, 'route'))).rejects.toThrow(/operator fee/);
   });
 
-  it('accepts an oracle that answers false for flags it has', async () => {
-    vi.stubGlobal('fetch', network({ plan: planFor(), fjord: false, isthmus: false }, account.address));
+  it('accepts an oracle that answers false for the flags it does not use', async () => {
+    vi.stubGlobal('fetch', network({ plan: planFor(), isthmus: false }, account.address));
     await expect(run.signPlan(account, await run.planChecked(t, 'route'))).resolves.toHaveLength(1);
   });
 });

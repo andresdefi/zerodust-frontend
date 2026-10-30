@@ -10,7 +10,7 @@ import { OFFLINE, SITE } from '../lib/env';
 const LOGOS: Array<[number, string]> = [
   [1, 'Ethereum'], [8453, 'Base'], [42161, 'Arbitrum'], [10, 'OP Mainnet'], [56, 'BNB Chain'], [137, 'Polygon'],
   [43114, 'Avalanche'], [59144, 'Linea'], [534352, 'Scroll'], [130, 'Unichain'], [146, 'Sonic'], [100, 'Gnosis'],
-  [5000, 'Mantle'], [80094, 'Berachain'], [999, 'HyperEVM'], [143, 'Monad'], [324, 'zkSync Era'], [81457, 'Blast'],
+  [5000, 'Mantle'], [80094, 'Berachain'], [999, 'HyperEVM'], [143, 'Monad'], [324, 'zkSync Era'], [42220, 'Celo'],
 ];
 
 /** Example only: what one sweep does to a wallet (all of it to Base, $30.95 at ~$2,690 per ETH) */

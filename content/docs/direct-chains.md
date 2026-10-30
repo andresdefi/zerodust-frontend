@@ -30,10 +30,9 @@ As of 13 October 2026, `GET /direct/chains` lists 22 chains:
 | Immutable zkEVM | 13371 | IMX | `evm` |
 | Etherlink | 42793 | XTZ | `etherlink` |
 | Avalanche | 43114 | AVAX | `evm` |
-| Blast | 81457 | ETH | `opguard` |
 | Ethereal | 5064014 | USDe | `arbitrum` |
 
-Read the list from the API rather than hardcoding it. Blast (26 October 2026), Gravity (1 November 2026) and Abstract (15 December 2026) are shutting down: their entries carry `closing`, and each leaves the list when it closes.
+Read the list from the API rather than hardcoding it. Gravity (1 November 2026) and Abstract (15 December 2026) are shutting down: their entries carry `closing`, and each leaves the list when it closes.
 
 ## How exact zero works
 
@@ -55,7 +54,7 @@ Some chains charge their own fixed network gas price, whatever price a transacti
 
 ### Guard chains (OP stack)
 
-On OP-stack chains every transaction also pays an L1 data fee, which depends on the signed bytes and on L1 prices, so a plain transfer cannot be sized to leave exactly 0. `GET /direct/chains` marks these chains `kind: "opguard"` with their fee formula in `l1Formula` (`ecotone` on Blast, `fjord` on Boba and opBNB). They are swept with one legacy transaction through ZeroDustGuard (`0x2f95e6ED90a7dD67fc3Fae5c5628647E6A83e48e` on each, runtime keccak `0x0e00b07c95af7e18d655633d521d110ce6e95ff3c330ff3a4ac2d1b44fed685e`), a contract with no owner and no storage:
+On OP-stack chains every transaction also pays an L1 data fee, which depends on the signed bytes and on L1 prices, so a plain transfer cannot be sized to leave exactly 0. `GET /direct/chains` marks these chains `kind: "opguard"` with their fee formula in `l1Formula` (`fjord` on Boba and opBNB). They are swept with one legacy transaction through ZeroDustGuard (`0x2f95e6ED90a7dD67fc3Fae5c5628647E6A83e48e` on each, runtime keccak `0x0e00b07c95af7e18d655633d521d110ce6e95ff3c330ff3a4ac2d1b44fed685e`), a contract with no owner and no storage:
 
 - The call is `sweep(address target, uint256 fee, bytes data)` with `value = balance - gas x gasPrice - L1 fee`. The chain takes the gas and the L1 fee before any code runs.
 - The guard reverts unless the wallet is then at exactly 0, pays `fee` to ZeroDust, sends the rest to `target` with `data`, reverts if anything came back to the wallet, and burns every unit of gas left so none is refunded. A transaction either leaves exactly 0 or changes nothing but its own fee.
@@ -142,7 +141,7 @@ The unsigned transactions that take the chain to exactly 0.
 | `feePaidTx` | Optional hash of an earlier fee transaction |
 
 - `route`: an optional fee transaction, then the sweep. Same chain (`toChainId` = `chainId`) is a plain transfer to `recipient`, which must not be `from`. Cross-chain asks Gas.zip and Relay and keeps the larger output.
-- With `bridge=native` (chains with `nativeExit`): the sweep goes into the chain's own bridge to `recipient` on Ethereum (`route: "native"`, `receive: null`): Blast through ZeroDustGuard into its `L2StandardBridge`, Abstract through the paymaster into `L2BaseToken.withdraw`, Gravity into `ArbSys.withdrawEth` (G arrives on Ethereum as an ERC-20, named in `receiveToken`), opBNB through ZeroDustGuard into its `L2StandardBridge` to `recipient` on BNB Chain (native BNB). Nothing arrives by itself: after the chain's waiting period the recipient proves (Blast, opBNB) and claims the withdrawal on the parent chain (Ethereum; BNB Chain for opBNB, paid in BNB there), on the chain's bridge site (`nativeExit.bridgeUrl`) or on zerodust.xyz.
+- With `bridge=native` (chains with `nativeExit`): the sweep goes into the chain's own bridge to `recipient` on Ethereum (`route: "native"`, `receive: null`): Abstract through the paymaster into `L2BaseToken.withdraw`, Gravity into `ArbSys.withdrawEth` (G arrives on Ethereum as an ERC-20, named in `receiveToken`), opBNB through ZeroDustGuard into its `L2StandardBridge` to `recipient` on BNB Chain (native BNB). Nothing arrives by itself: after the chain's waiting period the recipient proves (opBNB) and claims the withdrawal on the parent chain (Ethereum; BNB Chain for opBNB, paid in BNB there), on the chain's bridge site (`nativeExit.bridgeUrl`) or on zerodust.xyz.
 - `burn`: one transfer of everything to `0x000000000000000000000000000000000000dEaD`. `toChainId` and `recipient` are still required but not used.
 - `donate`: one transfer of everything to ZeroDust.
 
