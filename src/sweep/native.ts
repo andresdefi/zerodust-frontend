@@ -41,8 +41,6 @@ export const NATIVE_EXITS: Readonly<Record<number, NativeExit>> = {
   1135: { chainName: 'Lisk', explorerUrl: 'https://blockscout.lisk.com', stack: 'op', toChainId: ETHEREUM, bridge: { url: 'https://bridge.lisk.com', name: 'Lisk Bridge' }, claimAfterHours: 7 * 24 + 6, prove: true },
   // Arbitrum Nova: the assertion that holds the withdrawal is confirmed about 6.4 days later
   42170: { chainName: 'Arbitrum Nova', explorerUrl: 'https://nova.arbiscan.io', stack: 'arb', toChainId: ETHEREUM, bridge: { url: 'https://bridge.arbitrum.io', name: 'Arbitrum Bridge' }, claimAfterHours: 156, prove: false },
-  // Blast: its L2OutputOracle posts state hourly; claimable 1 day after the prove
-  81457: { chainName: 'Blast', explorerUrl: 'https://blastscan.io', stack: 'op', toChainId: ETHEREUM, bridge: { url: 'https://blast.io/en/bridge', name: 'Blast Bridge' }, claimAfterHours: 26, prove: true },
   // Abstract (ZK Stack): claimable once its batch is executed on Ethereum, hours later
   2741: { chainName: 'Abstract', explorerUrl: 'https://abscan.org', stack: 'zk', toChainId: ETHEREUM, bridge: { url: 'https://native-bridge.abs.xyz/bridge/', name: 'Abstract Native Bridge' }, claimAfterHours: 24, prove: false },
   // Fraxtal: L2OutputOracle outputs hourly, claimable 7 days after the prove; FRAX is paid out as FXS (an ERC-20)

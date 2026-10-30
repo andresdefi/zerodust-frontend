@@ -14,9 +14,9 @@ import { AGG_L1, aggClaimData, aggProof, aggWithdrawalOf, type AggContracts, typ
 // ---- Pinned contracts on the parent chain ----
 
 interface OpGames { kind: 'op-games'; portal: Address; factory: Address }
-/** The older portal with an L2OutputOracle; Blast's adds a yield checkpoint to its proofs and claims */
+/** The older portal with an L2OutputOracle */
 /** latestOutput: prove against the newest output (opBNB: its nodes keep proofs for minutes, not days) */
-interface OpOracle { kind: 'op-oracle'; portal: Address; oracle: Address; yieldManager?: Address; latestOutput?: true }
+interface OpOracle { kind: 'op-oracle'; portal: Address; oracle: Address; latestOutput?: true }
 interface Arb { kind: 'arb'; rollup: Address; outbox: Address }
 interface Zk { kind: 'zk'; nullifier: Address }
 /** Taiko: its relayer processes the message on Ethereum; the page only reads whether it did */
@@ -26,8 +26,6 @@ type Contracts = OpGames | OpOracle | Arb | Zk | Taiko | AggContracts;
 export const CLAIM_CONTRACTS: Readonly<Record<number, Contracts>> = {
   // Lisk: OptimismPortal2 with dispute games (games still report l2BlockNumber)
   1135: { kind: 'op-games', portal: '0x26dB93F8b8b4f7016240af62F7730979d353f9A7', factory: '0x0CF7D3706a27CCE2017aEB11E8a9c8b5388c282C' },
-  // Blast: the older portal with an L2OutputOracle; a claim names a yield checkpoint hint
-  81457: { kind: 'op-oracle', portal: '0x0Ec68c5B10F21EFFb74f2A5C61DFe6b08C0Db6Cb', oracle: '0x826D1B0D4111Ad9146Eb8941D7Ca2B6a44215c76', yieldManager: '0x98078db053902644191f93988341E31289E1C8FE' },
   // Fraxtal: OptimismPortalCGT 2.8.1-beta.4, pays the claim out as FXS
   252: { kind: 'op-oracle', portal: '0x36cb65c1967A0Fb0EEE11569C51C2f2aA1Ca6f6D', oracle: '0x66CC916Ed5C6C2FA97014f7D1cD141528Ae171e4' },
   42170: { kind: 'arb', rollup: '0xE7E8cCC7c381809BDC4b213CE44016300707B7Bd', outbox: '0xD4B80C3D7240325D18E645B49e6535A3Bf95cc58' },
@@ -119,8 +117,6 @@ export async function readWithdrawal(chainId: number, txHash: Hex): Promise<With
 // signature, and a pasted hash may be anyone's transaction)
 const OP_MESSAGE_PASSER: Address = '0x4200000000000000000000000000000000000016';
 const OP_L2_BRIDGE: Address = '0x4200000000000000000000000000000000000010';
-/** Blast also has its own ETH bridge (L2BlastBridge), which emits the same event */
-const BLAST_L2_BRIDGE: Address = '0x4300000000000000000000000000000000000005';
 const OP_L2_MESSENGER: Address = '0x4200000000000000000000000000000000000007';
 const ARB_SYS: Address = '0x0000000000000000000000000000000000000064';
 const TAIKO_L2_BRIDGE: Address = '0x1670000000000000000000000000000000000001';
@@ -161,8 +157,7 @@ export function withdrawalOf(chainId: number, receipt: TransactionReceipt, sentA
   const w = withdrawals[0]!;
   // Through L2StandardBridge the message goes to Ethereum's messenger; the bridge's event names the
   // user. It counts only when it is the message the messenger passed (same value).
-  const bridges = c.kind === 'op-oracle' && c.yieldManager ? [OP_L2_BRIDGE, BLAST_L2_BRIDGE] : [OP_L2_BRIDGE];
-  const bridged = parseEventLogs({ abi: ETH_BRIDGE_INITIATED, logs: bridges.flatMap((b) => logsFrom(receipt, b)) });
+  const bridged = parseEventLogs({ abi: ETH_BRIDGE_INITIATED, logs: logsFrom(receipt, OP_L2_BRIDGE) });
   const viaBridge = bridged.length === 1 && isAddressEqual(w.sender, OP_L2_MESSENGER) && bridged[0]!.args.amount === w.value ? bridged[0]!.args : undefined;
   if (bridged.length > 0 && !viaBridge) return null;
   const recipient = viaBridge ? viaBridge.to : w.target;
@@ -218,15 +213,10 @@ const FACTORY = parseAbi(['function gameCount() view returns (uint256)', 'functi
 const GAME = parseAbi(['function l2BlockNumber() view returns (uint256)']);
 const PORTAL1 = parseAbi([
   'function finalizedWithdrawals(bytes32) view returns (bool)',
-  'function provenWithdrawals(bytes32) view returns (bytes32 outputRoot, uint128 timestamp, uint128 l2OutputIndex, uint256 requestId)',
+  'function provenWithdrawals(bytes32) view returns (bytes32 outputRoot, uint128 timestamp, uint128 l2OutputIndex)',
   'struct OutputRootProof { bytes32 version; bytes32 stateRoot; bytes32 messagePasserStorageRoot; bytes32 latestBlockhash; }',
   TX_STRUCT,
   'function proveWithdrawalTransaction(WithdrawalTransaction _tx, uint256 _l2OutputIndex, OutputRootProof _outputRootProof, bytes[] _withdrawalProof)',
-  'function finalizeWithdrawalTransaction(uint256 hintId, WithdrawalTransaction _tx)',
-]);
-const PORTAL1_STD = parseAbi([
-  'function provenWithdrawals(bytes32) view returns (bytes32 outputRoot, uint128 timestamp, uint128 l2OutputIndex)',
-  TX_STRUCT,
   'function finalizeWithdrawalTransaction(WithdrawalTransaction _tx)',
 ]);
 const ORACLE = parseAbi([
@@ -236,7 +226,6 @@ const ORACLE = parseAbi([
   'function getL2OutputIndexAfter(uint256) view returns (uint256)',
   'function getL2Output(uint256) view returns ((bytes32 outputRoot, uint128 timestamp, uint128 l2BlockNumber))',
 ]);
-const YIELD = parseAbi(['function getLastCheckpointId() view returns (uint256)', 'function findCheckpointHint(uint256, uint256, uint256) view returns (uint256)']);
 const OUTBOX = parseAbi([
   'function roots(bytes32) view returns (bytes32)',
   'function isSpent(uint256) view returns (bool)',
@@ -279,9 +268,7 @@ export async function claimState(w: Withdrawal, now = Date.now()): Promise<Claim
   if (c.kind === 'op-oracle') {
     const { hash, block } = w.op!;
     if (await l1().readContract({ address: c.portal, abi: PORTAL1, functionName: 'finalizedWithdrawals', args: [hash] })) return { stage: 'claimed' };
-    const [, proved] = c.yieldManager
-      ? await l1().readContract({ address: c.portal, abi: PORTAL1, functionName: 'provenWithdrawals', args: [hash] })
-      : await l1().readContract({ address: c.portal, abi: PORTAL1_STD, functionName: 'provenWithdrawals', args: [hash] });
+    const [, proved] = await l1().readContract({ address: c.portal, abi: PORTAL1, functionName: 'provenWithdrawals', args: [hash] });
     if (proved > 0n) {
       const period = await l1().readContract({ address: c.oracle, abi: ORACLE, functionName: 'FINALIZATION_PERIOD_SECONDS' });
       const until = (Number(proved) + Number(period)) * 1000;
@@ -368,23 +355,13 @@ export async function proveCall(w: Withdrawal): Promise<L1Call> {
 /** The claim transaction on the parent chain */
 export async function claimCall(w: Withdrawal): Promise<L1Call> {
   const c = CLAIM_CONTRACTS[w.chainId]!;
-  const l1 = () => parent(w.chainId);
   if (c.kind === 'op-games') {
     const submitter = await provedBy(w.chainId, c, w.op!.hash);
     if (!submitter) throw new Error('not proved yet');
     return { to: c.portal, data: encodeFunctionData({ abi: PORTAL2, functionName: 'finalizeWithdrawalTransactionExternalProof', args: [w.op!.tx, submitter] }) };
   }
-  if (c.kind === 'op-oracle' && !c.yieldManager) {
-    return { to: c.portal, data: encodeFunctionData({ abi: PORTAL1_STD, functionName: 'finalizeWithdrawalTransaction', args: [w.op!.tx] }) };
-  }
   if (c.kind === 'op-oracle') {
-    const [, , , requestId] = await l1().readContract({ address: c.portal, abi: PORTAL1, functionName: 'provenWithdrawals', args: [w.op!.hash] });
-    let hintId = 0n;
-    if (requestId !== 0n) {
-      const last = await l1().readContract({ address: c.yieldManager!, abi: YIELD, functionName: 'getLastCheckpointId' });
-      hintId = await l1().readContract({ address: c.yieldManager!, abi: YIELD, functionName: 'findCheckpointHint', args: [requestId, 1n, last] });
-    }
-    return { to: c.portal, data: encodeFunctionData({ abi: PORTAL1, functionName: 'finalizeWithdrawalTransaction', args: [hintId, w.op!.tx] }) };
+    return { to: c.portal, data: encodeFunctionData({ abi: PORTAL1, functionName: 'finalizeWithdrawalTransaction', args: [w.op!.tx] }) };
   }
   if (c.kind === 'arb') {
     const a = w.arb!;

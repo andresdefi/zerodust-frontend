@@ -104,7 +104,7 @@ export const OFT_V2_ABI = parseAbi([
  * signs (l1fee.ts). Pinned here; the page refuses a plan when /direct/chains disagrees, and refuses
  * to sign when the chain's own oracle reports another formula.
  */
-export const GUARD_CHAINS: Readonly<Record<number, L1Formula>> = { 81457: 'ecotone', 288: 'fjord', 204: 'fjord' };
+export const GUARD_CHAINS: Readonly<Record<number, L1Formula>> = { 288: 'fjord', 204: 'fjord' };
 /** ZeroDustGuard (zerodust contracts/src/ZeroDustGuard.yul): CREATE2, the same address on every guard chain */
 export const ZERODUST_GUARD = '0x2f95e6ED90a7dD67fc3Fae5c5628647E6A83e48e';
 /** keccak256 of its runtime code: the page checks the code at the address before signing */

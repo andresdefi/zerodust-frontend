@@ -14,7 +14,7 @@ const fixture = JSON.parse(readFileSync(new URL('../tests/fixtures/claims-2026-1
   responses: Record<string, { result?: unknown; error?: unknown }>;
 };
 const ETH = new URL(RPC_URLS[1]!).origin;
-const L2 = [1135, 42170, 81457, 2741, 1625, 167000].map((id) => new URL((RPC_URLS[id] ?? DIRECT_RPC_URLS[id])!).origin);
+const L2 = [1135, 42170, 2741, 1625, 167000].map((id) => new URL((RPC_URLS[id] ?? DIRECT_RPC_URLS[id])!).origin);
 const ORIGINS = new Set([ETH, new URL(ETHEREUM_FALLBACK_RPC).origin, ...L2]);
 const GWEI = 1_000_000_000n;
 

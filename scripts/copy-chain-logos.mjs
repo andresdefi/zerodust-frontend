@@ -19,7 +19,7 @@ const NETWORKS = {
   747474: 'katana', 7777777: 'zora',
   // Direct chains (no EIP-7702 in ZeroDust)
   43114: 'avalanche', 25: 'cronos', 1088: 'metis-andromeda', 13371: 'immutable', 122: 'fuse',
-  50: 'xdc', 999: 'hyper-evm', 1625: 'gravity', 42793: 'etherlink', 40: 'telos', 1480: 'vana', 81457: 'blast', 288: 'boba',
+  50: 'xdc', 999: 'hyper-evm', 1625: 'gravity', 42793: 'etherlink', 40: 'telos', 1480: 'vana', 288: 'boba',
   // opBNB has no mark of its own in web3icons: BNB Chain's (the same BNB)
   204: 'binance-smart-chain',
   // Destinations only

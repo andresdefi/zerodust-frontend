@@ -61,7 +61,7 @@ export function PendingClaims({ address, version, onSummary }: {
 
   const add = async (txHash: Hex): Promise<string | null> => {
     const w = await findWithdrawal(txHash);
-    if (!w) return 'No withdrawal through a chain\'s own bridge in that transaction (Lisk, Arbitrum Nova, Blast, Abstract, Gravity, Taiko, Fraxtal).';
+    if (!w) return 'No withdrawal through a chain\'s own bridge in that transaction (Lisk, Arbitrum Nova, Abstract, Gravity, Taiko, Fraxtal).';
     const exit = nativeExitOf(w.chainId)!;
     addPendingClaim({
       chainId: w.chainId, chainName: exit.chainName, explorerUrl: exit.explorerUrl, symbol: exit.token?.symbol ?? parentOf(exit).symbol, decimals: exit.token?.decimals ?? 18,

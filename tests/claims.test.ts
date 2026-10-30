@@ -183,7 +183,7 @@ describe('Ethereum RPC', () => {
   it('falls back to the second RPC when the first rate-limits', async () => {
     const fetch = replay(new Set([ETH]));
     vi.stubGlobal('fetch', fetch);
-    const c = byName('blast claimed');
+    const c = byName('abstract claimed');
     const w = (await readWithdrawal(c.chainId, c.txHash))!;
     expect(await claimState(w, fixture.now)).toEqual({ stage: 'claimed' });
     expect(fetch.mock.calls.some(([u]) => new URL(String(u)).origin === ETH_2)).toBe(true);
