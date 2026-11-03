@@ -16,7 +16,9 @@ The page handles private keys, so the build is held to strict rules (checked on 
 
 ## Stack
 
-Vite, React, TypeScript. No server code: `dist/` is static and deployed to Vercel.
+Vite, React, TypeScript. No server code: `dist/` is static and deployed to Vercel. Moving to
+Cloudflare Workers: `wrangler.jsonc` and `cloudflare/worker.js` serve the same `dist/` and apply
+`vercel.json` (headers, redirects, rewrites), so both hosts answer the same.
 
 ## Develop
 
