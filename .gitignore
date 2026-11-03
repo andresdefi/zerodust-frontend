@@ -24,3 +24,4 @@ npm-debug.log*
 dist-offline
 dist-ssr
 offline-out
+.wrangler

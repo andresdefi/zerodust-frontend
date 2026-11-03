@@ -21,4 +21,8 @@ export default tseslint.config(
     files: ['scripts/**/*.mjs', 'build/**/*.ts', 'tests/**/*.ts', 'e2e/**/*.ts', '*.config.{js,ts}'],
     languageOptions: { globals: globals.node },
   },
+  {
+    files: ['cloudflare/**/*.js'],
+    languageOptions: { globals: globals.serviceworker },
+  },
 );

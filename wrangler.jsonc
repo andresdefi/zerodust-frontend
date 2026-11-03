@@ -1,0 +1,18 @@
+{
+  // zerodust.xyz on Cloudflare Workers. Deploy a clean build of main:
+  // `npm ci && npm run build && npx wrangler@4.156.0 deploy`.
+  "$schema": "https://unpkg.com/wrangler@4.156.0/config-schema.json",
+  "name": "zerodust-site",
+  "main": "cloudflare/worker.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    // The Worker applies vercel.json to every request before any file.
+    "run_worker_first": true,
+    // cleanUrls: serve /security from security.html, redirect /security.html.
+    "html_handling": "drop-trailing-slash",
+    "not_found_handling": "none"
+  }
+}
