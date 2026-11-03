@@ -18,7 +18,11 @@ export default {
     const url = new URL(request.url);
     const { pathname } = url;
 
-    // The apex redirects to www, as Vercel's domain setting did.
+    // http to https on the same host, then the apex to www, as Vercel did.
+    if (url.protocol === "http:") {
+      url.protocol = "https:";
+      return Response.redirect(url.toString(), 308);
+    }
     if (url.hostname === "zerodust.xyz") {
       url.hostname = "www.zerodust.xyz";
       return Response.redirect(url.toString(), 308);
