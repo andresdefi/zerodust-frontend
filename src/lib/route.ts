@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { OFFLINE } from './env';
 
 // Two views: the home page and one address (/address/<0x… or name.eth>). The site
-// routes by path (Vercel rewrites /address/* to the app); the offline file runs
+// routes by path (the host rewrites /address/* to the app, see vercel.json); the offline file runs
 // from disk, where paths mean files, so it routes by hash (#/address/…).
 
 export type View = { kind: 'home' } | { kind: 'address'; query: string };
