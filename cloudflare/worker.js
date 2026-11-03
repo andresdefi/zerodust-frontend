@@ -18,6 +18,12 @@ export default {
     const url = new URL(request.url);
     const { pathname } = url;
 
+    // The apex redirects to www, as Vercel's domain setting did.
+    if (url.hostname === "zerodust.xyz") {
+      url.hostname = "www.zerodust.xyz";
+      return Response.redirect(url.toString(), 308);
+    }
+
     if (pathname.length > 1 && pathname.endsWith("/")) {
       url.pathname = pathname.replace(/\/+$/, "");
       return Response.redirect(url.toString(), 308);
