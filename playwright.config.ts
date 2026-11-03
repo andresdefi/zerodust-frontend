@@ -9,7 +9,18 @@ export default defineConfig({
   fullyParallel: true,
   reporter: process.env.CI ? 'github' : 'list',
   use: { baseURL: 'http://localhost:4175', trace: 'retain-on-failure' },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // Run on the installed Google Chrome with its sandbox on: Playwright's bundled
+  // Chromium lags Chrome security fixes and launches with --no-sandbox by default.
+  projects: [
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        channel: 'chrome',
+        launchOptions: { chromiumSandbox: true },
+      },
+    },
+  ],
   webServer: {
     command: 'npx vite preview --port 4175 --strictPort',
     url: 'http://localhost:4175',
