@@ -6,6 +6,11 @@
   "main": "cloudflare/worker.js",
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
+  // Both hosts run the Worker; it sends zerodust.xyz to www.zerodust.xyz.
+  "routes": [
+    { "pattern": "www.zerodust.xyz", "custom_domain": true },
+    { "pattern": "zerodust.xyz", "custom_domain": true }
+  ],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
