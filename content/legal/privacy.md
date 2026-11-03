@@ -12,7 +12,7 @@ ZeroDust is a community tool built and run by [andresdefi](https://x.com/andresd
 - **Your private key**, when you load a wallet with it, stays in your browser tab's memory. It is never sent to us or anyone else, never stored, and never logged. Only signatures and signed transactions leave the tab.
 - **No cookies, no tracking.** The site stores one thing in your browser, and only if you choose a theme: your light or dark preference (local storage).
 - **Daily counts of a few steps.** When a page opens, and when you connect MetaMask, open the sweep dialog, choose or enter the key, see the confirmation or start a sweep, the page sends the API only the step's name (for example "home"). Once per visit it also sends the kind of site you came from, worked out from what your browser shows as the previous page: X, hiddenfunds.xyz, a search engine, another site, or none. Never the page itself. If the page hits an error it did not handle, it sends "page-error", once. The API adds each name to that day's totals and keeps nothing else: no address, no IP address, no identifier, and nothing that links one step to another. The offline page sends none.
-- **Hosting.** The site is served by Vercel, which processes the connection data any web server needs to deliver a page (such as your IP address). We do not add analytics to it.
+- **Hosting.** The site is served by Cloudflare (by Vercel until 3 November 2026), which processes the connection data any web server needs to deliver a page (such as your IP address). We do not add analytics to it.
 
 ## What the ZeroDust API receives and keeps
 
@@ -44,7 +44,7 @@ To quote and run a sweep, the API (api.zerodust.xyz) receives your wallet addres
 - **Chain RPC providers.** Your browser reads balances and sends transactions through each chain's public RPC endpoint. Those providers see your IP address and the requests you make.
 - **Bridges** (Gas.zip, Relay, Across, LI.FI). To quote and deliver a cross-chain sweep, the API sends them your wallet address, the destination address, the chains and the amount. For a MetaMask sweep that Relay carries, your browser also asks Relay for the deposit directly (api.relay.link), with the same details, so Relay sees your IP address. Sweeps carried over LayerZero (Stargate, 0G's bridge) are quoted on-chain; the API only sends LayerZero's explorer (scan.layerzero-api.com) the sweep's transaction hash, to follow its delivery.
 - **Our providers.** The API and its database run on a server rented from Hetzner in Germany. It reads the chains through Alchemy and Infura, and for a few chains also through dRPC's public endpoints when the chain's own RPC fails; they see the wallet addresses it looks up but not your IP address. They process data only to run the service. Until 12 October 2026 the API ran on Render with its database on Supabase; both, including Supabase's copy of the database, were deleted on 30 October 2026.
-- **Transfers outside the EEA.** Hetzner is in the EU. Vercel (which hosts the site), Alchemy and Infura are US companies. Transfers to them rely on the EU's standard contractual clauses or the EU-US Data Privacy Framework.
+- **Transfers outside the EEA.** Hetzner is in the EU. Cloudflare (which hosts the site), Alchemy and Infura are US companies. Transfers to them rely on the EU's standard contractual clauses or the EU-US Data Privacy Framework.
 
 ## Your rights
 
@@ -54,4 +54,4 @@ You can ask what data ZeroDust holds about your wallet address, and ask for it t
 
 We will update this page when what we collect changes, and change the date below.
 
-Last updated: 19 October 2026.
+Last updated: 3 November 2026.
