@@ -41,4 +41,3 @@ unless noted.
 97477 Doma: ethereum-lists/chains icon "doma"
 124816 Mitosis: MITO token logo (CoinGecko), the network's mark
 685689 Gensyn: ethereum-lists/chains icon "gensyn"
-5064014 Ethereal: ethereal.trade favicon (SVG, unchanged)

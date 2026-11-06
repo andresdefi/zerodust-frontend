@@ -34,7 +34,7 @@ const TOKENS = { 747: 'FLOW' };
 // Project logos added by hand (2026-10-08): the file's format, already in public/chains/
 const BRAND = {
   360: 'png', 648: 'png', 1155: 'png', 1514: 'png', 1672: 'png', 2818: 'png', 5031: 'png',
-  16661: 'svg', 42018: 'png', 97477: 'png', 124816: 'png', 685689: 'png', 5064014: 'svg',
+  16661: 'svg', 42018: 'png', 97477: 'png', 124816: 'png', 685689: 'png',
 };
 
 const root = new URL('../node_modules/@web3icons/core/dist/svgs/', import.meta.url);
