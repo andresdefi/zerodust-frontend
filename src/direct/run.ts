@@ -1,5 +1,4 @@
 import { chainConfig as zkChainConfig } from 'viem/zksync';
-import { nativeExitOf } from '../sweep/native';
 import { bytesToHex, decodeFunctionData, decodeFunctionResult, encodeFunctionData, keccak256, parseAbi, type Hex, type LocalAccount } from 'viem';
 import { DIRECT_RPC_URLS, RPC_URLS } from '../chains/rpcs';
 import { isRegisteredSettler, ZEROX_DEPLOYER, ZEROX_REGISTRY_CALLS } from './across';
@@ -139,19 +138,6 @@ export async function planChecked(t: Target, mode: PlanMode, feePaidTx?: string,
       return { ...tx, value, data: encodeFunctionData({ abi: GUARD_SWEEP, functionName: 'sweep', args: [target, fee + l1Fee, data] }) };
     });
     checkReplay(t.chainId, txs, await replay(t.chainId, t.from, txs), null);
-    return plan;
-  }
-  if (checks.native && nativeExitOf(t.chainId)?.stack === 'arb') {
-    // ArbSys is a native precompile (its code reads 0xfe), so no EVM fork can run the withdrawal.
-    // The chain itself answers instead: the sweep must succeed with exactly its gas limit and fail
-    // with one unit less, so it uses all of it and no refund is left behind (as on a fork replay)
-    // Every transaction in the set (the fee transfer too): a limit above what it uses is refunded as dust
-    for (const tx of plan.txs) {
-      const call = (gas: bigint) => rpc<string>(t.chainId, 'eth_call', [{ from: t.from, to: tx.to, data: tx.data, value: `0x${BigInt(tx.value).toString(16)}`, gas: `0x${gas.toString(16)}` }, 'latest'])
-        .then(() => true, () => false);
-      const gas = BigInt(tx.gas);
-      if (!(await call(gas)) || (await call(gas - 1n))) throw new Error(`Plan refused: the ${tx.kind === 'fee' ? 'fee transfer' : 'withdrawal'}'s gas limit is not exactly what it uses, so it could leave dust`);
-    }
     return plan;
   }
   // Never the API's expiry: the one in the deposit itself (or none)

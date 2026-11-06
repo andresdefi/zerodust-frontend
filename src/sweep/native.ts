@@ -69,11 +69,6 @@ export const NATIVE_EXITS: Readonly<Record<number, NativeExit>> = {
   // after the prove. No bridge site claims their ETH.
   81224: { chainName: 'Codex', explorerUrl: 'https://explorer.codex.xyz', stack: 'op', toChainId: ETHEREUM, claimAfterHours: 8 * 24, prove: true },
   1750: { chainName: 'Metal L2', explorerUrl: 'https://explorer.metall2.com', stack: 'op', toChainId: ETHEREUM, claimAfterHours: 7 * 24 + 6, prove: true },
-  // Gravity (Arbitrum Orbit): G arrives as an ERC-20 on Ethereum, confirmed about 6.4 days later
-  1625: {
-    chainName: 'Gravity', explorerUrl: 'https://explorer.gravity.xyz', stack: 'arb', toChainId: ETHEREUM, bridge: { url: 'https://bridge.gravity.xyz', name: 'Gravity Bridge' }, claimAfterHours: 156, prove: false,
-    token: { symbol: 'G', name: 'Gravity', address: '0x9C7BEBa8F6eF6643aBd725e45a4E8387eF260649', decimals: 18 },
-  },
 };
 
 export const nativeExitOf = (chainId: number): NativeExit | undefined => NATIVE_EXITS[chainId];

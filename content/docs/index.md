@@ -76,7 +76,6 @@ Asked for explicitly (`bridge=native` on [`GET /quote`](/docs/api#get-quote) and
 | Taiko (167000) | Taiko | none: Taiko's relayer delivers in ~30 min, its fee taken from the amount | ETH on Ethereum |
 | opBNB (204), direct | OP Stack | prove, then 7 days | BNB on BNB Chain |
 | Abstract (2741), direct | ZK Stack | until its batch is executed on Ethereum (hours) | ETH on Ethereum |
-| Gravity (1625), direct | Arbitrum Orbit | ~5.6 days | G on Ethereum, an ERC-20 token |
 
 On the website these routes are under "Native bridges only", for chains no other bridge takes out, and the address page lists withdrawals waiting to be proved or claimed (kept in that browser), with buttons for each step.
 
