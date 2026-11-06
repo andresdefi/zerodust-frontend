@@ -6,7 +6,7 @@ The planning endpoints are quote-only. They return unsigned transactions and nev
 
 ## Chains
 
-As of 13 October 2026, `GET /direct/chains` lists 22 chains:
+As of 6 November 2026, `GET /direct/chains` lists 20 chains:
 
 | Chain | ID | Token | `kind` |
 |---|---|---|---|
