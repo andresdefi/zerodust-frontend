@@ -408,7 +408,7 @@ export function useSweep(wallet: Wallet) {
   const directTarget = (row: Row) => ({ chainId: row.chainId, from: address, ...targetFor(row) });
   /** The chain's own bridge, when that is the row's way out */
   const bridgeFor = (row: Row): 'native' | undefined => (choices[row.chainId] === 'native' ? 'native' : undefined);
-  /** What arrives: a token route's token, or the token a chain's own bridge delivers (Gravity: G) */
+  /** What arrives: a token route's token, or the token a chain's own bridge delivers (Fraxtal: FXS) */
   const tokenFor = (row: Row, toChainId: number): RowState['token'] => {
     const exit = choices[row.chainId] === 'native' ? nativeExitOf(row.chainId) : undefined;
     return exit?.token ? { symbol: exit.token.symbol, decimals: exit.token.decimals } : rowToken(row.chainId, toChainId);

@@ -80,8 +80,8 @@ describe('groupChains', () => {
     expect(groupText('claim', null).detail).not.toContain('not ETH');
     expect(groupText('claim', null, { tokens: [{ chain: 'Fraxtal', symbol: 'FXS' }] }).detail)
       .toContain('Fraxtal arrives as FXS, a token on Ethereum, not ETH. Sweep with the key.');
-    expect(groupText('claim', null, { tokens: [{ chain: 'Fraxtal', symbol: 'FXS' }, { chain: 'Gravity', symbol: 'G' }] }).detail)
-      .toContain('Fraxtal arrives as FXS and Gravity as G, tokens on Ethereum, not ETH.');
+    expect(groupText('claim', null, { tokens: [{ chain: 'Fraxtal', symbol: 'FXS' }, { chain: 'X Layer', symbol: 'OKB' }] }).detail)
+      .toContain('Fraxtal arrives as FXS and X Layer as OKB, tokens on Ethereum, not ETH.');
   });
 
   it('native bridges only: the wait follows the chains (X Layer about an hour, OP and Arbitrum days)', () => {

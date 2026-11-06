@@ -74,8 +74,6 @@ describe('own-bridge withdrawals, read from the chain and Ethereum', () => {
     // No exact date for Arbitrum until it is confirmed: the usual 156 hours after it was sent
     const w = (await readWithdrawal(42170, nova.txHash))!;
     expect(nova.state).toEqual({ stage: 'waiting', until: w.sentAt + 156 * 3_600_000 });
-    // Gravity: G (18 decimals), not ETH
-    expect(Number(byName('gravity waiting (G)').amount) / 1e18).toBeCloseTo(1125.668, 3);
   });
 
   it('sends every call to the pinned contract of its chain', () => {

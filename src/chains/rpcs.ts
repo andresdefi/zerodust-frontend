@@ -96,7 +96,6 @@ export const DIRECT_RPC_URLS: Record<number, string> = {
   50: 'https://rpc.xdcrpc.com',
   999: 'https://rpc.hyperliquid.xyz/evm',
   747: 'https://mainnet.evm.nodes.onflow.org',
-  1625: 'https://rpc.gravity.xyz',
   42793: 'https://node.mainnet.etherlink.com',
   // Added 2026-10-02 (probe-rpcs: CORS for the site and Origin: null, reads answer)
   14: 'https://flare-api.flare.network/ext/C/rpc',

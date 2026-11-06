@@ -6,7 +6,7 @@ The planning endpoints are quote-only. They return unsigned transactions and nev
 
 ## Chains
 
-As of 13 October 2026, `GET /direct/chains` lists 22 chains:
+As of 6 November 2026, `GET /direct/chains` lists 20 chains:
 
 | Chain | ID | Token | `kind` |
 |---|---|---|---|
@@ -25,21 +25,20 @@ As of 13 October 2026, `GET /direct/chains` lists 22 chains:
 | HyperEVM | 999 | HYPE | `evm` |
 | Metis | 1088 | METIS | `evm` |
 | Vana | 1480 | VANA | `evm` |
-| Gravity | 1625 | G | `arbitrum` |
 | Abstract | 2741 | ETH | `zk` |
 | Immutable zkEVM | 13371 | IMX | `evm` |
 | Etherlink | 42793 | XTZ | `etherlink` |
 | Avalanche | 43114 | AVAX | `evm` |
 | Ethereal | 5064014 | USDe | `arbitrum` |
 
-Read the list from the API rather than hardcoding it. Gravity (1 November 2026) and Abstract (15 December 2026) are shutting down: their entries carry `closing`, and each leaves the list when it closes.
+Read the list from the API rather than hardcoding it. Abstract is shutting down on 15 December 2026: its entry carries `closing`, and it leaves the list when it closes.
 
 ## How exact zero works
 
 A legacy transaction costs exactly `gas x gasPrice` on these chains, so `value = balance - gas x gasPrice` leaves 0. That needs the exact gas, never an estimate:
 
 - The planner finds the smallest gas limit `eth_call` accepts for the call, by bisection.
-- Gas price: the chain's `eth_gasPrice` plus 10%. Gravity charges the base fee whatever the transaction says, so it is only planned while the base fee is at its floor. Etherlink adds its inclusion fee as gas and is only planned while its base fee is 1 gwei. Otherwise the planner answers `TRY_LATER`.
+- Gas price: the chain's `eth_gasPrice` plus 10%. Arbitrum-stack chains (Ethereal) charge the base fee whatever the transaction says, so they are only planned while the base fee is at its floor. Etherlink adds its inclusion fee as gas and is only planned while its base fee is 1 gwei. Otherwise the planner answers `TRY_LATER`.
 - A same-chain sweep must go to a plain address (no contract code), because only then is the transfer's gas fixed.
 
 ### ZK-stack chains
@@ -141,7 +140,7 @@ The unsigned transactions that take the chain to exactly 0.
 | `feePaidTx` | Optional hash of an earlier fee transaction |
 
 - `route`: an optional fee transaction, then the sweep. Same chain (`toChainId` = `chainId`) is a plain transfer to `recipient`, which must not be `from`. Cross-chain asks Gas.zip and Relay and keeps the larger output.
-- With `bridge=native` (chains with `nativeExit`): the sweep goes into the chain's own bridge to `recipient` on Ethereum (`route: "native"`, `receive: null`): Abstract through the paymaster into `L2BaseToken.withdraw`, Gravity into `ArbSys.withdrawEth` (G arrives on Ethereum as an ERC-20, named in `receiveToken`), opBNB through ZeroDustGuard into its `L2StandardBridge` to `recipient` on BNB Chain (native BNB). Nothing arrives by itself: after the chain's waiting period the recipient proves (opBNB) and claims the withdrawal on the parent chain (Ethereum; BNB Chain for opBNB, paid in BNB there), on the chain's bridge site (`nativeExit.bridgeUrl`) or on zerodust.xyz.
+- With `bridge=native` (chains with `nativeExit`): the sweep goes into the chain's own bridge to `recipient` on Ethereum (`route: "native"`, `receive: null`): Abstract through the paymaster into `L2BaseToken.withdraw`, opBNB through ZeroDustGuard into its `L2StandardBridge` to `recipient` on BNB Chain (native BNB). Nothing arrives by itself: after the chain's waiting period the recipient proves (opBNB) and claims the withdrawal on the parent chain (Ethereum; BNB Chain for opBNB, paid in BNB there), on the chain's bridge site (`nativeExit.bridgeUrl`) or on zerodust.xyz.
 - `burn`: one transfer of everything to `0x000000000000000000000000000000000000dEaD`. `toChainId` and `recipient` are still required but not used.
 - `donate`: one transfer of everything to ZeroDust.
 
@@ -160,7 +159,7 @@ Response:
 | `txGapBlocks` | Gas-limit chains with a reserve rule (Monad): blocks to wait after each transaction's block before sending the next |
 | `expiresAt` | Across only: unix seconds after which the deposit reverts on-chain. Across quotes live about 30 seconds; never send the sweep after this |
 | `guard` | Guard chains only: how the one transaction through ZeroDustGuard is built (see [Guard chains](#guard-chains-op-stack)) |
-| `receiveToken` | When a token arrives instead of gas (Telos's OFT exit, Gravity's own bridge): `{ chainId, symbol, address, decimals }` |
+| `receiveToken` | When a token arrives instead of gas (Telos's OFT exit): `{ chainId, symbol, address, decimals }` |
 | `bridgeFee` | Meson only: its fixed fee in wei, already out of `receive`. State it before signing |
 
 #### Across (not offered at the moment)

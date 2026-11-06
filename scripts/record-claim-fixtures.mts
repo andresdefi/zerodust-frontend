@@ -12,7 +12,6 @@ const CASES: Array<{ name: string; chainId: number; txHash: Hex }> = [
   { name: 'lisk proved, waiting', chainId: 1135, txHash: '0x3ac5978bc6ab565571c47a02735c219922c84b8ab5e6f77fc7371a287a392ae5' },
   { name: 'abstract claimed', chainId: 2741, txHash: '0xcd00ec6951cd7de4d0c4ff054f39934031193361f94866b456193e23a6856382' },
   { name: 'nova waiting', chainId: 42170, txHash: '0xb7c4317ef1b8eb218be459e2d4301c63b44152ebcbfd527fd49b1ae65862c2a8' },
-  { name: 'gravity waiting (G)', chainId: 1625, txHash: '0x44fd4235a20e0aeb6b8a7bfdcb5bf0f98993e4dee29344fc789ba34681b4eae2' },
   // Other people's open withdrawals, for the prove and claim calls
   { name: 'lisk ready to prove', chainId: 1135, txHash: '0x79c1defdafceed9228afdd2cfd4013189a9743a59271b8d6be2cb91f3fe310d6' },
   { name: 'lisk ready to claim', chainId: 1135, txHash: '0xd3fe47043eaa6edfbde3fdc2ed67725460478fac3a1f5939135b338434272317' },
