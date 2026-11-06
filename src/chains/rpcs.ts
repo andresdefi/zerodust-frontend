@@ -100,7 +100,6 @@ export const DIRECT_RPC_URLS: Record<number, string> = {
   // Added 2026-10-02 (probe-rpcs: CORS for the site and Origin: null, reads answer)
   14: 'https://flare-api.flare.network/ext/C/rpc',
   30: 'https://public-node.rsk.co',
-  5064014: 'https://rpc.ethereal.trade',
   // ZK stack (2026-10-02): swept through ZeroDust's paymaster; CORS for the site and Origin: null
   324: 'https://mainnet.era.zksync.io',
   2741: 'https://api.mainnet.abs.xyz',

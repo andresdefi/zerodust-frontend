@@ -6,7 +6,7 @@ The planning endpoints are quote-only. They return unsigned transactions and nev
 
 ## Chains
 
-As of 6 November 2026, `GET /direct/chains` lists 20 chains:
+As of 6 November 2026, `GET /direct/chains` lists 19 chains:
 
 | Chain | ID | Token | `kind` |
 |---|---|---|---|
@@ -29,7 +29,6 @@ As of 6 November 2026, `GET /direct/chains` lists 20 chains:
 | Immutable zkEVM | 13371 | IMX | `evm` |
 | Etherlink | 42793 | XTZ | `etherlink` |
 | Avalanche | 43114 | AVAX | `evm` |
-| Ethereal | 5064014 | USDe | `arbitrum` |
 
 Read the list from the API rather than hardcoding it. Abstract is shutting down on 15 December 2026: its entry carries `closing`, and it leaves the list when it closes.
 
@@ -38,7 +37,7 @@ Read the list from the API rather than hardcoding it. Abstract is shutting down 
 A legacy transaction costs exactly `gas x gasPrice` on these chains, so `value = balance - gas x gasPrice` leaves 0. That needs the exact gas, never an estimate:
 
 - The planner finds the smallest gas limit `eth_call` accepts for the call, by bisection.
-- Gas price: the chain's `eth_gasPrice` plus 10%. Arbitrum-stack chains (Ethereal) charge the base fee whatever the transaction says, so they are only planned while the base fee is at its floor. Etherlink adds its inclusion fee as gas and is only planned while its base fee is 1 gwei. Otherwise the planner answers `TRY_LATER`.
+- Gas price: the chain's `eth_gasPrice` plus 10%. Etherlink adds its inclusion fee as gas and is only planned while its base fee is 1 gwei. Otherwise the planner answers `TRY_LATER`.
 - A same-chain sweep must go to a plain address (no contract code), because only then is the transfer's gas fixed.
 
 ### ZK-stack chains
@@ -103,7 +102,7 @@ Rate limits: `/direct/chains`, `/direct/balances` and `/direct/status` are reads
 }
 ```
 
-`kind` is the chain's gas rule: `evm`, `arbitrum` (price must equal the base fee), `etherlink` (inclusion fee charged as gas), `gaslimit` (the whole limit is charged), `fixedprice` (the network's own price is charged, whatever the transaction offers), `zk` (a paymaster pays the gas) or `opguard` (an L1 data fee; one transaction through ZeroDustGuard, with `l1Formula`). `prices` is USD per token, for display.
+`kind` is the chain's gas rule: `evm`, `etherlink` (inclusion fee charged as gas), `gaslimit` (the whole limit is charged), `fixedprice` (the network's own price is charged, whatever the transaction offers), `zk` (a paymaster pays the gas) or `opguard` (an L1 data fee; one transaction through ZeroDustGuard, with `l1Formula`). `prices` is USD per token, for display.
 
 Optional fields: `nativeExit` (`stack`, `toChainId`, `bridgeUrl`: the chain's own bridge, see below), `noExit` (no way off the chain) and `closing` (`stage`, `closesAt`, `cutoffAt`, `source`, `note`). In a chain's last 3 days (`cutoff`) plans carry no ZeroDust fee.
 
