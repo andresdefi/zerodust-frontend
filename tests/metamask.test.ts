@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { allowedCallTargets, ZERO_ROUTE_HASH } from '@zerodust/sdk';
 import { encodeFunctionData, encodeFunctionResult, keccak256, parseAbi, type Hex } from 'viem';
@@ -100,6 +100,10 @@ describe('sweepBatchWithPermissions', () => {
   const ZERO_HASH = ZERO_ROUTE_HASH;
   const BALANCE = 10n ** 15n;
   const reads: ChainReads = { gasPrice: async () => 10n ** 9n, l1Fee: async () => 0n, code: async () => '0x', call: async () => '0x' };
+  // One per test: the quote and the batch are built apart, and a second turning over between them
+  // made their deadlines differ, so the page refused the batch (CI, 2026-10-07 and 2026-11-10)
+  let deadline = 0;
+  beforeEach(() => { deadline = Math.floor(Date.now() / 1000) + 50; });
 
   /** A same-chain permission quote to DEST that passes the SDK's checks */
   const quoteFor = (chainId: number, over: { router?: string; destination?: string } = {}) => ({
@@ -108,7 +112,7 @@ describe('sweepBatchWithPermissions', () => {
     autoRevoke: false, signer: 'permission',
     permission: { router: over.router ?? PINNED, delegationManager: DM, domainVersion: 'permission-2' },
     intent: { mode: 0, destination: (over.destination ?? DEST).toLowerCase(), destinationChainId: String(chainId), callTarget: ZERO, routeHash: ZERO_HASH, minReceive: '900000000000000' },
-    deadline: Math.floor(Date.now() / 1000) + 50, nonce: 0, validForSeconds: 55,
+    deadline, nonce: 0, validForSeconds: 55,
   });
 
   /** The backend's SweepBatch for these quotes (services/signature.ts buildSweepBatchTypedData) */
