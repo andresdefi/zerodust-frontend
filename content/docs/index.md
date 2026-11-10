@@ -66,7 +66,6 @@ Asked for explicitly (`bridge=native` on [`GET /quote`](/docs/api#get-quote) and
 
 | Chain | Stack | Wait before the claim | Arrives as |
 |---|---|---|---|
-| Lisk (1135) | OP Stack | a state record (up to ~6 h), prove, then 7 days | ETH on Ethereum |
 | Fraxtal (252) | OP Stack | an output, prove, then 7 days | FXS on Ethereum, an ERC-20 token |
 | RISE (4153), Metal L2 (1750), Codex (81224) | OP Stack | a dispute game (RISE ~25 min, Metal L2 ~6 h, Codex daily), prove, then 7 days | ETH on Ethereum |
 | Arbitrum Nova (42170) | Arbitrum | ~6.4 days | ETH on Ethereum |

@@ -17,7 +17,6 @@ const STRANGER = '0x3333333333333333333333333333333333333333';
 const NOVA = 42170;
 const ABSTRACT = 2741;
 const RISE = 4153;
-const LISK = 1135;
 
 const OP = parseAbi(['function bridgeETHTo(address _to, uint32 _minGasLimit, bytes _extraData) payable']);
 const ARB = parseAbi(['function withdrawEth(address destination) payable returns (uint256)']);
@@ -102,7 +101,7 @@ describe('groupOf: the claim group', () => {
 
   it('leaves it where a bridge, another destination or a minimum still applies', () => {
     expect(groupOf(chain(NOVA), { gas: true }, 8453)).toBe('gas');
-    expect(groupOf(chain(LISK), { gas: false, notToDestination: true }, 8453)).toBe('elsewhere');
+    expect(groupOf(chain(RISE), { gas: false, notToDestination: true }, 8453)).toBe('elsewhere');
     expect(groupOf(chain(ABSTRACT, { direct: true }), { gas: false, minimum: 10n }, 8453)).toBe('gas');
     expect(groupOf(chain(ABSTRACT, { direct: true }), { gas: null }, 8453)).toBe('gas');
     // No own bridge: stays on its chain
@@ -112,9 +111,9 @@ describe('groupOf: the claim group', () => {
 
 describe('steps, costs and dates', () => {
   it('says when each chain is proved and claimed, and what arrives, before signing', () => {
-    const lisk = nativeSummary(NATIVE_EXITS[LISK]!, 'Lisk');
-    expect(lisk.when).toMatch(/^Prove it within a few hours, then claim it after about/);
-    expect(lisk.arrives).toBe('Arrives as ETH on Ethereum');
+    const rise = nativeSummary(NATIVE_EXITS[RISE]!, 'RISE');
+    expect(rise.when).toMatch(/^Prove it within a few hours, then claim it after about/);
+    expect(rise.arrives).toBe('Arrives as ETH on Ethereum');
     const nova = nativeSummary(NATIVE_EXITS[NOVA]!, 'Arbitrum Nova');
     expect(nova.when).not.toMatch(/prove/i);
     expect(nativeSummary(NATIVE_EXITS[252]!, 'Fraxtal').arrives).toBe('Arrives as FXS (Frax Share), a token on Ethereum, not ETH');
@@ -123,7 +122,7 @@ describe('steps, costs and dates', () => {
 
   it('prices the prove and the claim at the given gas', () => {
     // OP stack: a prove (450k) and a claim (250k: our Blast claims used 244k)
-    expect(claimCostWei(NATIVE_EXITS[LISK]!, 1n)).toBe(700_000n);
+    expect(claimCostWei(NATIVE_EXITS[RISE]!, 1n)).toBe(700_000n);
     expect(claimCostWei(NATIVE_EXITS[NOVA]!, 2n)).toBe(300_000n);
     expect(claimCostWei(NATIVE_EXITS[ABSTRACT]!, 1n)).toBe(190_000n);
   });
@@ -132,8 +131,8 @@ describe('steps, costs and dates', () => {
     const closes = Date.parse('2026-11-01T00:00:00Z');
     // Arbitrum stack: the claim's proof comes from the chain once confirmed (156 h), plus a day
     expect(new Date(startByMs(NATIVE_EXITS[NOVA]!, closes)).toISOString()).toBe('2026-10-24T12:00:00.000Z');
-    // Lisk: only the prove needs the chain (12 h), plus a day
-    expect(new Date(startByMs(NATIVE_EXITS[LISK]!, closes)).toISOString()).toBe('2026-10-30T12:00:00.000Z');
+    // RISE: only the prove needs the chain (12 h), plus a day
+    expect(new Date(startByMs(NATIVE_EXITS[RISE]!, closes)).toISOString()).toBe('2026-10-30T12:00:00.000Z');
   });
 });
 
