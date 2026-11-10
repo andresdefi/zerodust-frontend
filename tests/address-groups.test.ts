@@ -92,9 +92,9 @@ describe('groupChains', () => {
 
   it('native bridges only: a chain settling on BNB Chain is named; alone, the group says BNB Chain', () => {
     const op = { chain: 'opBNB', parent: 'BNB Chain', symbol: 'BNB' };
-    expect(groupText('claim', null, { parents: [op, { chain: 'Lisk', parent: 'Ethereum', symbol: 'ETH' }] }).detail).toContain("sends it to Ethereum (opBNB's to BNB Chain), where you claim it");
+    expect(groupText('claim', null, { parents: [op, { chain: 'RISE', parent: 'Ethereum', symbol: 'ETH' }] }).detail).toContain("sends it to Ethereum (opBNB's to BNB Chain), where you claim it");
     expect(groupText('claim', null, { parents: [op] }).detail).toContain('sends it to BNB Chain, where you claim it');
-    expect(groupText('claim', null, { parents: [{ chain: 'Lisk', parent: 'Ethereum', symbol: 'ETH' }] }).detail).toContain('sends it to Ethereum, where');
+    expect(groupText('claim', null, { parents: [{ chain: 'RISE', parent: 'Ethereum', symbol: 'ETH' }] }).detail).toContain('sends it to Ethereum, where');
   });
 });
 

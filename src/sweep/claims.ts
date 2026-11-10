@@ -24,8 +24,6 @@ interface Taiko { kind: 'taiko'; l1Bridge: Address }
 type Contracts = OpGames | OpOracle | Arb | Zk | Taiko | AggContracts;
 
 export const CLAIM_CONTRACTS: Readonly<Record<number, Contracts>> = {
-  // Lisk: OptimismPortal2 with dispute games (games still report l2BlockNumber)
-  1135: { kind: 'op-games', portal: '0x26dB93F8b8b4f7016240af62F7730979d353f9A7', factory: '0x0CF7D3706a27CCE2017aEB11E8a9c8b5388c282C' },
   // Fraxtal: OptimismPortalCGT 2.8.1-beta.4, pays the claim out as FXS
   252: { kind: 'op-oracle', portal: '0x36cb65c1967A0Fb0EEE11569C51C2f2aA1Ca6f6D', oracle: '0x66CC916Ed5C6C2FA97014f7D1cD141528Ae171e4' },
   42170: { kind: 'arb', rollup: '0xE7E8cCC7c381809BDC4b213CE44016300707B7Bd', outbox: '0xD4B80C3D7240325D18E645B49e6535A3Bf95cc58' },

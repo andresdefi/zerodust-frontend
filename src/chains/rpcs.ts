@@ -18,7 +18,6 @@ export const RPC_URLS: Record<number, string> = {
   360: 'https://shape-mainnet.g.alchemy.com/public',
   480: 'https://worldchain-mainnet.g.alchemy.com/public',
   988: 'https://rpc.stable.xyz',
-  1135: 'https://rpc.api.lisk.com',
   1329: 'https://evm-rpc.sei-apis.com',
   1514: 'https://mainnet.datarpc.io',
   1672: 'https://rpc.pharos.xyz',

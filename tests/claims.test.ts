@@ -6,7 +6,7 @@ import { formatTransactionReceipt, toEventSelector, type TransactionReceipt } fr
 import { CLAIM_CONTRACTS, claimCall, claimState, findWithdrawal, proveCall, readWithdrawal, withdrawalOf, type ClaimState } from '../src/sweep/claims';
 
 // Own-bridge withdrawals read from the chain and Ethereum (sweep/claims.ts), replayed from real
-// RPC answers (scripts/record-claim-fixtures.mts, 2026-10-12): ZeroDust's own test withdrawals at
+// RPC answers (scripts/record-claim-fixtures.mts, 2026-10-12, Metal L2 2026-11-10): ZeroDust's own test withdrawals at
 // each stage, and other people's open ones for the prove and claim calls. Each recorded call
 // passed eth_estimateGas on Ethereum when it was recorded (the fixture keeps the estimate).
 
@@ -14,6 +14,8 @@ interface Case {
   name: string;
   chainId: number;
   txHash: Hex;
+  /** Recorded later than the file's `now` */
+  now?: number;
   recipient: string;
   amount: string;
   state: ClaimState;
@@ -55,7 +57,7 @@ describe('own-bridge withdrawals, read from the chain and Ethereum', () => {
       const w = (await readWithdrawal(c.chainId, c.txHash))!;
       expect(w.recipient).toBe(c.recipient);
       expect(w.amount.toString()).toBe(c.amount);
-      expect(await claimState(w, fixture.now)).toEqual(c.state);
+      expect(await claimState(w, c.now ?? fixture.now)).toEqual(c.state);
       if (c.call) {
         const built = c.call.step === 'prove' ? await proveCall(w) : await claimCall(w);
         expect(built.to).toBe(c.call.to);
@@ -65,15 +67,16 @@ describe('own-bridge withdrawals, read from the chain and Ethereum', () => {
   }
 
   it('our own: the recipient is the swept wallet on Ethereum, and the dates are the chain\'s', async () => {
-    const lisk = byName('lisk proved, waiting');
-    expect(lisk.recipient).toBe(TEST_WALLET);
-    // Proved 2026-10-10 17:58:23 UTC; Lisk's proof maturity is 7 days
-    expect(lisk.state).toEqual({ stage: 'proved', until: Date.parse('2026-10-17T17:58:23Z') });
     const nova = byName('nova waiting');
     expect(nova.recipient).toBe(TEST_WALLET);
     // No exact date for Arbitrum until it is confirmed: the usual 156 hours after it was sent
     const w = (await readWithdrawal(42170, nova.txHash))!;
     expect(nova.state).toEqual({ stage: 'waiting', until: w.sentAt + 156 * 3_600_000 });
+  });
+
+  it('Metal L2: claimable 7 days after the prove, a date read from Ethereum', () => {
+    // Proved 2026-11-09 10:07:59 UTC
+    expect(byName('metal proved, waiting').state).toEqual({ stage: 'proved', until: Date.parse('2026-11-16T10:07:59Z') });
   });
 
   it('sends every call to the pinned contract of its chain', () => {
@@ -84,8 +87,8 @@ describe('own-bridge withdrawals, read from the chain and Ethereum', () => {
     }
   });
 
-  it('Lisk: the claim names whoever proved it, so any wallet can send it', async () => {
-    const c = byName('lisk ready to claim');
+  it('Dispute-game chains: the claim names whoever proved it, so any wallet can send it', async () => {
+    const c = byName('metal ready to claim');
     const built = await claimCall((await readWithdrawal(c.chainId, c.txHash))!);
     const { functionName, args } = decodeFunctionData({
       abi: parseAbi(['struct WithdrawalTransaction { uint256 nonce; address sender; address target; uint256 value; uint256 gasLimit; bytes data; }', 'function finalizeWithdrawalTransactionExternalProof(WithdrawalTransaction _tx, address _proofSubmitter)']),
@@ -116,7 +119,7 @@ describe('own-bridge withdrawals, read from the chain and Ethereum', () => {
   });
 
   it('reads nothing on a chain without a pinned own bridge', async () => {
-    expect(await readWithdrawal(10, byName('lisk ready to prove').txHash)).toBeNull();
+    expect(await readWithdrawal(10, byName('metal ready to prove').txHash)).toBeNull();
   });
 });
 
@@ -127,6 +130,8 @@ describe('only the chains\' own contracts count (a pasted hash may be anyone\'s 
     const key = Object.keys(fixture.responses).find((k) => k.includes('eth_getTransactionReceipt') && k.includes(c.txHash))!;
     return formatTransactionReceipt(structuredClone(fixture.responses[key]!.result) as never);
   };
+  const METAL = 1750;
+  const metal = byName('metal proved, waiting');
   const ARB_SYS = '0x0000000000000000000000000000000000000064';
   const PASSER = '0x4200000000000000000000000000000000000016';
   const L2_BRIDGE = '0x4200000000000000000000000000000000000010';
@@ -135,7 +140,7 @@ describe('only the chains\' own contracts count (a pasted hash may be anyone\'s 
 
   it('reads the real receipts', () => {
     expect(withdrawalOf(42170, receiptOf('nova waiting'), 0)?.recipient).toBe(TEST_WALLET);
-    expect(withdrawalOf(1135, receiptOf('lisk proved, waiting'), 0)?.recipient).toBe(TEST_WALLET);
+    expect(withdrawalOf(METAL, receiptOf('metal proved, waiting'), 0)?.recipient).toBe(metal.recipient);
   });
 
   it('Arbitrum: an L2ToL1Tx from any other contract is ignored, and two withdrawals are refused', () => {
@@ -148,14 +153,14 @@ describe('only the chains\' own contracts count (a pasted hash may be anyone\'s 
   });
 
   it('OP stack: a bridge event from another contract cannot name the recipient', () => {
-    const fake = receiptOf('lisk proved, waiting');
+    const fake = receiptOf('metal proved, waiting');
     const bridgeLog = bridgeEvent(fake);
     // Someone else's contract emits the same event naming another recipient
     fake.logs.push({ ...bridgeLog, address: '0x000000000000000000000000000000000000bEEF', topics: [bridgeLog.topics[0]!, bridgeLog.topics[1]!, `0x${'00'.repeat(12)}${'ee'.repeat(20)}`] });
-    expect(withdrawalOf(1135, fake, 0)?.recipient).toBe(TEST_WALLET);
-    const twice = receiptOf('lisk proved, waiting');
+    expect(withdrawalOf(METAL, fake, 0)?.recipient).toBe(metal.recipient);
+    const twice = receiptOf('metal proved, waiting');
     twice.logs = [...twice.logs, ...twice.logs.filter((l) => l.address.toLowerCase() === PASSER)];
-    expect(withdrawalOf(1135, twice, 0)).toBeNull();
+    expect(withdrawalOf(METAL, twice, 0)).toBeNull();
   });
 
   it('Taiko: a MessageSent from any other contract is not a withdrawal', () => {
@@ -167,11 +172,11 @@ describe('only the chains\' own contracts count (a pasted hash may be anyone\'s 
   });
 
   it('OP stack: a bridge event whose amount is not the message\'s value is refused', () => {
-    const r = receiptOf('lisk proved, waiting');
+    const r = receiptOf('metal proved, waiting');
     const bridgeLog = bridgeEvent(r);
     // amount is the first word of the event's data
     bridgeLog.data = `0x${(1n).toString(16).padStart(64, '0')}${bridgeLog.data.slice(66)}`;
-    expect(withdrawalOf(1135, r, 0)).toBeNull();
+    expect(withdrawalOf(METAL, r, 0)).toBeNull();
   });
 });
 
@@ -212,6 +217,6 @@ describe('a withdrawal its chain\'s usual RPC has pruned', () => {
 
   it('a chain with no full-history RPC still says the transaction was not found', async () => {
     vi.stubGlobal('fetch', pruned(false));
-    await expect(readWithdrawal(1135, op.txHash)).rejects.toThrow(/could not be found/);
+    await expect(readWithdrawal(252, op.txHash)).rejects.toThrow(/could not be found/);
   });
 });

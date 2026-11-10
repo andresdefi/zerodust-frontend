@@ -14,7 +14,7 @@ const fixture = JSON.parse(readFileSync(new URL('../tests/fixtures/claims-2026-1
   responses: Record<string, { result?: unknown; error?: unknown }>;
 };
 const ETH = new URL(RPC_URLS[1]!).origin;
-const L2 = [1135, 42170, 2741, 252, 167000].map((id) => new URL((RPC_URLS[id] ?? DIRECT_RPC_URLS[id])!).origin);
+const L2 = [42170, 2741, 252, 167000].map((id) => new URL((RPC_URLS[id] ?? DIRECT_RPC_URLS[id])!).origin);
 const ORIGINS = new Set([ETH, new URL(ETHEREUM_FALLBACK_RPC).origin, ...L2]);
 const GWEI = 1_000_000_000n;
 
@@ -71,7 +71,6 @@ async function openWithClaims(page: Page, names: string[]) {
   await mockNetwork(page, user);
   await replayChains(page, 0n);
   const exits: Record<number, { chainName: string; explorerUrl: string; symbol: string }> = {
-    1135: { chainName: 'Lisk', explorerUrl: 'https://blockscout.lisk.com', symbol: 'ETH' },
     42170: { chainName: 'Arbitrum Nova', explorerUrl: 'https://nova.arbiscan.io', symbol: 'ETH' },
     252: { chainName: 'Fraxtal', explorerUrl: 'https://fraxscan.com', symbol: 'FXS' },
     2741: { chainName: 'Abstract', explorerUrl: 'https://abscan.org', symbol: 'ETH' },
@@ -138,19 +137,19 @@ test('a withdrawal sent from another browser: added by its transaction hash, the
 });
 
 test('several withdrawals: each shows its steps and what is next; the tab counts the ones ready', async ({ page }) => {
-  await openWithClaims(page, ['lisk ready to prove', 'nova waiting', 'fraxtal ready to claim', 'abstract claimed']);
+  await openWithClaims(page, ['fraxtal ready to prove', 'nova waiting', 'abstract claimed']);
   // The balances stay on their own tab
   await expect(page.getByRole('tab', { name: 'Balances' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('region', { name: 'Waiting to be claimed' })).toBeHidden();
   const tab = page.getByRole('tab', { name: /Waiting to be claimed/ });
-  await expect(tab).toContainText('2 ready', { timeout: 20_000 });
+  await expect(tab).toContainText('1 ready', { timeout: 20_000 });
   await tab.click();
   await expect(tab).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('section.ap-grp').first()).toBeHidden();
   const card = page.getByRole('region', { name: 'Waiting to be claimed' });
   const row = (name: string) => card.locator('.ap-claim', { hasText: name });
-  await expect(row('Lisk').getByRole('button', { name: 'Prove now' })).toBeVisible();
-  await expect(row('Lisk').locator('.ap-claim-steps li.now.ready')).toHaveText('Prove');
+  await expect(row('Fraxtal').getByRole('button', { name: 'Prove now' })).toBeVisible();
+  await expect(row('Fraxtal').locator('.ap-claim-steps li.now.ready')).toHaveText('Prove');
   await expect(row('Arbitrum Nova').locator('.ap-claim-steps li.now')).toHaveText('Wait');
   await expect(row('Arbitrum Nova').getByRole('button')).toHaveCount(0);
   // Fraxtal's FRAX arrives as FXS, a token on Ethereum

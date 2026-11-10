@@ -11,7 +11,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 const NETWORKS = {
   1: 'ethereum', 10: 'optimism', 56: 'binance-smart-chain', 100: 'gnosis', 130: 'unichain',
   137: 'polygon', 146: 'sonic', 169: 'manta-pacific', 196: 'x-layer', 252: 'fraxtal',
-  480: 'world', 988: 'stable', 1135: 'lisk', 1329: 'sei-network', 1868: 'soneium',
+  480: 'world', 988: 'stable', 1329: 'sei-network', 1868: 'soneium',
   2020: 'ronin', 4326: 'mega-eth', 4663: 'robinhood', 5000: 'mantle', 5042: 'arc',
   8453: 'base', 9745: 'plasma', 33139: 'apechain', 34443: 'mode', 42161: 'arbitrum-one',
   42220: 'celo', 43111: 'hemi', 48900: 'zircuit', 57073: 'ink', 59144: 'linea',
